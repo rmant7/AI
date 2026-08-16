@@ -28,6 +28,9 @@ import ai.localstudio.app.models.LocalModels
 import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
+import ai.localstudio.app.whisper.WhisperDownloads
+import ai.localstudio.app.whisper.WhisperEngine
+import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiRuntime
 import java.io.File
@@ -56,6 +59,10 @@ class AppContainer private constructor(private val context: Context) {
         tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
     )
+
+    val whisperStore = WhisperStore(context)
+    val whisperDownloads = WhisperDownloads(whisperStore)
+    val whisperEngine = WhisperEngine(whisperStore)
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

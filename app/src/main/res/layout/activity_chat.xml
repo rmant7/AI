@@ -37,6 +37,26 @@
         android:orientation="horizontal"
         android:padding="8dp">
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/attachButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:minWidth="0dp"
+            android:paddingHorizontal="8dp"
+            android:text="@string/chat_attach" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/micButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:minWidth="0dp"
+            android:paddingHorizontal="8dp"
+            android:text="@string/chat_mic" />
+
         <EditText
             android:id="@+id/input"
             android:layout_width="0dp"

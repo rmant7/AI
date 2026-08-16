@@ -1,19 +1,29 @@
 package ai.localstudio.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import ai.localstudio.app.attach.DocumentIngest
+import ai.localstudio.app.camera.CameraActivity
 import ai.localstudio.app.databinding.ActivityChatBinding
 import ai.localstudio.app.history.ChatHistoryStore
 import ai.localstudio.app.history.Conversation
 import ai.localstudio.app.history.toMessage
 import ai.localstudio.app.history.toStored
+import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.core.engine.UserRequest
+import ai.localstudio.core.memory.MemoryScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,6 +38,16 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var history: ChatHistoryStore
     private val adapter = MessageAdapter()
     private var conversationId = "chat-" + System.currentTimeMillis()
+    private val recorder = AudioRecorder()
+
+    private val pickDocument = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { ingestDocument(it) }
+    }
+
+    private val requestMicPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) toggleRecording() else Toast.makeText(this, R.string.chat_mic_permission, Toast.LENGTH_SHORT).show()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +61,8 @@ class ChatActivity : AppCompatActivity() {
         binding.messages.adapter = adapter
 
         binding.sendButton.setOnClickListener { send() }
+        binding.attachButton.setOnClickListener { pickDocument.launch("*/*") }
+        binding.micButton.setOnClickListener { onMicClicked() }
 
         // The app being killed in the background is routine on Android, not
         // exceptional — resuming the most recent conversation instead of a
@@ -51,6 +73,11 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        container.whisperEngine.release()
+    }
+
     override fun onResume() {
         super.onResume()
         updateStatus()
@@ -59,9 +86,10 @@ class ChatActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_MEMORY, 0, memoryTitle()).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(0, MENU_MODELS, 1, R.string.menu_models)
-        menu.add(0, MENU_SETTINGS, 2, R.string.menu_settings)
-        menu.add(0, MENU_HISTORY, 3, R.string.menu_history)
-        menu.add(0, MENU_CLEAR, 4, R.string.menu_clear)
+        menu.add(0, MENU_CAMERA, 2, R.string.menu_camera)
+        menu.add(0, MENU_SETTINGS, 3, R.string.menu_settings)
+        menu.add(0, MENU_HISTORY, 4, R.string.menu_history)
+        menu.add(0, MENU_CLEAR, 5, R.string.menu_clear)
         return true
     }
 
@@ -78,6 +106,11 @@ class ChatActivity : AppCompatActivity() {
 
         MENU_MODELS -> {
             startActivity(Intent(this, ModelsActivity::class.java))
+            true
+        }
+
+        MENU_CAMERA -> {
+            startActivity(Intent(this, CameraActivity::class.java))
             true
         }
 
@@ -212,6 +245,85 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
+    private fun ingestDocument(uri: Uri) {
+        lifecycleScope.launch {
+            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { "файл" }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = DocumentIngest.extractText(this@ChatActivity, uri)
+                    DocumentIngest.chunk(text)
+                }
+            }
+            result
+                .onSuccess { chunks ->
+                    chunks.forEach { chunk ->
+                        container.memory.remember(chunk, MemoryScope.SEMANTIC, metadata = mapOf("source" to name))
+                    }
+                    container.settings.memoryEnabled = true
+                    invalidateOptionsMenu()
+                    updateStatus()
+                    Toast.makeText(this@ChatActivity, getString(R.string.chat_attach_added, name, chunks.size), Toast.LENGTH_SHORT).show()
+                }
+                .onFailure { error ->
+                    Toast.makeText(
+                        this@ChatActivity,
+                        getString(R.string.chat_attach_failed, error.message ?: error.toString()),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+        }
+    }
+
+    private fun onMicClicked() {
+        if (recorder.isRecording) {
+            toggleRecording()
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            toggleRecording()
+        } else {
+            requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    private fun toggleRecording() {
+        if (!recorder.isRecording) {
+            val seed = container.whisperStore.installedSeed()
+            if (seed == null) {
+                Toast.makeText(this, R.string.chat_mic_no_model, Toast.LENGTH_LONG).show()
+                return
+            }
+            recorder.start()
+            binding.micButton.text = "■"
+            binding.statusText.text = getString(R.string.chat_recording)
+            return
+        }
+
+        val audio = recorder.stop()
+        binding.micButton.text = getString(R.string.chat_mic)
+        updateStatus()
+        val seed = container.whisperStore.installedSeed() ?: return
+
+        lifecycleScope.launch {
+            binding.statusText.text = getString(R.string.chat_transcribing)
+            val result = withContext(Dispatchers.Default) {
+                runCatching { container.whisperEngine.transcribe(seed, audio) }
+            }
+            updateStatus()
+            result
+                .onSuccess { text ->
+                    if (text.isNotBlank()) {
+                        val current = binding.input.text?.toString().orEmpty()
+                        binding.input.setText(if (current.isBlank()) text else "$current $text")
+                        binding.input.setSelection(binding.input.text?.length ?: 0)
+                    }
+                }
+                .onFailure { error ->
+                    Toast.makeText(this@ChatActivity, error.message ?: error.toString(), Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
     private fun setBusy(busy: Boolean) {
         binding.progress.visibility = if (busy) android.view.View.VISIBLE else android.view.View.GONE
         binding.sendButton.isEnabled = !busy
@@ -220,8 +332,9 @@ class ChatActivity : AppCompatActivity() {
     private companion object {
         const val MENU_MEMORY = 1
         const val MENU_MODELS = 2
-        const val MENU_SETTINGS = 3
-        const val MENU_HISTORY = 4
-        const val MENU_CLEAR = 5
+        const val MENU_CAMERA = 3
+        const val MENU_SETTINGS = 4
+        const val MENU_HISTORY = 5
+        const val MENU_CLEAR = 6
     }
 }

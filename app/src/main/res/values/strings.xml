@@ -12,6 +12,27 @@
     <string name="history_delete">Удалить</string>
     <string name="memory_on">Память: вкл</string>
     <string name="memory_off">Память: выкл</string>
+    <string name="menu_camera">Камера</string>
+
+    <string name="chat_attach">Файл</string>
+    <string name="chat_mic">Голос</string>
+    <string name="chat_attach_hint">Поддерживаются .txt и .pdf — текст добавляется в память и учитывается в ответах.</string>
+    <string name="chat_attach_added">Добавлено в память: %1$s (%2$d фрагм.)</string>
+    <string name="chat_attach_failed">Не удалось прочитать файл: %1$s</string>
+    <string name="chat_recording">Идёт запись… нажмите ещё раз, чтобы остановить</string>
+    <string name="chat_transcribing">Распознаю…</string>
+    <string name="chat_mic_no_model">Модель распознавания речи не установлена. Скачайте её в Настройках.</string>
+    <string name="chat_mic_permission">Нужен доступ к микрофону</string>
+
+    <string name="camera_model_missing">Модель детекции объектов не установлена</string>
+    <string name="camera_permission">Нужен доступ к камере</string>
+
+    <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
+    <string name="settings_whisper_download">Скачать</string>
+    <string name="settings_whisper_delete">Удалить</string>
+    <string name="settings_whisper_installed">Установлена: %1$s</string>
+    <string name="settings_whisper_none">Не установлена</string>
+    <string name="settings_whisper_note">Распознавание работает офлайн через TensorFlow Lite. Без словаря модель вернёт номера токенов вместо слов — сообщите, если нужен полный текст, словарь можно добавить отдельно.</string>
 
     <string name="settings_title">Настройки</string>
     <string name="settings_provider">Провайдер модели</string>
