@@ -21,8 +21,15 @@ import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.router.CapabilityRouter
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
+import ai.localstudio.app.llama.LlamaBridge
+import ai.localstudio.app.llama.LlamaCppRuntime
+import ai.localstudio.app.models.LocalModelSeed
+import ai.localstudio.app.models.LocalModels
+import ai.localstudio.app.models.ModelDownloads
+import ai.localstudio.app.models.ModelStore
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiRuntime
+import java.io.File
 
 /**
  * Wires the architecture for this device.
@@ -40,6 +47,13 @@ class AppContainer private constructor(private val context: Context) {
 
     val device: DeviceProfile by lazy { profileOf(context) }
 
+    val modelStore = ModelStore(context)
+
+    val downloads = ModelDownloads(modelStore)
+
+    /** Seeds that are on disk right now, newest state each time it is asked. */
+    fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
+
     private var cachedOrchestrator: Orchestrator? = null
     private var cachedSignature: String? = null
 
@@ -54,10 +68,12 @@ class AppContainer private constructor(private val context: Context) {
         ).joinToString("|")
         cachedOrchestrator?.takeIf { cachedSignature == signature }?.let { return it }
 
-        val runtime: ModelRuntime = if (settings.hasEndpoint) {
-            OpenAiRuntime(OpenAiConfig(baseUrl = settings.endpoint, apiKey = settings.apiKey.ifBlank { null }))
-        } else {
-            StubRuntime()
+        val runtime: ModelRuntime = when {
+            settings.providerId == CloudProviders.LOCAL.id -> LlamaCppRuntime()
+            settings.hasEndpoint ->
+                OpenAiRuntime(OpenAiConfig(baseUrl = settings.endpoint, apiKey = settings.apiKey.ifBlank { null }))
+
+            else -> StubRuntime()
         }
 
         val manager = RuntimeManager(
@@ -80,6 +96,7 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     fun registry(): ModelRegistry {
+        if (settings.providerId == CloudProviders.LOCAL.id) return localRegistry()
         val kind = if (settings.hasEndpoint) RuntimeKind.REMOTE_OPENAI else RuntimeKind.STUB
         return ModelRegistry(
             listOf(
@@ -94,6 +111,39 @@ class AppContainer private constructor(private val context: Context) {
             ),
         )
     }
+
+    /**
+     * Downloaded models, described from what is actually on disk: the binding's
+     * artifact is the file path, and its size is the file's real size, so the
+     * scorer and the runtime agree about what exists.
+     */
+    private fun localRegistry(): ModelRegistry = ModelRegistry(
+        installedSeeds().map { seed ->
+            val file: File = modelStore.fileFor(seed)
+            RegistryEntry(
+                ModelDescriptor(
+                    id = seed.id,
+                    family = seed.id.substringBefore('-'),
+                    version = "1",
+                    parameterCount = 1,
+                    contextLength = seed.contextTokens,
+                    capabilities = seed.capabilities,
+                    bindings = listOf(
+                        RuntimeBinding(
+                            runtime = RuntimeKind.LLAMA_CPP,
+                            artifact = file.absolutePath,
+                            fileSizeBytes = file.length().coerceAtLeast(1),
+                            // Left unmeasured on purpose: effectiveRequiredRamBytes
+                            // then errs high, which is the safe direction here.
+                            requiredRamBytes = null,
+                        ),
+                    ),
+                ),
+                InstallState.INSTALLED,
+                installedPath = file.absolutePath,
+            )
+        },
+    )
 
     /** The catalog shipped in `registry/`, used by the Models screen to rank against this device. */
     fun catalog(): ModelCatalog = runCatching {
@@ -147,9 +197,13 @@ class AppContainer private constructor(private val context: Context) {
                 availableStorageBytes = context.filesDir.freeSpace,
                 cpuCores = Runtime.getRuntime().availableProcessors(),
                 androidApiLevel = Build.VERSION.SDK_INT,
-                // Only what this build can actually execute. llama.cpp and
-                // MediaPipe join the set when their runtimes are implemented.
-                supportedRuntimes = setOf(RuntimeKind.REMOTE_OPENAI, RuntimeKind.STUB),
+                // Only what this build can actually execute on this device:
+                // llama.cpp appears once its native library loads for this ABI.
+                supportedRuntimes = buildSet {
+                    add(RuntimeKind.REMOTE_OPENAI)
+                    add(RuntimeKind.STUB)
+                    if (LlamaBridge.isAvailable) add(RuntimeKind.LLAMA_CPP)
+                },
                 hasGpuDelegate = false,
                 performanceIndex = 1.0,
             )

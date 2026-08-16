@@ -22,5 +22,13 @@
     <string name="settings_saved">Сохранено</string>
 
     <string name="models_title">Модели</string>
+    <string name="models_local_header">Локальные модели — работают без сети</string>
+    <string name="models_catalog_header">Каталог (справочно)</string>
+    <string name="model_download">Скачать</string>
+    <string name="model_delete">Удалить</string>
+    <string name="model_cancel">Отменить</string>
+    <string name="model_use">Использовать</string>
+    <string name="model_installed">Установлена</string>
+    <string name="model_native_missing">Локальный runtime недоступен для этого устройства</string>
     <string name="models_device">Устройство</string>
 </resources>

@@ -34,7 +34,17 @@ object CloudProviders {
         needsKey = false,
     )
 
+    val LOCAL = CloudProvider(
+        id = "local",
+        title = "Локально на устройстве (llama.cpp)",
+        baseUrl = "",
+        defaultModel = "gemma-3-4b-it-q4",
+        keyHint = "Ключ и сеть не нужны. Модель скачивается один раз на экране «Модели» и дальше работает офлайн.",
+        needsKey = false,
+    )
+
     val ALL = listOf(
+        LOCAL,
         DEMO,
         CloudProvider(
             id = "gemini",

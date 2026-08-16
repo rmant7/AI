@@ -95,3 +95,23 @@ class ModelsScreenTest {
         }
     }
 }
+
+/**
+ * The native library is the one part of this app that cannot be verified
+ * anywhere but on a device: it either loads for this ABI or it does not.
+ * Running a model here would mean downloading gigabytes on every CI run, so
+ * the test checks what is cheap and decisive — that llama.cpp linked, loaded
+ * and reports the CPU features it was actually built with.
+ */
+@RunWith(AndroidJUnit4::class)
+class LlamaNativeTest {
+
+    @Test
+    fun the_native_library_loads_and_reports_its_cpu_features() {
+        assertTrue("llama_jni did not load for this ABI", ai.localstudio.app.llama.LlamaBridge.isAvailable)
+
+        val info = ai.localstudio.app.llama.LlamaBridge().nativeSystemInfo()
+        assertTrue("empty system info", info.isNotBlank())
+        android.util.Log.i("LlamaNativeTest", "llama.cpp: $info")
+    }
+}
