@@ -19,30 +19,66 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/settings_endpoint"
+            android:text="@string/settings_provider"
             android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/endpointInput"
+        <Spinner
+            android:id="@+id/providerSpinner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints="no"
-            android:hint="@string/settings_endpoint_hint"
-            android:inputType="textUri" />
+            android:minHeight="48dp" />
 
         <TextView
+            android:id="@+id/providerHint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="16dp"
-            android:text="@string/settings_api_key"
-            android:textStyle="bold" />
+            android:paddingTop="4dp"
+            android:textSize="12sp" />
 
-        <EditText
-            android:id="@+id/apiKeyInput"
+        <LinearLayout
+            android:id="@+id/endpointBlock"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints="no"
-            android:inputType="textPassword" />
+            android:orientation="vertical"
+            android:paddingTop="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_endpoint"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/endpointInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints="no"
+                android:hint="@string/settings_endpoint_hint"
+                android:inputType="textUri" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/apiKeyBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_api_key"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/apiKeyInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints="no"
+                android:inputType="textPassword" />
+
+        </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"

@@ -45,7 +45,13 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Rebuilt only when the settings that affect wiring have actually changed. */
     fun orchestrator(): Orchestrator {
-        val signature = "${settings.endpoint}|${settings.apiKey}|${settings.chatModel}|${settings.speechModel}"
+        val signature = listOf(
+            settings.providerId,
+            settings.endpoint,
+            settings.apiKey,
+            settings.chatModel,
+            settings.speechModel,
+        ).joinToString("|")
         cachedOrchestrator?.takeIf { cachedSignature == signature }?.let { return it }
 
         val runtime: ModelRuntime = if (settings.hasEndpoint) {
@@ -95,7 +101,7 @@ class AppContainer private constructor(private val context: Context) {
     }.getOrElse { ModelCatalog(models = emptyList()) }
 
     val runtimeLabel: String
-        get() = if (settings.hasEndpoint) settings.endpoint else "встроенный демо-runtime"
+        get() = settings.provider.title
 
     private fun servedModel(
         id: String,
