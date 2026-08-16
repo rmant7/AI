@@ -123,4 +123,27 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest
+          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest 2>&1 | tee smoke.log
+
+      # Same idea as ci-status, on its own branch so the two jobs do not
+      # overwrite each other's result.
+      - name: Publish the smoke-test result to the ci-smoke branch
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/smoke
+          {
+            echo "run: ${GITHUB_RUN_NUMBER}"
+            echo "sha: ${GITHUB_SHA}"
+            echo "job status: ${{ job.status }}"
+            echo "---"
+            grep -E "FAILED|PASSED|tests? completed|BUILD (SUCCESSFUL|FAILED)|Execution failed|^\s+> |Error|error:" smoke.log 2>/dev/null | tail -60 || echo "no smoke log"
+          } > /tmp/smoke/status.txt
+          cd /tmp/smoke
+          git init -q .
+          git config user.email noreply@anthropic.com
+          git config user.name Claude
+          git checkout -q -b ci-smoke
+          git add status.txt
+          git commit -q -m "smoke ${GITHUB_RUN_NUMBER}: ${{ job.status }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-smoke
