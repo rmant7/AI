@@ -6,6 +6,13 @@ pluginManagement {
         // resolves before this repository is ever queried.
         google()
     }
+    // Versions are declared, not applied: nothing is resolved until a project
+    // actually asks for the plugin. The Kotlin plugin is deliberately absent —
+    // it is already on the build classpath from the root project, and asking
+    // for it again with a version is an error.
+    plugins {
+        id("com.android.application") version "8.7.3"
+    }
 }
 
 rootProject.name = "local-ai-studio"

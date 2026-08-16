@@ -15,6 +15,16 @@ dependencies {
 
 kotlin {
     jvmToolchain(21)
+    // Java 17 bytecode, not 21: these modules are consumed by the Android app,
+    // and D8 is the constraint. Compiling with a newer JDK is fine; emitting
+    // newer class files is not.
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.release.set(17)
 }
 
 tasks.test {
