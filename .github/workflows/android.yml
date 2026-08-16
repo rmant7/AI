@@ -75,7 +75,7 @@ jobs:
             echo "sha: ${GITHUB_SHA}"
             echo "job status: ${{ job.status }}"
             echo "---"
-            grep -E "^e: |^w: .*error|FAILURE:|BUILD (SUCCESSFUL|FAILED)|Execution failed|Caused by:|^\s+> " build.log 2>/dev/null | tail -60 || echo "no build log"
+            grep -E "^e: |error:|FAILURE:|BUILD (SUCCESSFUL|FAILED)|Execution failed|Caused by:|ninja: build stopped|C/C\+\+:.*error|^\s+> " build.log 2>/dev/null | tail -60 || echo "no build log"
           } > /tmp/status/status.txt
           cd /tmp/status
           git init -q .

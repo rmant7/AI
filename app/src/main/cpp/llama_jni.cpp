@@ -106,7 +106,10 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     // No GPU offload: Android GPU backends are per-vendor and this build has to
     // run everywhere. CPU with the right ARM flags is what makes it usable.
     modelParams.n_gpu_layers = 0;
-    modelParams.use_mmap = true;
+    // mmap rather than reading the weights into the heap: a 3 GB model is then
+    // paged in on demand and, more importantly, evictable under pressure —
+    // which is what keeps Android from killing the app while it loads.
+    modelParams.load_mode = LLAMA_LOAD_MODE_MMAP;
 
     llama_model *model = llama_model_load_from_file(path.c_str(), modelParams);
     if (model == nullptr) {
