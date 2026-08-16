@@ -21,18 +21,19 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.nio.charset.StandardCharsets
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class OpenAiConfig(
     /** e.g. `http://localhost:11434/v1` for Ollama, `http://localhost:8080/v1` for llama-server. */
     val baseUrl: String,
     val apiKey: String? = null,
-    val requestTimeout: Duration = Duration.ofMinutes(5),
+    val connectTimeoutMs: Int = 15_000,
+    /**
+     * Generous on purpose: a large model on modest hardware can take minutes to
+     * emit its first token, and a timeout here looks exactly like a broken
+     * server to the user.
+     */
+    val readTimeoutMs: Int = 300_000,
 ) {
     val normalizedBaseUrl: String get() = baseUrl.trimEnd('/')
 }
@@ -43,7 +44,7 @@ class OpenAiException(val status: Int, val body: String) : Exception(
     private companion object {
         fun describe(body: String): String = runCatching {
             openAiJson.decodeFromString(ApiErrorBody.serializer(), body).error?.message
-        }.getOrNull() ?: body.take(300)
+        }.getOrNull() ?: body.take(300).ifBlank { "no response body" }
     }
 }
 
@@ -51,25 +52,24 @@ class OpenAiException(val status: Int, val body: String) : Exception(
  * Runs models on an OpenAI-compatible endpoint — Ollama, llama-server, or any
  * other server speaking the same API.
  *
- * This is the development-mode runtime from docs/10: the same pipelines,
- * router and context engine that will run on the phone, executed against a
- * desktop-class machine so the orchestration can be built and debugged before
- * any on-device runtime exists. It implements the same [ModelRuntime]
- * interface as llama.cpp will, which is exactly the point — nothing above the
- * runtime layer knows which one it is talking to.
+ * This is the development-mode runtime from docs/10, and also what a phone uses
+ * to reach a server on the same network. It implements the same [ModelRuntime]
+ * interface as an on-device engine will, which is the whole point: nothing
+ * above the runtime layer knows which one it is talking to.
  *
- * [ModelDescriptor.id] is used as the remote model name unless the binding's
- * `artifact` overrides it, so one descriptor can name a local file on device
- * and a served model name in development.
+ * [ModelDescriptor.id] names the remote model unless the binding's `artifact`
+ * overrides it, so one descriptor can name a local file on device and a served
+ * model name in development.
  */
-class OpenAiRuntime(
-    private val config: OpenAiConfig,
-    private val client: HttpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(15))
-        .build(),
-) : ModelRuntime {
+class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.REMOTE_OPENAI
+
+    private val http = HttpTransport(
+        connectTimeoutMs = config.connectTimeoutMs,
+        readTimeoutMs = config.readTimeoutMs,
+        apiKey = config.apiKey,
+    )
 
     override fun canRun(model: ModelDescriptor, binding: RuntimeBinding): Boolean =
         binding.runtime == RuntimeKind.REMOTE_OPENAI
@@ -80,8 +80,8 @@ class OpenAiRuntime(
         }
         val remoteName = binding.artifact.ifBlank { model.id }
         // Nothing is loaded into this process: the server owns the weights. The
-        // reported footprint is therefore zero, which is what keeps the runtime
-        // manager from evicting local models to make room for a remote one.
+        // reported footprint is therefore zero, which keeps the runtime manager
+        // from evicting local models to make room for a remote one.
         return when {
             Capability.SPEECH_TO_TEXT in model.capabilities -> RemoteSpeechModel(model.id, remoteName)
             Capability.EMBEDDING in model.capabilities -> RemoteEmbeddingModel(model.id, remoteName)
@@ -90,12 +90,7 @@ class OpenAiRuntime(
         }
     }
 
-    private fun request(path: String): HttpRequest.Builder {
-        val builder = HttpRequest.newBuilder(URI.create("${config.normalizedBaseUrl}$path"))
-            .timeout(config.requestTimeout)
-        config.apiKey?.let { builder.header("Authorization", "Bearer $it") }
-        return builder
-    }
+    private fun url(path: String) = "${config.normalizedBaseUrl}$path"
 
     private inner class RemoteTextModel(
         override val modelId: String,
@@ -122,26 +117,18 @@ class OpenAiRuntime(
                 ),
             )
 
-            val response = client.send(
-                request("/chat/completions")
-                    .header("Content-Type", "application/json")
-                    .header("Accept", "text/event-stream")
-                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                    .build(),
-                HttpResponse.BodyHandlers.ofLines(),
-            )
-            if (response.statusCode() !in 200..299) {
-                throw OpenAiException(response.statusCode(), response.body().toList().joinToString("\n"))
-            }
-
-            for (line in response.body()) {
-                if (cancelled.get()) break
-                val payload = SseParser.dataOf(line) ?: continue
-                if (SseParser.isTerminator(payload)) break
-                val chunk = runCatching {
-                    openAiJson.decodeFromString(ChatStreamChunk.serializer(), payload)
-                }.getOrNull() ?: continue
-                chunk.choices.firstOrNull()?.delta?.content?.takeIf { it.isNotEmpty() }?.let { emit(it) }
+            http.postJsonStreaming(url("/chat/completions"), body).use { response ->
+                val reader = response.reader()
+                while (true) {
+                    if (cancelled.get()) break
+                    val line = reader.readLine() ?: break
+                    val payload = SseParser.dataOf(line) ?: continue
+                    if (SseParser.isTerminator(payload)) break
+                    val chunk = runCatching {
+                        openAiJson.decodeFromString(ChatStreamChunk.serializer(), payload)
+                    }.getOrNull() ?: continue
+                    chunk.choices.firstOrNull()?.delta?.content?.takeIf { it.isNotEmpty() }?.let { emit(it) }
+                }
             }
         }.flowOn(Dispatchers.IO)
 
@@ -172,17 +159,10 @@ class OpenAiRuntime(
                 EmbeddingRequest.serializer(),
                 EmbeddingRequest(remoteName, texts),
             )
-            val response = client.send(
-                request("/embeddings")
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                    .build(),
-                HttpResponse.BodyHandlers.ofString(),
+            val decoded = openAiJson.decodeFromString(
+                EmbeddingResponse.serializer(),
+                http.postJson(url("/embeddings"), body).text(),
             )
-            if (response.statusCode() !in 200..299) {
-                throw OpenAiException(response.statusCode(), response.body())
-            }
-            val decoded = openAiJson.decodeFromString(EmbeddingResponse.serializer(), response.body())
             decoded.data
                 .sortedBy { it.index }
                 .map { it.embedding.toFloatArray() }
@@ -201,7 +181,7 @@ class OpenAiRuntime(
 
         override suspend fun transcribe(audio: AudioRef, language: String?): Transcript =
             withContext(Dispatchers.IO) {
-                val file = File(URI.create(audio.uri).takeIf { it.scheme == "file" }?.path ?: audio.uri)
+                val file = audioFile(audio)
                 if (!file.isFile) throw OpenAiException(0, "Audio file not found: ${audio.uri}")
 
                 val boundary = "----localaistudio${System.nanoTime()}"
@@ -212,17 +192,14 @@ class OpenAiRuntime(
                     file("file", file)
                 }.build()
 
-                val response = client.send(
-                    request("/audio/transcriptions")
-                        .header("Content-Type", "multipart/form-data; boundary=$boundary")
-                        .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                        .build(),
-                    HttpResponse.BodyHandlers.ofString(),
+                val decoded = openAiJson.decodeFromString(
+                    TranscriptionResponse.serializer(),
+                    http.postBytes(
+                        url = url("/audio/transcriptions"),
+                        contentType = "multipart/form-data; boundary=$boundary",
+                        body = body,
+                    ).text(),
                 )
-                if (response.statusCode() !in 200..299) {
-                    throw OpenAiException(response.statusCode(), response.body())
-                }
-                val decoded = openAiJson.decodeFromString(TranscriptionResponse.serializer(), response.body())
                 Transcript(
                     text = decoded.text.trim(),
                     language = decoded.language ?: language,
@@ -236,7 +213,16 @@ class OpenAiRuntime(
                 )
             }
 
+        private fun audioFile(audio: AudioRef): File {
+            val path = runCatching { URI.create(audio.uri) }
+                .getOrNull()
+                ?.takeIf { it.scheme == "file" }
+                ?.path
+            return File(path ?: audio.uri)
+        }
+
         override fun requestCancel() = Unit
+
         override fun close() = Unit
     }
 }

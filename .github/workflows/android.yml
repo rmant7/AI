@@ -35,10 +35,10 @@ jobs:
       # first means a logic regression fails in seconds rather than after a
       # full Android build.
       - name: Test core and openai
-        run: ./gradlew --no-daemon :core:test :openai:test
+        run: ./gradlew --no-daemon :core:test :openai:test 2>&1 | tee -a build.log
 
       - name: Build debug APK
-        run: ./gradlew --no-daemon :app:assembleDebug
+        run: ./gradlew --no-daemon :app:assembleDebug 2>&1 | tee -a build.log
 
       - name: Name the APK after the build
         id: apk
@@ -55,6 +55,30 @@ jobs:
           name: local-ai-studio-apk
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
+
+      # The build's outcome, published where a plain `git fetch` can read it.
+      # Useful beyond automation: the ci-status branch shows why a build failed
+      # without opening the Actions logs.
+      - name: Publish build status to the ci-status branch
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/status
+          {
+            echo "run: ${GITHUB_RUN_NUMBER}"
+            echo "sha: ${GITHUB_SHA}"
+            echo "job status: ${{ job.status }}"
+            echo "---"
+            grep -E "^e: |^w: .*error|FAILURE:|BUILD (SUCCESSFUL|FAILED)|Execution failed|Caused by:|^\s+> " build.log 2>/dev/null | tail -60 || echo "no build log"
+          } > /tmp/status/status.txt
+          cd /tmp/status
+          git init -q .
+          git config user.email noreply@anthropic.com
+          git config user.name Claude
+          git checkout -q -b ci-status
+          git add status.txt
+          git commit -q -m "build ${GITHUB_RUN_NUMBER}: ${{ job.status }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-status
 
       # A release asset is downloadable with a plain URL, which an artifact is
       # not — that is the difference between "the build produced an APK" and
