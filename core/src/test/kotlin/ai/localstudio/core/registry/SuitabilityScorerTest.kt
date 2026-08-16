@@ -53,6 +53,39 @@ class SuitabilityScorerTest {
     }
 
     @Test
+    fun `each runtime's own verdict is kept separate`() {
+        val device = device(
+            availableRamBytes = 10 * GB, // 6 GB usable
+            supportedRuntimes = setOf(RuntimeKind.LLAMA_CPP, RuntimeKind.MEDIAPIPE),
+        )
+        val model = model(
+            "two-ways",
+            bindings = listOf(
+                binding(runtime = RuntimeKind.LLAMA_CPP, ramBytes = 8 * GB),
+                binding(runtime = RuntimeKind.MEDIAPIPE, ramBytes = 2 * GB, requiresGpu = true),
+            ),
+        )
+
+        val result = assertIs<Suitability.Incompatible>(
+            scorer.evaluate(model, device, Capability.TEXT_GENERATION),
+        )
+
+        assertEquals(
+            setOf(IncompatibilityReason.NOT_ENOUGH_RAM),
+            result.byRuntime.getValue(RuntimeKind.LLAMA_CPP),
+        )
+        assertEquals(
+            setOf(IncompatibilityReason.GPU_REQUIRED),
+            result.byRuntime.getValue(RuntimeKind.MEDIAPIPE),
+        )
+        // The union is still available for a one-line summary.
+        assertEquals(
+            setOf(IncompatibilityReason.NOT_ENOUGH_RAM, IncompatibilityReason.GPU_REQUIRED),
+            result.reasons,
+        )
+    }
+
+    @Test
     fun `installed models are not filtered on storage`() {
         val device = device(availableStorageBytes = 1 * GB)
         val big = model("big", bindings = listOf(binding(fileSizeBytes = 3 * GB, ramBytes = 3 * GB)))

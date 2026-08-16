@@ -25,6 +25,7 @@ class ChatActivity : AppCompatActivity() {
         binding = ActivityChatBinding.inflate(layoutInflater)
         setContentView(binding.root)
         container = AppContainer.get(this)
+        binding.root.applySystemBarInsets(applyImeInset = true)
 
         binding.messages.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         binding.messages.adapter = adapter

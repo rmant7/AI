@@ -48,8 +48,8 @@ class StubRuntime : ModelRuntime {
                 .map { it.trim('[', ']') }
 
             emit("Демонстрационный режим: модель не подключена.\n\n")
-            emit("Запрос прошёл всю систему, и в контекст попало ${sections.size} секций")
-            if (sections.isNotEmpty()) emit(": " + sections.joinToString(", "))
+            emit("Запрос прошёл всю систему. Секций в контексте: ${sections.size}")
+            if (sections.isNotEmpty()) emit(" (" + sections.joinToString(", ") + ")")
             emit(".\n\n")
             emit("Подключите Ollama или llama-server в настройках — маршрут, ")
             emit("сборка контекста и память останутся ровно теми же, изменится только ")

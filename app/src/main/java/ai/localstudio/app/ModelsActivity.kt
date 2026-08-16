@@ -28,6 +28,7 @@ class ModelsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val binding = ActivityModelsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.root.applySystemBarInsets()
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         val container = AppContainer.get(this)
@@ -73,9 +74,24 @@ class ModelsActivity : AppCompatActivity() {
             is Suitability.Incompatible -> Row(
                 model = model,
                 specs = specs(model),
-                verdict = "Не запустится: " + suitability.reasons.joinToString(", ") { explain(it) },
+                verdict = explainIncompatible(suitability),
                 score = -1.0,
             )
+        }
+    }
+
+    /**
+     * One line per runtime when they disagree: "not enough RAM" for llama.cpp
+     * and "needs a GPU" for MediaPipe are different verdicts about different
+     * ways of running the same model, and merging them describes neither.
+     */
+    private fun explainIncompatible(suitability: Suitability.Incompatible): String {
+        val perRuntime = suitability.byRuntime
+        if (perRuntime.size <= 1) {
+            return "Не запустится: " + suitability.reasons.joinToString(", ") { explain(it) }
+        }
+        return "Не запустится:\n" + perRuntime.entries.joinToString("\n") { (runtime, reasons) ->
+            "· ${runtime.id}: " + reasons.joinToString(", ") { explain(it) }
         }
     }
 

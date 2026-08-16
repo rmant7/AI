@@ -30,7 +30,17 @@ sealed interface Suitability {
         val estimatedTokensPerSecond: Double?,
     ) : Suitability
 
-    data class Incompatible(val reasons: Set<IncompatibilityReason>) : Suitability
+    /**
+     * [reasons] is the union across bindings, kept for a one-line summary.
+     * [byRuntime] keeps them apart, because "not enough RAM" for llama.cpp and
+     * "needs a GPU" for MediaPipe are two different verdicts about two
+     * different ways of running the same model, and merging them describes
+     * neither.
+     */
+    data class Incompatible(
+        val reasons: Set<IncompatibilityReason>,
+        val byRuntime: Map<RuntimeKind, Set<IncompatibilityReason>> = emptyMap(),
+    ) : Suitability
 }
 
 data class RankedModel(
@@ -78,13 +88,19 @@ class SuitabilityScorer(
         }
 
         val rejections = mutableSetOf<IncompatibilityReason>()
+        val perRuntime = linkedMapOf<RuntimeKind, Set<IncompatibilityReason>>()
         val candidates = mutableListOf<RuntimeBinding>()
         for (binding in model.bindings) {
             val reasons = reject(binding, device, alreadyInstalled)
-            if (reasons.isEmpty()) candidates += binding else rejections += reasons
+            if (reasons.isEmpty()) {
+                candidates += binding
+            } else {
+                rejections += reasons
+                perRuntime[binding.runtime] = reasons
+            }
         }
         if (candidates.isEmpty()) {
-            return Suitability.Incompatible(rejections)
+            return Suitability.Incompatible(rejections, perRuntime)
         }
 
         return candidates
