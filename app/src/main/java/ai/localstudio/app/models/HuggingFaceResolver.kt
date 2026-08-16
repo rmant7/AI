@@ -6,6 +6,7 @@ import org.json.JSONArray
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.UnknownHostException
 
 data class ResolvedModelFile(
     val fileName: String,
@@ -24,6 +25,8 @@ data class ResolvedModelFile(
 object HuggingFaceResolver {
 
     private const val API = "https://huggingface.co/api/models"
+    private const val RESOLVE_RETRIES = 3
+    private const val RESOLVE_RETRY_DELAY_MS = 2_000L
 
     /**
      * Tries each repository in turn and reports every failure if none works.
@@ -37,12 +40,39 @@ object HuggingFaceResolver {
         val failures = mutableListOf<String>()
         for (repoId in repoIds) {
             try {
-                return repoId to resolve(repoId, token)
+                return repoId to resolveWithRetry(repoId, token)
+            } catch (e: NoNetworkException) {
+                // Every repoId lives on the same host: a DNS failure on the
+                // first one will repeat identically for the rest. Trying them
+                // anyway just produces the same line four times and burns the
+                // retry budget on a problem that is not about the repository.
+                throw IOException("Нет соединения с huggingface.co — проверьте интернет. (${e.message})")
             } catch (e: Exception) {
                 failures += "$repoId: ${e.message}"
             }
         }
         throw IOException("Ни один источник не подошёл.\n" + failures.joinToString("\n"))
+    }
+
+    private class NoNetworkException(message: String) : IOException(message)
+
+    /**
+     * A DNS hiccup while switching between Wi-Fi and mobile data is common and
+     * transient; [resolve] itself is not retried by the caller the way the
+     * download body is, so without this a blip here fails the whole model
+     * instead of a brief pause.
+     */
+    private fun resolveWithRetry(repoId: String, token: String?): ResolvedModelFile {
+        var lastNetworkError: UnknownHostException? = null
+        repeat(RESOLVE_RETRIES) { attempt ->
+            try {
+                return resolve(repoId, token)
+            } catch (e: UnknownHostException) {
+                lastNetworkError = e
+                if (attempt < RESOLVE_RETRIES - 1) Thread.sleep(RESOLVE_RETRY_DELAY_MS)
+            }
+        }
+        throw NoNetworkException(lastNetworkError?.message ?: "host unreachable")
     }
 
     fun resolve(repoId: String, token: String? = null): ResolvedModelFile {
