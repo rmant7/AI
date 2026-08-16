@@ -37,7 +37,17 @@ class NodeExecutors(
     private val memory: MemoryProvider? = null,
     private val knowledge: KnowledgeProvider? = null,
     private val systemPrompt: String? = null,
-    private val contextWindowTokens: Int = 8_192,
+    // Kept in sync with LlamaBridge.DEFAULT_CONTEXT_TOKENS on purpose: this is
+    // what gets assembled *before* textGeneration() picks a model, so the two
+    // must agree on a size every model can actually load, not just the
+    // biggest one — a mismatch either rejects a turn that fit by this
+    // engine's own accounting, or forces every model into a KV cache sized
+    // for the largest, which is what pushed tight-memory devices into OOM.
+    private val contextWindowTokens: Int = 4_096,
+    private val defaultTemperature: Double = 0.7,
+    private val defaultTopP: Double = 0.95,
+    private val defaultTopK: Int = 40,
+    private val defaultRepeatPenalty: Double = 1.1,
 ) {
 
     fun build(): Map<NodeType, NodeExecutor> = buildMap {
@@ -179,6 +189,10 @@ class NodeExecutors(
                     prompt = assembled.render(),
                     systemPrompt = systemPrompt,
                     maxTokens = node.params["max_tokens"]?.toIntOrNull() ?: 1024,
+                    temperature = node.params["temperature"]?.toDoubleOrNull() ?: defaultTemperature,
+                    topP = node.params["top_p"]?.toDoubleOrNull() ?: defaultTopP,
+                    topK = node.params["top_k"]?.toIntOrNull() ?: defaultTopK,
+                    repeatPenalty = node.params["repeat_penalty"]?.toDoubleOrNull() ?: defaultRepeatPenalty,
                 ),
             ).toList().joinToString("")
         }

@@ -14,6 +14,7 @@ data class ChatRequest(
     val stream: Boolean = true,
     @SerialName("max_tokens") val maxTokens: Int? = null,
     val temperature: Double? = null,
+    @SerialName("top_p") val topP: Double? = null,
     val stop: List<String>? = null,
 )
 

@@ -118,6 +118,7 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                     stream = true,
                     maxTokens = request.maxTokens,
                     temperature = request.temperature,
+                    topP = request.topP,
                     stop = request.stopSequences.takeIf { it.isNotEmpty() },
                 ),
             )

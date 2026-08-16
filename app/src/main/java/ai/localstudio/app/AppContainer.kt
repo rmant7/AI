@@ -78,11 +78,16 @@ class AppContainer private constructor(private val context: Context) {
             settings.apiKey,
             settings.chatModel,
             settings.speechModel,
+            settings.temperature,
+            settings.topP,
+            settings.topK,
+            settings.repeatPenalty,
+            settings.contextTokens,
         ).joinToString("|")
         cachedOrchestrator?.takeIf { cachedSignature == signature }?.let { return it }
 
         val runtime: ModelRuntime = when {
-            settings.providerId == CloudProviders.LOCAL.id -> LlamaCppRuntime()
+            settings.providerId == CloudProviders.LOCAL.id -> LlamaCppRuntime(contextTokens = settings.contextTokens)
             settings.hasEndpoint ->
                 OpenAiRuntime(OpenAiConfig(baseUrl = settings.endpoint, apiKey = settings.apiKey.ifBlank { null }))
 
@@ -101,6 +106,11 @@ class AppContainer private constructor(private val context: Context) {
             contextEngine = ContextEngine(),
             memory = memory,
             systemPrompt = SYSTEM_PROMPT,
+            contextWindowTokens = settings.contextTokens,
+            defaultTemperature = settings.temperature,
+            defaultTopP = settings.topP,
+            defaultTopK = settings.topK,
+            defaultRepeatPenalty = settings.repeatPenalty,
         )
         return Orchestrator(CapabilityRouter(), executors).also {
             cachedOrchestrator = it
@@ -139,7 +149,12 @@ class AppContainer private constructor(private val context: Context) {
                     family = seed.id.substringBefore('-'),
                     version = "1",
                     parameterCount = 1,
-                    contextLength = seed.contextTokens,
+                    // What the runtime will actually allocate is the user's
+                    // setting, not the seed's own default — the two are the
+                    // same value system-wide, since LlamaCppRuntime loads
+                    // every model with one context size regardless of which
+                    // model it is.
+                    contextLength = settings.contextTokens,
                     capabilities = seed.capabilities,
                     bindings = listOf(
                         RuntimeBinding(

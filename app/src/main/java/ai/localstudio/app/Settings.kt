@@ -1,6 +1,7 @@
 package ai.localstudio.app
 
 import android.content.Context
+import ai.localstudio.app.llama.LlamaBridge
 
 /**
  * User-visible configuration. Everything here is optional: with no endpoint the
@@ -65,6 +66,37 @@ class Settings(context: Context) {
 
     val hasEndpoint: Boolean get() = endpoint.isNotBlank()
 
+    // Sampling: how the model picks its next token. Exposed because a fixed
+    // choice cannot be right for every model — a small quantized model that
+    // degenerates into repeated phrases at the defaults needs a stronger
+    // repeat penalty, not a code change.
+    var temperature: Double
+        get() = prefs.getFloat(KEY_TEMPERATURE, DEFAULT_TEMPERATURE).toDouble().coerceIn(0.0, 2.0)
+        set(value) = prefs.edit().putFloat(KEY_TEMPERATURE, value.coerceIn(0.0, 2.0).toFloat()).apply()
+
+    var topP: Double
+        get() = prefs.getFloat(KEY_TOP_P, DEFAULT_TOP_P).toDouble().coerceIn(0.0, 1.0)
+        set(value) = prefs.edit().putFloat(KEY_TOP_P, value.coerceIn(0.0, 1.0).toFloat()).apply()
+
+    var topK: Int
+        get() = prefs.getInt(KEY_TOP_K, DEFAULT_TOP_K).coerceIn(0, 200)
+        set(value) = prefs.edit().putInt(KEY_TOP_K, value.coerceIn(0, 200)).apply()
+
+    /** 1.0 disables the penalty; higher discourages repeated tokens more. */
+    var repeatPenalty: Double
+        get() = prefs.getFloat(KEY_REPEAT_PENALTY, DEFAULT_REPEAT_PENALTY).toDouble().coerceIn(1.0, 2.0)
+        set(value) = prefs.edit().putFloat(KEY_REPEAT_PENALTY, value.coerceIn(1.0, 2.0).toFloat()).apply()
+
+    /**
+     * Local-only: the native context window, in tokens. Larger holds more
+     * conversation but costs RAM for every model regardless of size — this
+     * is what pushed a model that barely fit into being killed for memory
+     * once raised app-wide, so it defaults low and is opt-in to raise.
+     */
+    var contextTokens: Int
+        get() = prefs.getInt(KEY_CONTEXT_TOKENS, LlamaBridge.DEFAULT_CONTEXT_TOKENS)
+        set(value) = prefs.edit().putInt(KEY_CONTEXT_TOKENS, value).apply()
+
     private companion object {
         const val KEY_PROVIDER = "provider"
         const val KEY_ENDPOINT = "endpoint"
@@ -74,7 +106,16 @@ class Settings(context: Context) {
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
+        const val KEY_TEMPERATURE = "temperature"
+        const val KEY_TOP_P = "topP"
+        const val KEY_TOP_K = "topK"
+        const val KEY_REPEAT_PENALTY = "repeatPenalty"
+        const val KEY_CONTEXT_TOKENS = "contextTokens"
         const val DEFAULT_RAM_PERCENT = 90
         const val DEFAULT_ASR_MODEL = "whisper-1"
+        const val DEFAULT_TEMPERATURE = 0.7f
+        const val DEFAULT_TOP_P = 0.95f
+        const val DEFAULT_TOP_K = 40
+        const val DEFAULT_REPEAT_PENALTY = 1.1f
     }
 }

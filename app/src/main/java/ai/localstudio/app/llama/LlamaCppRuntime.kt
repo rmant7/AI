@@ -79,6 +79,9 @@ private class LlamaTextModel(
                 userPrompt = request.prompt,
                 maxTokens = request.maxTokens,
                 temperature = request.temperature.toFloat(),
+                topP = request.topP.toFloat(),
+                topK = request.topK,
+                repeatPenalty = request.repeatPenalty.toFloat(),
                 callback = sink,
             )
             if (produced < 0) {

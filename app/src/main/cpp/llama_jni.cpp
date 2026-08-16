@@ -21,6 +21,9 @@
 
 namespace {
 
+/** How many recent tokens the repetition penalty looks back over. */
+constexpr int32_t PENALTY_LAST_N = 64;
+
 /**
  * Best-effort: ask the scheduler to favour this thread.
  *
@@ -174,7 +177,8 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeCancel(JNIEnv *, jobject, jlong 
 JNIEXPORT jint JNICALL
 Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     JNIEnv *env, jobject, jlong handle, jstring systemPrompt, jstring userPrompt,
-    jint maxTokens, jfloat temperature, jobject callback) {
+    jint maxTokens, jfloat temperature, jfloat topP, jint topK, jfloat repeatPenalty,
+    jobject callback) {
 
     auto *session = reinterpret_cast<Session *>(handle);
     if (session == nullptr) return -1;
@@ -223,9 +227,18 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
         return -5;
     }
 
+    // Without a repetition penalty, a small quantized model that starts
+    // echoing a phrase has nothing pushing it out of the loop — top-k/top-p
+    // still rate the repeated token highly, so it keeps winning. That
+    // matches degenerating/repeating output seen on-device far better than
+    // any single-turn decoding bug does, and left unchecked it runs the
+    // decode loop out to maxTokens instead of stopping, which is what a long
+    // hang before "no response" looks like from the Kotlin side.
     llama_sampler *sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.95f, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+        llama_vocab_n_tokens(session->vocab), PENALTY_LAST_N, repeatPenalty, 0.0f, 0.0f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(topK));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1));
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 

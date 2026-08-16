@@ -61,6 +61,10 @@ data class GenerationRequest(
     val systemPrompt: String? = null,
     val maxTokens: Int = 1024,
     val temperature: Double = 0.7,
+    val topP: Double = 0.95,
+    val topK: Int = 40,
+    /** >1.0 discourages repeats; 1.0 disables the penalty entirely. */
+    val repeatPenalty: Double = 1.1,
     val stopSequences: List<String> = emptyList(),
 )
 

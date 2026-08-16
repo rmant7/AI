@@ -30,6 +30,9 @@ class LlamaBridge {
         userPrompt: String,
         maxTokens: Int,
         temperature: Float,
+        topP: Float,
+        topK: Int,
+        repeatPenalty: Float,
         callback: TokenSink,
     ): Int
 
@@ -45,12 +48,15 @@ class LlamaBridge {
             runCatching { System.loadLibrary("llama_jni") }.isSuccess
         }
 
-        // Matches NodeExecutors' default context-assembly budget (8192). A
-        // native window smaller than what the Context Engine assembles means
-        // a turn that fit by the engine's own accounting is rejected at the
-        // native boundary — a confusing mismatch between two layers that
-        // should agree.
-        const val DEFAULT_CONTEXT_TOKENS = 8192
+        // Matches NodeExecutors' default context-assembly budget (4096) —
+        // deliberately, on both sides: raising this without raising the RAM
+        // budget alongside it is what let a model that barely fit start
+        // allocating a KV cache twice the size it used to, on devices
+        // already running at 90-95% of total RAM. A mismatch here rejects a
+        // turn cleanly (a "context exceeded" error); an oversized KV cache
+        // on a memory-starved device gets the process killed outright, which
+        // is the worse failure to risk by default.
+        const val DEFAULT_CONTEXT_TOKENS = 4096
 
         /**
          * Phone SoCs are big.LITTLE and ggml splits each matmul evenly across
