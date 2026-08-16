@@ -1,6 +1,8 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    // Both versions are declared here so AGP and the Kotlin Android plugin land
+    // in the same classpath — the Kotlin plugin needs AGP's classes to apply.
+    id("com.android.application") version "8.7.3"
+    id("org.jetbrains.kotlin.android") version "2.1.0"
 }
 
 repositories {
