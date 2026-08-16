@@ -1,6 +1,7 @@
 package ai.localstudio.app.models
 
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
@@ -10,18 +11,27 @@ data class DownloadProgress(val bytesDownloaded: Long, val bytesTotal: Long) {
 }
 
 /**
- * Resumable download.
+ * Resumable download that survives what actually goes wrong on a phone.
  *
- * A multi-gigabyte transfer over mobile data has to survive a dropped
- * connection rather than start over, so bytes go to a `.part` file, resumption
- * uses HTTP `Range`, and backoff resets on any real progress: otherwise a bad
- * network cancels a download that is in fact advancing. The file is promoted to
- * its final name only once the transfer is complete.
+ * Three things had to be handled explicitly, and the first one is why a
+ * download could fail outright:
+ *
+ * 1. **Redirects are followed by hand.** `HttpURLConnection` silently refuses
+ *    to follow a redirect that changes protocol or host — and every model host
+ *    redirects the download to a CDN on another host. Left to the platform, the
+ *    request returns a 302 body of a few hundred bytes and the "model" is
+ *    unusable.
+ * 2. **Resumption**, because a multi-gigabyte transfer over mobile data will be
+ *    interrupted: bytes go to a `.part` file and continue via HTTP `Range`.
+ * 3. **Backoff that resets on progress**, so a flaky network cannot cancel a
+ *    download that is in fact advancing; only attempts that transfer nothing
+ *    count towards giving up.
  */
 class ModelDownloader(
-    private val maxConsecutiveFailures: Int = 5,
+    private val maxConsecutiveFailures: Int = 6,
     private val initialBackoffMs: Long = 1_000,
     private val maxBackoffMs: Long = 30_000,
+    private val maxRedirects: Int = 5,
 ) {
 
     fun interface Listener {
@@ -59,24 +69,21 @@ class ModelDownloader(
                 backoff = if (progressed) initialBackoffMs else (backoff * 2).coerceAtMost(maxBackoffMs)
             }
         }
-        throw lastError
+        throw IOException("${lastError.message} (после $maxConsecutiveFailures попыток)", lastError)
     }
 
     private fun downloadOnce(url: String, tempFile: File, listener: Listener) {
         val resumeFrom = if (tempFile.exists()) tempFile.length() else 0L
-        val connection = (URI.create(url).toURL().openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-            if (resumeFrom > 0) setRequestProperty("Range", "bytes=$resumeFrom-")
-        }
+        val connection = open(url, resumeFrom)
 
         try {
             val status = connection.responseCode
-            if (status !in 200..299) throw IOException("Сервер ответил HTTP $status")
+            if (status !in 200..299) {
+                throw IOException("Сервер ответил HTTP $status${describe(connection)}")
+            }
 
-            // 200 to a Range request means the server ignored it and is sending
-            // the whole file: appending would corrupt what is already on disk.
+            // A 200 in reply to a Range request means the server ignored it and
+            // is sending the whole file: appending would corrupt what is on disk.
             val append = status == HttpURLConnection.HTTP_PARTIAL && resumeFrom > 0
             if (!append && resumeFrom > 0) tempFile.delete()
 
@@ -85,7 +92,7 @@ class ModelDownloader(
             val total = alreadyHave + remaining
 
             connection.inputStream.use { input ->
-                java.io.FileOutputStream(tempFile, append).use { output ->
+                FileOutputStream(tempFile, append).use { output ->
                     val buffer = ByteArray(BUFFER_SIZE)
                     var written = alreadyHave
                     var lastReport = 0L
@@ -104,13 +111,53 @@ class ModelDownloader(
                     listener.onProgress(DownloadProgress(written, total))
                 }
             }
+
+            if (total > 0 && tempFile.length() < total) {
+                throw IOException("Передано ${tempFile.length()} из $total байт")
+            }
         } finally {
             connection.disconnect()
         }
     }
 
+    /** Follows redirects manually, carrying the Range header to the final host. */
+    private fun open(startUrl: String, resumeFrom: Long): HttpURLConnection {
+        var current = startUrl
+        repeat(maxRedirects + 1) {
+            val connection = (URI.create(current).toURL().openConnection() as HttpURLConnection).apply {
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                // Off on purpose: the platform drops cross-protocol redirects,
+                // and it would also drop the Range header on the way.
+                instanceFollowRedirects = false
+                setRequestProperty("User-Agent", USER_AGENT)
+                setRequestProperty("Accept", "*/*")
+                if (resumeFrom > 0) setRequestProperty("Range", "bytes=$resumeFrom-")
+            }
+
+            val status = connection.responseCode
+            if (status !in REDIRECT_CODES) return connection
+
+            val location = connection.getHeaderField("Location")
+            connection.disconnect()
+            if (location.isNullOrBlank()) throw IOException("Редирект HTTP $status без адреса")
+            current = URI.create(current).resolve(location).toString()
+        }
+        throw IOException("Слишком много редиректов")
+    }
+
+    private fun describe(connection: HttpURLConnection): String = runCatching {
+        val message = connection.responseMessage.orEmpty()
+        val body = connection.errorStream?.bufferedReader()?.use { it.readText().take(200) }.orEmpty()
+        listOf(message, body).filter { it.isNotBlank() }.joinToString(": ").let { if (it.isBlank()) "" else " — $it" }
+    }.getOrDefault("")
+
     private companion object {
         const val BUFFER_SIZE = 1 shl 16
-        const val REPORT_EVERY = 2L * 1024 * 1024
+        const val REPORT_EVERY = 1L * 1024 * 1024
+        const val CONNECT_TIMEOUT_MS = 30_000
+        const val READ_TIMEOUT_MS = 120_000
+        const val USER_AGENT = "LocalAiStudio/0.1 (Android)"
+        val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
     }
 }

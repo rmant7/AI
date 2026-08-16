@@ -21,10 +21,20 @@ data class DeviceProfile(
     val hasGpuDelegate: Boolean = false,
     val hasNpu: Boolean = false,
     val performanceIndex: Double = 1.0,
+    /**
+     * Share of total RAM a model may claim. The conservative default suits a
+     * device shared with other apps; a user who wants the phone to be an
+     * inference machine can raise it, and on a 16 GB device that is the
+     * difference between a 4B model and a 27B one.
+     */
+    val ramBudgetFraction: Double = BASE_RAM_FRACTION,
 ) {
     init {
         require(availableRamBytes in 0..totalRamBytes) { "availableRamBytes out of range" }
         require(performanceIndex > 0) { "performanceIndex must be positive" }
+        require(ramBudgetFraction in 0.05..MAX_RAM_FRACTION) {
+            "ramBudgetFraction must be between 0.05 and $MAX_RAM_FRACTION"
+        }
     }
 
     /**
@@ -47,7 +57,7 @@ data class DeviceProfile(
      */
     val usableRamBytes: Long
         get() = maxOf(
-            (totalRamBytes * BASE_RAM_FRACTION).toLong(),
+            (totalRamBytes * ramBudgetFraction).toLong(),
             (availableRamBytes * FREE_RAM_SAFETY_FACTOR).toLong(),
         ).coerceAtMost((totalRamBytes * MAX_RAM_FRACTION).toLong())
 
@@ -85,8 +95,13 @@ data class DeviceProfile(
         /** Of genuinely free RAM, when that is the larger figure. */
         const val FREE_RAM_SAFETY_FACTOR = 0.6
 
-        /** Hard ceiling as a share of total RAM. */
-        const val MAX_RAM_FRACTION = 0.55
+        /**
+         * Absolute ceiling. Even a user who wants everything cannot have the
+         * last 5%: the OS, the UI process and the file cache the model itself
+         * is mapped through live there, and taking it means being killed
+         * mid-answer rather than running slowly.
+         */
+        const val MAX_RAM_FRACTION = 0.95
 
         /** Weights under ~35% of total RAM leave comfortable room for KV cache and activations. */
         const val RECOMMENDED_RAM_FRACTION = 0.35

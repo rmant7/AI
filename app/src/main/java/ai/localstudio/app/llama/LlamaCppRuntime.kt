@@ -68,6 +68,11 @@ private class LlamaTextModel(
         }
 
         val worker = CoroutineScope(Dispatchers.IO).launch {
+            // The user asked for the model, not for a background chore: tell
+            // Android this thread matters before the native pool inherits it.
+            runCatching {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
+            }
             val produced = bridge.nativeGenerate(
                 handle = handle,
                 systemPrompt = request.systemPrompt,

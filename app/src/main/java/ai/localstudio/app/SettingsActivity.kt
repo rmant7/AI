@@ -48,6 +48,8 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         binding.asrModelInput.setText(settings.speechModel)
+        binding.ramInput.setText(settings.ramBudgetPercent.toString())
+        binding.hfTokenInput.setText(settings.huggingFaceToken)
         showProvider(settings.provider)
 
         binding.saveButton.setOnClickListener { save() }
@@ -73,6 +75,8 @@ class SettingsActivity : AppCompatActivity() {
         }
         settings.chatModel = binding.chatModelInput.text?.toString().orEmpty()
         settings.speechModel = binding.asrModelInput.text?.toString().orEmpty()
+        binding.ramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.ramBudgetPercent = it }
+        settings.huggingFaceToken = binding.hfTokenInput.text?.toString().orEmpty()
 
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
         finish()

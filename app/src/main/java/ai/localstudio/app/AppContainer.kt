@@ -45,11 +45,12 @@ class AppContainer private constructor(private val context: Context) {
     /** Memory lives above the models, so it survives switching between runtimes. */
     val memory = InMemoryMemoryProvider()
 
-    val device: DeviceProfile by lazy { profileOf(context) }
+    /** Recomputed on demand: free memory moves, and the budget is user-settable. */
+    val device: DeviceProfile get() = profileOf(context, settings.ramBudgetFraction)
 
     val modelStore = ModelStore(context)
 
-    val downloads = ModelDownloads(modelStore)
+    val downloads = ModelDownloads(modelStore, tokenProvider = { settings.huggingFaceToken.ifBlank { null } })
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
@@ -188,7 +189,7 @@ class AppContainer private constructor(private val context: Context) {
                 instance ?: AppContainer(context.applicationContext).also { instance = it }
             }
 
-        fun profileOf(context: Context): DeviceProfile {
+        fun profileOf(context: Context, ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION): DeviceProfile {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
             return DeviceProfile(
@@ -206,6 +207,7 @@ class AppContainer private constructor(private val context: Context) {
                 },
                 hasGpuDelegate = false,
                 performanceIndex = 1.0,
+                ramBudgetFraction = ramBudgetFraction,
             )
         }
     }

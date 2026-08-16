@@ -30,5 +30,13 @@
     <string name="model_use">Использовать</string>
     <string name="model_installed">Установлена</string>
     <string name="model_native_missing">Локальный runtime недоступен для этого устройства</string>
+    <string name="model_details">Подробности</string>
+    <string name="model_retry">Повторить</string>
+    <string name="models_custom_title">Своя модель с Hugging Face</string>
+    <string name="models_custom_hint">Укажите репозиторий вида owner/repo, содержащий файл .gguf — приложение само выберет подходящее квантование.</string>
+    <string name="models_custom_add">Добавить</string>
+    <string name="settings_ram">Бюджет памяти на модель, % от общей RAM</string>
+    <string name="settings_ram_hint">90</string>
+    <string name="settings_hf_token">Токен Hugging Face (для закрытых репозиториев)</string>
     <string name="models_device">Устройство</string>
 </resources>

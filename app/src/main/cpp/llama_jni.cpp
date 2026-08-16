@@ -7,6 +7,7 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <sys/resource.h>
 
 #include <atomic>
 #include <string>
@@ -19,6 +20,21 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace {
+
+/**
+ * Best-effort: ask the scheduler to favour this thread.
+ *
+ * ggml's worker threads inherit the nice value of whichever thread creates
+ * them, so raising it here before decoding propagates to the pool. A phone
+ * will still throttle and the OS may refuse the request outright — hence
+ * "best-effort" rather than a guarantee, and hence no failure path: inference
+ * at normal priority is slower, not broken.
+ */
+void raiseThreadPriority() {
+    if (setpriority(PRIO_PROCESS, 0, -8) != 0) {
+        LOGI("could not raise thread priority; continuing at default");
+    }
+}
 
 struct Session {
     llama_model *model = nullptr;
@@ -119,7 +135,9 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
 
     llama_context_params contextParams = llama_context_default_params();
     contextParams.n_ctx = (uint32_t) contextTokens;
-    contextParams.n_batch = 256;
+    // Larger batches process the prompt in fewer passes at the cost of memory
+    // during that phase — a good trade on a device with RAM to spare.
+    contextParams.n_batch = 512;
     contextParams.n_threads = threads;
     contextParams.n_threads_batch = threads;
 
@@ -161,6 +179,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     auto *session = reinterpret_cast<Session *>(handle);
     if (session == nullptr) return -1;
     session->cancelled.store(false);
+    raiseThreadPriority();
 
     jclass callbackClass = env->GetObjectClass(callback);
     jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");

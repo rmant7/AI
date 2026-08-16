@@ -56,6 +56,7 @@ fun device(
     hasGpuDelegate: Boolean = false,
     androidApiLevel: Int = 35,
     performanceIndex: Double = 1.0,
+    ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION,
 ) = DeviceProfile(
     totalRamBytes = totalRamBytes,
     availableRamBytes = availableRamBytes,
@@ -65,4 +66,5 @@ fun device(
     supportedRuntimes = supportedRuntimes,
     hasGpuDelegate = hasGpuDelegate,
     performanceIndex = performanceIndex,
+    ramBudgetFraction = ramBudgetFraction,
 )

@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 sealed interface DownloadState {
     data object Idle : DownloadState
     data class Resolving(val repoId: String) : DownloadState
-    data class Running(val progress: DownloadProgress) : DownloadState
+    data class Running(val progress: DownloadProgress, val source: String) : DownloadState
     data class Failed(val message: String) : DownloadState
     data object Installed : DownloadState
 }
@@ -25,6 +25,7 @@ sealed interface DownloadState {
  */
 class ModelDownloads(
     private val store: ModelStore,
+    private val tokenProvider: () -> String? = { null },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
 
@@ -43,21 +44,24 @@ class ModelDownloads(
         val downloader = ModelDownloader()
         downloaders[seed.id] = downloader
         jobs[seed.id] = scope.launch {
-            publish(seed, DownloadState.Resolving(seed.repoId))
+            publish(seed, DownloadState.Resolving(seed.repoIds.first()))
             try {
-                val resolved = HuggingFaceResolver.resolve(seed.repoId)
+                val (source, resolved) = HuggingFaceResolver.resolveAny(seed.repoIds, tokenProvider())
                 val free = store.freeSpaceBytes()
                 if (resolved.sizeBytes > 0 && resolved.sizeBytes + SLACK_BYTES > free) {
                     publish(seed, DownloadState.Failed("Не хватает места: нужно ${gb(resolved.sizeBytes)}, свободно ${gb(free)}"))
                     return@launch
                 }
 
-                publish(seed, DownloadState.Running(DownloadProgress(store.partialSize(seed), resolved.sizeBytes)))
+                publish(
+                    seed,
+                    DownloadState.Running(DownloadProgress(store.partialSize(seed), resolved.sizeBytes), source),
+                )
                 downloader.download(
                     url = resolved.downloadUrl,
                     destination = store.fileFor(seed),
                     tempFile = store.partFor(seed),
-                ) { progress -> publish(seed, DownloadState.Running(progress)) }
+                ) { progress -> publish(seed, DownloadState.Running(progress, source)) }
 
                 publish(seed, DownloadState.Installed)
             } catch (e: Exception) {

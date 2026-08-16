@@ -43,6 +43,22 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_ASR_MODEL, DEFAULT_ASR_MODEL).orEmpty().ifBlank { DEFAULT_ASR_MODEL }
         set(value) = prefs.edit().putString(KEY_ASR_MODEL, value.trim()).apply()
 
+    /**
+     * Share of total RAM a model may claim, in percent. Defaults high: this is
+     * an app whose whole purpose is running a model, and on a 16 GB phone the
+     * cautious default kept every worthwhile model out.
+     */
+    var ramBudgetPercent: Int
+        get() = prefs.getInt(KEY_RAM_PERCENT, DEFAULT_RAM_PERCENT).coerceIn(10, 95)
+        set(value) = prefs.edit().putInt(KEY_RAM_PERCENT, value.coerceIn(10, 95)).apply()
+
+    val ramBudgetFraction: Double get() = ramBudgetPercent / 100.0
+
+    /** Only needed for gated repositories; community mirrors work without it. */
+    var huggingFaceToken: String
+        get() = prefs.getString(KEY_HF_TOKEN, "").orEmpty().trim()
+        set(value) = prefs.edit().putString(KEY_HF_TOKEN, value.trim()).apply()
+
     var memoryEnabled: Boolean
         get() = prefs.getBoolean(KEY_MEMORY, true)
         set(value) = prefs.edit().putBoolean(KEY_MEMORY, value).apply()
@@ -56,6 +72,9 @@ class Settings(context: Context) {
         const val KEY_CHAT_MODEL = "chatModel"
         const val KEY_ASR_MODEL = "asrModel"
         const val KEY_MEMORY = "memoryEnabled"
+        const val KEY_RAM_PERCENT = "ramBudgetPercent"
+        const val KEY_HF_TOKEN = "huggingFaceToken"
+        const val DEFAULT_RAM_PERCENT = 90
         const val DEFAULT_ASR_MODEL = "whisper-1"
     }
 }

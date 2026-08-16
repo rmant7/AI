@@ -162,10 +162,30 @@ class SuitabilityScorerTest {
     }
 
     @Test
-    fun `the budget never claims more than half the machine`() {
-        val phone = device(availableRamBytes = 15_000_000_000, totalRamBytes = 16_000_000_000)
+    fun `the budget never claims the whole machine`() {
+        val greedy = device(
+            availableRamBytes = 15_000_000_000,
+            totalRamBytes = 16_000_000_000,
+            ramBudgetFraction = DeviceProfile.MAX_RAM_FRACTION,
+        )
 
-        assertTrue(phone.usableRamBytes <= (16_000_000_000 * 0.55).toLong())
+        assertTrue(greedy.usableRamBytes <= (16_000_000_000 * DeviceProfile.MAX_RAM_FRACTION).toLong())
+        assertTrue(greedy.usableRamBytes < 16_000_000_000)
+    }
+
+    @Test
+    fun `raising the budget fraction is what lets a big model through`() {
+        val cautious = device(
+            availableRamBytes = 2_000_000_000,
+            totalRamBytes = 16_000_000_000,
+            ramBudgetFraction = 0.35,
+        )
+        val greedy = cautious.copy(ramBudgetFraction = 0.90)
+        val big = model("big", bindings = listOf(binding(ramBytes = 8 * GB, fileSizeBytes = 7 * GB)))
+
+        assertIs<Suitability.Incompatible>(scorer.evaluate(big, cautious, Capability.TEXT_GENERATION))
+        assertIs<Suitability.Compatible>(scorer.evaluate(big, greedy, Capability.TEXT_GENERATION))
+        assertTrue(greedy.usableRamBytes > 14_000_000_000)
     }
 
     @Test

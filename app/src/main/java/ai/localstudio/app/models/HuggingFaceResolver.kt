@@ -25,10 +25,30 @@ object HuggingFaceResolver {
 
     private const val API = "https://huggingface.co/api/models"
 
-    fun resolve(repoId: String): ResolvedModelFile {
-        val entries = fetchTree(repoId)
+    /**
+     * Tries each repository in turn and reports every failure if none works.
+     *
+     * A single source is a single point of failure: gated repositories answer
+     * 401/403 without a token, and any repository can be renamed. The error
+     * message lists what each source said, because "не удалось скачать" is not
+     * something a user can act on.
+     */
+    fun resolveAny(repoIds: List<String>, token: String? = null): Pair<String, ResolvedModelFile> {
+        val failures = mutableListOf<String>()
+        for (repoId in repoIds) {
+            try {
+                return repoId to resolve(repoId, token)
+            } catch (e: Exception) {
+                failures += "$repoId: ${e.message}"
+            }
+        }
+        throw IOException("Ни один источник не подошёл.\n" + failures.joinToString("\n"))
+    }
+
+    fun resolve(repoId: String, token: String? = null): ResolvedModelFile {
+        val entries = fetchTree(repoId, token)
         val best = ArtifactResolver.pickBest(entries)
-            ?: throw IOException("В репозитории $repoId нет подходящего файла .gguf")
+            ?: throw IOException("нет подходящего файла .gguf (возможно, модель разбита на части)")
         return ResolvedModelFile(
             fileName = best.path.substringAfterLast('/'),
             sizeBytes = best.sizeBytes,
@@ -36,16 +56,25 @@ object HuggingFaceResolver {
         )
     }
 
-    private fun fetchTree(repoId: String): List<RemoteArtifact> {
-        val connection = (URI.create("$API/$repoId/tree/main").toURL().openConnection() as HttpURLConnection).apply {
+    private fun fetchTree(repoId: String, token: String?): List<RemoteArtifact> {
+        val connection = (URI.create("$API/$repoId/tree/main?recursive=false").toURL()
+            .openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 20_000
             setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "LocalAiStudio/0.1 (Android)")
+            if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
         }
         try {
             val status = connection.responseCode
-            if (status == 404) throw IOException("Репозиторий $repoId не найден")
-            if (status !in 200..299) throw IOException("Hugging Face ответил HTTP $status для $repoId")
+            if (status == 404) throw IOException("репозиторий не найден")
+            if (status == 401 || status == 403) {
+                throw IOException(
+                    "доступ закрыт (HTTP $status) — репозиторий gated: нужен токен Hugging Face " +
+                        "и принятая лицензия",
+                )
+            }
+            if (status !in 200..299) throw IOException("Hugging Face ответил HTTP $status")
             return parseTree(connection.inputStream.bufferedReader().use { it.readText() })
         } finally {
             connection.disconnect()
