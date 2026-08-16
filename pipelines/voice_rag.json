@@ -1,0 +1,28 @@
+{
+  "id": "voice_rag",
+  "name": "Voice → Memory → RAG → LLM",
+  "description": "Голосовой запрос: транскрипция, поиск в памяти и документах, ответ, обновление памяти.",
+  "nodes": [
+    { "id": "mic", "type": "microphone" },
+    { "id": "vad", "type": "vad", "params": { "min_silence_ms": "500" } },
+    { "id": "stt", "type": "speech_to_text", "params": { "language": "auto" } },
+    { "id": "memory", "type": "memory_search", "params": { "scopes": "episodic,semantic", "limit": "8" } },
+    { "id": "rag", "type": "knowledge_search", "params": { "limit": "6", "rerank": "true" } },
+    { "id": "context", "type": "context_build" },
+    { "id": "llm", "type": "text_generation", "params": { "capability": "reasoning" } },
+    { "id": "save", "type": "memory_update" },
+    { "id": "out", "type": "response" }
+  ],
+  "edges": [
+    { "from": "mic", "to": "vad" },
+    { "from": "vad", "to": "stt" },
+    { "from": "stt", "to": "memory" },
+    { "from": "stt", "to": "rag" },
+    { "from": "stt", "to": "context" },
+    { "from": "memory", "to": "context" },
+    { "from": "rag", "to": "context" },
+    { "from": "context", "to": "llm" },
+    { "from": "llm", "to": "save" },
+    { "from": "llm", "to": "out" }
+  ]
+}

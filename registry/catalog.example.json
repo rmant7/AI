@@ -1,0 +1,128 @@
+{
+  "_note": "Пример формата каталога. Числа в benchmarks/referenceTokensPerSecond — плейсхолдеры для проверки схемы, а не измеренные значения. Реальные заполняются из Model Discovery и локальных прогонов.",
+  "updatedAt": "2026-08-15",
+  "models": [
+    {
+      "id": "text-small-4b-q4",
+      "family": "text-small",
+      "version": "3.5",
+      "parameterCount": 4000000000,
+      "quantization": "Q4_K_M",
+      "contextLength": 32768,
+      "languages": ["ru", "en"],
+      "capabilities": ["text_generation", "reasoning", "coding"],
+      "license": "apache-2.0",
+      "bindings": [
+        {
+          "runtime": "llama_cpp",
+          "artifact": "text-small-4b-q4_k_m.gguf",
+          "fileSizeBytes": 2700000000,
+          "requiredRamBytes": 3400000000,
+          "minAndroidApi": 31,
+          "referenceTokensPerSecond": 22.0
+        },
+        {
+          "runtime": "mediapipe",
+          "artifact": "text-small-4b-int4.task",
+          "fileSizeBytes": 2600000000,
+          "requiredRamBytes": 3100000000,
+          "requiresGpu": true,
+          "minAndroidApi": 33,
+          "referenceTokensPerSecond": 31.0
+        }
+      ],
+      "benchmarks": { "reasoning": 78.0, "coding": 71.0, "general": 74.0 }
+    },
+    {
+      "id": "text-large-8b-q4",
+      "family": "text-large",
+      "version": "3.5",
+      "parameterCount": 8000000000,
+      "quantization": "Q4_K_M",
+      "contextLength": 65536,
+      "languages": ["ru", "en", "de"],
+      "capabilities": ["text_generation", "reasoning", "coding", "translation"],
+      "license": "apache-2.0",
+      "bindings": [
+        {
+          "runtime": "llama_cpp",
+          "artifact": "text-large-8b-q4_k_m.gguf",
+          "fileSizeBytes": 4900000000,
+          "requiredRamBytes": 5800000000,
+          "minAndroidApi": 31,
+          "referenceTokensPerSecond": 11.0
+        }
+      ],
+      "benchmarks": { "reasoning": 88.0, "coding": 84.0, "general": 85.0 }
+    },
+    {
+      "id": "vision-4b-q4",
+      "family": "vision-edge",
+      "version": "2.0",
+      "parameterCount": 4000000000,
+      "quantization": "Q4_K_M",
+      "contextLength": 16384,
+      "languages": ["ru", "en"],
+      "capabilities": ["vision", "ocr", "image_understanding", "text_generation"],
+      "license": "apache-2.0",
+      "bindings": [
+        {
+          "runtime": "llama_cpp",
+          "artifact": "vision-4b-q4_k_m.gguf",
+          "fileSizeBytes": 3100000000,
+          "requiredRamBytes": 3900000000,
+          "minAndroidApi": 31,
+          "referenceTokensPerSecond": 14.0
+        }
+      ],
+      "benchmarks": { "vision": 76.0, "general": 70.0 }
+    },
+    {
+      "id": "asr-multilingual-small",
+      "family": "asr-multilingual",
+      "version": "3",
+      "parameterCount": 244000000,
+      "quantization": "int8",
+      "languages": ["ru", "en", "multi"],
+      "capabilities": ["speech_to_text"],
+      "license": "mit",
+      "bindings": [
+        {
+          "runtime": "whisper_cpp",
+          "artifact": "asr-small-q8.bin",
+          "fileSizeBytes": 480000000,
+          "requiredRamBytes": 900000000,
+          "minAndroidApi": 26
+        },
+        {
+          "runtime": "sherpa_onnx",
+          "artifact": "asr-small-onnx",
+          "fileSizeBytes": 520000000,
+          "requiredRamBytes": 850000000,
+          "minAndroidApi": 26
+        }
+      ],
+      "benchmarks": { "asrAccuracy": 91.0 }
+    },
+    {
+      "id": "embedding-multilingual-small",
+      "family": "embedding-multilingual",
+      "version": "1.5",
+      "parameterCount": 118000000,
+      "quantization": "int8",
+      "languages": ["ru", "en", "multi"],
+      "capabilities": ["embedding"],
+      "license": "apache-2.0",
+      "bindings": [
+        {
+          "runtime": "onnx_runtime",
+          "artifact": "embedding-small-int8.onnx",
+          "fileSizeBytes": 130000000,
+          "requiredRamBytes": 320000000,
+          "minAndroidApi": 26
+        }
+      ],
+      "benchmarks": { "general": 72.0 }
+    }
+  ]
+}

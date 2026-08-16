@@ -1,0 +1,21 @@
+{
+  "id": "photo_analyze",
+  "name": "Image → Vision → LLM",
+  "description": "Снимок с камеры: описание и OCR отдельной VLM, затем ответ текстовой моделью.",
+  "nodes": [
+    { "id": "cam", "type": "camera" },
+    { "id": "vision", "type": "vision_analyze" },
+    { "id": "ocr", "type": "ocr" },
+    { "id": "context", "type": "context_build" },
+    { "id": "llm", "type": "text_generation" },
+    { "id": "out", "type": "response" }
+  ],
+  "edges": [
+    { "from": "cam", "to": "vision" },
+    { "from": "cam", "to": "ocr" },
+    { "from": "vision", "to": "context" },
+    { "from": "ocr", "to": "context" },
+    { "from": "context", "to": "llm" },
+    { "from": "llm", "to": "out" }
+  ]
+}

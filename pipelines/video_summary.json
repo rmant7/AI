@@ -1,0 +1,30 @@
+{
+  "id": "video_summary",
+  "name": "Video → Audio + Frames → Summary",
+  "description": "Видео разбирается на дорожку речи и ключевые кадры; в модель уходит компактное представление, а не поток.",
+  "nodes": [
+    { "id": "video", "type": "video_input" },
+    { "id": "frames", "type": "frame_extract", "params": { "strategy": "scene_change", "max_frames": "24" } },
+    { "id": "stt", "type": "speech_to_text" },
+    { "id": "diarize", "type": "diarization" },
+    { "id": "vision", "type": "vision_analyze" },
+    { "id": "ocr", "type": "ocr" },
+    { "id": "context", "type": "context_build", "params": { "temporal": "true" } },
+    { "id": "llm", "type": "text_generation", "params": { "capability": "reasoning" } },
+    { "id": "save", "type": "memory_update" },
+    { "id": "out", "type": "response" }
+  ],
+  "edges": [
+    { "from": "video", "to": "frames" },
+    { "from": "video", "to": "stt" },
+    { "from": "stt", "to": "diarize" },
+    { "from": "frames", "to": "vision" },
+    { "from": "frames", "to": "ocr" },
+    { "from": "diarize", "to": "context" },
+    { "from": "vision", "to": "context" },
+    { "from": "ocr", "to": "context" },
+    { "from": "context", "to": "llm" },
+    { "from": "llm", "to": "save" },
+    { "from": "llm", "to": "out" }
+  ]
+}

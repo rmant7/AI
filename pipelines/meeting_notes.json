@@ -1,0 +1,22 @@
+{
+  "id": "meeting_notes",
+  "name": "Meeting → Transcript → Summary → Memory",
+  "description": "Длинная запись: транскрипция с разделением говорящих, резюме и запись решений в память.",
+  "nodes": [
+    { "id": "audio", "type": "audio_input" },
+    { "id": "stt", "type": "speech_to_text", "params": { "timestamps": "true" } },
+    { "id": "diarize", "type": "diarization" },
+    { "id": "context", "type": "context_build" },
+    { "id": "llm", "type": "text_generation", "params": { "capability": "reasoning" } },
+    { "id": "save", "type": "memory_update", "params": { "scope": "episodic" } },
+    { "id": "out", "type": "response" }
+  ],
+  "edges": [
+    { "from": "audio", "to": "stt" },
+    { "from": "stt", "to": "diarize" },
+    { "from": "diarize", "to": "context" },
+    { "from": "context", "to": "llm" },
+    { "from": "llm", "to": "save" },
+    { "from": "llm", "to": "out" }
+  ]
+}
