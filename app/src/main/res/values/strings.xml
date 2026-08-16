@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Local AI Studio</string>
+
+    <string name="chat_hint">Спросите что-нибудь…</string>
+    <string name="send">Отправить</string>
+    <string name="menu_settings">Настройки</string>
+    <string name="menu_models">Модели</string>
+    <string name="menu_clear">Очистить чат</string>
+    <string name="memory_on">Память: вкл</string>
+    <string name="memory_off">Память: выкл</string>
+
+    <string name="settings_title">Настройки</string>
+    <string name="settings_endpoint">Адрес OpenAI-совместимого сервера</string>
+    <string name="settings_endpoint_hint">http://192.168.1.10:11434/v1</string>
+    <string name="settings_api_key">API-ключ (если нужен)</string>
+    <string name="settings_chat_model">Модель для текста</string>
+    <string name="settings_asr_model">Модель для речи</string>
+    <string name="settings_save">Сохранить</string>
+    <string name="settings_explainer">Пусто — работает встроенный демонстрационный runtime без сети: видно, как собирается контекст и как маршрутизируется запрос. Укажите адрес Ollama или llama-server, чтобы отвечала настоящая модель.</string>
+    <string name="settings_saved">Сохранено</string>
+
+    <string name="models_title">Модели</string>
+    <string name="models_device">Устройство</string>
+</resources>

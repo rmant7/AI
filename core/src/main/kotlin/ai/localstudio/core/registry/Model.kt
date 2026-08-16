@@ -31,7 +31,15 @@ enum class RuntimeKind(val id: String) {
 
     /** OpenAI-compatible endpoint (Ollama, llama-server) — development mode only. */
     @SerialName("remote_openai")
-    REMOTE_OPENAI("remote_openai");
+    REMOTE_OPENAI("remote_openai"),
+
+    /**
+     * In-process stub: no weights, no network. Exists so the app runs — and can
+     * be demonstrated — before any real runtime is installed, and so tests can
+     * exercise the full stack without one.
+     */
+    @SerialName("stub")
+    STUB("stub");
 
     companion object {
         private val byId = entries.associateBy(RuntimeKind::id)
