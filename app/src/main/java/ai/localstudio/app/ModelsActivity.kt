@@ -1,12 +1,17 @@
 package ai.localstudio.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -37,6 +42,11 @@ class ModelsActivity : AppCompatActivity() {
     private val adapter = RowAdapter(::onPrimary, ::onSecondary)
     private val customSeeds = mutableListOf<LocalModelSeed>()
 
+    // A denial here does not block downloads — it only means the foreground
+    // service's progress notification stays invisible, so no fallback is needed.
+    private val requestNotifications =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityModelsBinding.inflate(layoutInflater)
@@ -47,6 +57,13 @@ class ModelsActivity : AppCompatActivity() {
         container = AppContainer.get(this)
         binding.models.layoutManager = LinearLayoutManager(this)
         binding.models.adapter = adapter
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         lifecycleScope.launch { container.downloads.state.collect { render() } }
         render()

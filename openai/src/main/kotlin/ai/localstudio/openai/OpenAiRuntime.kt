@@ -63,6 +63,11 @@ class OpenAiException(val status: Int, val body: String) : Exception(
  */
 class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
 
+    private companion object {
+        /** One retry: enough for a transient reset, not enough to mask a real outage. */
+        const val STREAM_RETRY_LIMIT = 1
+    }
+
     override val kind: RuntimeKind = RuntimeKind.REMOTE_OPENAI
 
     private val http = HttpTransport(
@@ -117,17 +122,36 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                 ),
             )
 
-            http.postJsonStreaming(url("/chat/completions"), body).use { response ->
-                val reader = response.reader()
-                while (true) {
-                    if (cancelled.get()) break
-                    val line = reader.readLine() ?: break
-                    val payload = SseParser.dataOf(line) ?: continue
-                    if (SseParser.isTerminator(payload)) break
-                    val chunk = runCatching {
-                        openAiJson.decodeFromString(ChatStreamChunk.serializer(), payload)
-                    }.getOrNull() ?: continue
-                    chunk.choices.firstOrNull()?.delta?.content?.takeIf { it.isNotEmpty() }?.let { emit(it) }
+            // A dropped/reset connection on a mobile network is common enough
+            // that failing the whole turn on the first hiccup is the wrong
+            // default. Retrying is only safe before any token has reached the
+            // caller — once a partial answer has been shown, re-sending the
+            // same prompt would duplicate it — so the flag below gates the
+            // retry to exactly that window.
+            var emittedAny = false
+            var attempt = 0
+            while (true) {
+                attempt++
+                try {
+                    http.postJsonStreaming(url("/chat/completions"), body).use { response ->
+                        val reader = response.reader()
+                        while (true) {
+                            if (cancelled.get()) return@use
+                            val line = reader.readLine() ?: return@use
+                            val payload = SseParser.dataOf(line) ?: continue
+                            if (SseParser.isTerminator(payload)) return@use
+                            val chunk = runCatching {
+                                openAiJson.decodeFromString(ChatStreamChunk.serializer(), payload)
+                            }.getOrNull() ?: continue
+                            chunk.choices.firstOrNull()?.delta?.content?.takeIf { it.isNotEmpty() }?.let {
+                                emittedAny = true
+                                emit(it)
+                            }
+                        }
+                    }
+                    break
+                } catch (e: java.io.IOException) {
+                    if (emittedAny || cancelled.get() || attempt > STREAM_RETRY_LIMIT) throw e
                 }
             }
         }.flowOn(Dispatchers.IO)

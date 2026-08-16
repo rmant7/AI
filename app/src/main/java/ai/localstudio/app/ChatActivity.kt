@@ -4,33 +4,51 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import ai.localstudio.app.databinding.ActivityChatBinding
+import ai.localstudio.app.history.ChatHistoryStore
+import ai.localstudio.app.history.Conversation
+import ai.localstudio.app.history.toMessage
+import ai.localstudio.app.history.toStored
 import ai.localstudio.core.engine.UserRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ChatActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityChatBinding
     private lateinit var container: AppContainer
+    private lateinit var history: ChatHistoryStore
     private val adapter = MessageAdapter()
-    private val conversationId = "chat-" + System.currentTimeMillis()
+    private var conversationId = "chat-" + System.currentTimeMillis()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityChatBinding.inflate(layoutInflater)
         setContentView(binding.root)
         container = AppContainer.get(this)
+        history = ChatHistoryStore(this)
         binding.root.applySystemBarInsets(applyImeInset = true)
 
         binding.messages.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         binding.messages.adapter = adapter
 
         binding.sendButton.setOnClickListener { send() }
+
+        // The app being killed in the background is routine on Android, not
+        // exceptional — resuming the most recent conversation instead of a
+        // blank screen is what makes that invisible to the user.
+        history.list().firstOrNull()?.let { latest ->
+            conversationId = latest.id
+            latest.messages.forEach { adapter.add(it.toMessage()) }
+        }
     }
 
     override fun onResume() {
@@ -42,7 +60,8 @@ class ChatActivity : AppCompatActivity() {
         menu.add(0, MENU_MEMORY, 0, memoryTitle()).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(0, MENU_MODELS, 1, R.string.menu_models)
         menu.add(0, MENU_SETTINGS, 2, R.string.menu_settings)
-        menu.add(0, MENU_CLEAR, 3, R.string.menu_clear)
+        menu.add(0, MENU_HISTORY, 3, R.string.menu_history)
+        menu.add(0, MENU_CLEAR, 4, R.string.menu_clear)
         return true
     }
 
@@ -71,10 +90,68 @@ class ChatActivity : AppCompatActivity() {
 
         MENU_CLEAR -> {
             adapter.clear()
+            conversationId = "chat-" + System.currentTimeMillis()
+            true
+        }
+
+        MENU_HISTORY -> {
+            showHistory()
             true
         }
 
         else -> super.onOptionsItemSelected(item)
+    }
+
+    private fun showHistory() {
+        val conversations = history.list()
+        if (conversations.isEmpty()) {
+            android.widget.Toast.makeText(this, R.string.history_empty, android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val format = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
+        val labels = conversations.map { "${it.title}\n${format.format(Date(it.updatedAt))}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.menu_history)
+            .setItems(labels) { _, index -> openConversation(conversations[index]) }
+            .setNegativeButton(R.string.history_delete) { _, _ -> pickAndDelete(conversations) }
+            .show()
+    }
+
+    private fun pickAndDelete(conversations: List<Conversation>) {
+        val format = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
+        val labels = conversations.map { "${it.title}\n${format.format(Date(it.updatedAt))}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.history_delete)
+            .setItems(labels) { _, index ->
+                val target = conversations[index]
+                history.delete(target.id)
+                if (target.id == conversationId) {
+                    adapter.clear()
+                    conversationId = "chat-" + System.currentTimeMillis()
+                }
+            }
+            .show()
+    }
+
+    private fun openConversation(conversation: Conversation) {
+        conversationId = conversation.id
+        adapter.clear()
+        conversation.messages.forEach { adapter.add(it.toMessage()) }
+        binding.messages.scrollToPosition((adapter.itemCount - 1).coerceAtLeast(0))
+    }
+
+    private fun persist() {
+        val messages = adapter.messages()
+        if (messages.isEmpty()) return
+        val stored = messages.map { it.toStored() }
+        history.save(
+            Conversation(
+                id = conversationId,
+                title = ChatHistoryStore.titleFor(stored),
+                updatedAt = System.currentTimeMillis(),
+                messages = stored,
+            ),
+        )
     }
 
     private fun memoryTitle(): Int =
@@ -92,6 +169,7 @@ class ChatActivity : AppCompatActivity() {
         binding.input.setText("")
         adapter.add(Message.user(text))
         binding.messages.scrollToPosition(adapter.itemCount - 1)
+        persist()
         setBusy(true)
 
         lifecycleScope.launch {
@@ -130,6 +208,7 @@ class ChatActivity : AppCompatActivity() {
                     )
                 }
             binding.messages.scrollToPosition(adapter.itemCount - 1)
+            persist()
         }
     }
 
@@ -142,6 +221,7 @@ class ChatActivity : AppCompatActivity() {
         const val MENU_MEMORY = 1
         const val MENU_MODELS = 2
         const val MENU_SETTINGS = 3
-        const val MENU_CLEAR = 4
+        const val MENU_HISTORY = 4
+        const val MENU_CLEAR = 5
     }
 }

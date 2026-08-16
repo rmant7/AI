@@ -181,6 +181,18 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     session->cancelled.store(false);
     raiseThreadPriority();
 
+    // Every call sends the *whole* conversation as prompt text — the Kotlin
+    // side rebuilds full context each turn, it does not send an incremental
+    // continuation. Without this, llama_batch_get_one's automatic position
+    // tracking keeps appending onto the KV cache left over from the previous
+    // turn: positions drift out of sync with the token stream being decoded,
+    // which produced exactly what a real device showed — coherent-length but
+    // wrong-language, degenerating replies from turn two onward, and by the
+    // third or fourth turn the accumulated (never-freed) cache exceeded n_ctx
+    // and crashed. Clearing before every call makes each generate() the fresh
+    // single-shot decode it was written to be.
+    llama_memory_clear(llama_get_memory(session->ctx), true);
+
     jclass callbackClass = env->GetObjectClass(callback);
     jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
     if (onToken == nullptr) return -2;

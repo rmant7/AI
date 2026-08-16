@@ -25,6 +25,7 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.llama.LlamaCppRuntime
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
+import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.openai.OpenAiConfig
@@ -50,7 +51,11 @@ class AppContainer private constructor(private val context: Context) {
 
     val modelStore = ModelStore(context)
 
-    val downloads = ModelDownloads(modelStore, tokenProvider = { settings.huggingFaceToken.ifBlank { null } })
+    val downloads = ModelDownloads(
+        modelStore,
+        tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
+        onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+    )
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

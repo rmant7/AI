@@ -27,6 +27,12 @@ class ModelDownloads(
     private val store: ModelStore,
     private val tokenProvider: () -> String? = { null },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    /**
+     * Lets the caller keep the process alive for the duration of the transfer
+     * (a foreground service) without this class knowing anything about
+     * Android services or notifications.
+     */
+    private val onDownloadStarted: () -> Unit = {},
 ) {
 
     private val states = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
@@ -41,6 +47,7 @@ class ModelDownloads(
     fun start(seed: LocalModelSeed) {
         if (jobs[seed.id]?.isActive == true) return
 
+        onDownloadStarted()
         val downloader = ModelDownloader()
         downloaders[seed.id] = downloader
         jobs[seed.id] = scope.launch {
@@ -62,6 +69,27 @@ class ModelDownloads(
                     destination = store.fileFor(seed),
                     tempFile = store.partFor(seed),
                 ) { progress -> publish(seed, DownloadState.Running(progress, source)) }
+
+                // The HTTP layer already rejects a transfer that ends short of
+                // the Content-Length it was told to expect, but that guards
+                // only a single connection's own honesty. Comparing against the
+                // size Hugging Face's own metadata reported for this file is an
+                // independent check — the "install" step this is standing in
+                // for — and it is exactly the kind of corruption that produces
+                // a model which loads, then misbehaves or crashes mid-generation
+                // instead of failing cleanly up front.
+                val installedFile = store.fileFor(seed)
+                val installedSize = installedFile.length()
+                if (resolved.sizeBytes > 0 && installedSize != resolved.sizeBytes) {
+                    installedFile.delete()
+                    publish(
+                        seed,
+                        DownloadState.Failed(
+                            "Файл повреждён: получено $installedSize байт, ожидалось ${resolved.sizeBytes}",
+                        ),
+                    )
+                    return@launch
+                }
 
                 publish(seed, DownloadState.Installed)
             } catch (e: Exception) {

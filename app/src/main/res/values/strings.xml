@@ -6,7 +6,10 @@
     <string name="send">Отправить</string>
     <string name="menu_settings">Настройки</string>
     <string name="menu_models">Модели</string>
-    <string name="menu_clear">Очистить чат</string>
+    <string name="menu_clear">Новый чат</string>
+    <string name="menu_history">История чатов</string>
+    <string name="history_empty">Пока нет сохранённых чатов</string>
+    <string name="history_delete">Удалить</string>
     <string name="memory_on">Память: вкл</string>
     <string name="memory_off">Память: выкл</string>
 

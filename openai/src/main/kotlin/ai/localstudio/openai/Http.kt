@@ -44,6 +44,14 @@ internal class HttpTransport(
             instanceFollowRedirects = true
             setRequestProperty("Content-Type", contentType)
             setRequestProperty("Accept", if (streaming) "text/event-stream" else "application/json")
+            // A long-lived SSE connection is exactly the case Android's HTTP
+            // stack's keep-alive pool gets wrong: it can hand back a socket the
+            // server has already started closing, and the read fails partway
+            // through with "unexpected end of stream" instead of at connect
+            // time. A fresh connection per streaming request sidesteps that
+            // whole class of failure; a plain JSON call is short enough that
+            // reuse is safe and worth keeping for it.
+            if (streaming) setRequestProperty("Connection", "close")
             apiKey?.let { setRequestProperty("Authorization", "Bearer $it") }
             // Without this the whole request body is buffered in memory, which
             // matters for audio uploads.

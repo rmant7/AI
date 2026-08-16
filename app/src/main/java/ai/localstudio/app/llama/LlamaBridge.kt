@@ -45,7 +45,12 @@ class LlamaBridge {
             runCatching { System.loadLibrary("llama_jni") }.isSuccess
         }
 
-        const val DEFAULT_CONTEXT_TOKENS = 4096
+        // Matches NodeExecutors' default context-assembly budget (8192). A
+        // native window smaller than what the Context Engine assembles means
+        // a turn that fit by the engine's own accounting is rejected at the
+        // native boundary — a confusing mismatch between two layers that
+        // should agree.
+        const val DEFAULT_CONTEXT_TOKENS = 8192
 
         /**
          * Phone SoCs are big.LITTLE and ggml splits each matmul evenly across
