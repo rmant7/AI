@@ -28,12 +28,28 @@ data class DeviceProfile(
     }
 
     /**
-     * RAM a model may occupy. The rest is left to the OS, the UI process and
-     * whatever else is resident — loading up to the last free byte gets the
-     * app killed on Android long before it gets slow.
+     * RAM a model may occupy.
+     *
+     * Derived primarily from **total** memory, not from what is free right now.
+     * Android reports `availMem` as "free this instant" while keeping large
+     * amounts in cached processes that it evicts on demand: a 16 GB phone
+     * routinely reports under 2 GB free and still loads a 4 GB model without
+     * trouble. Budgeting off `availMem` alone therefore punishes exactly the
+     * devices that can run the most — measured on a real 15 GB device, which
+     * was offered a 1.1 GB budget.
+     *
+     * Free memory still counts, as the higher of the two: a device that
+     * genuinely has a lot free right now may use it. The result is capped so
+     * that a model never claims more than [MAX_RAM_FRACTION] of the machine —
+     * the OS, the UI process and the other stages of a pipeline live in the
+     * rest, and loading up to the last byte gets the app killed long before it
+     * gets slow.
      */
     val usableRamBytes: Long
-        get() = (availableRamBytes * RAM_SAFETY_FACTOR).toLong()
+        get() = maxOf(
+            (totalRamBytes * BASE_RAM_FRACTION).toLong(),
+            (availableRamBytes * FREE_RAM_SAFETY_FACTOR).toLong(),
+        ).coerceAtMost((totalRamBytes * MAX_RAM_FRACTION).toLong())
 
     /**
      * Pre-download verdict: how a model of this artifact size sits against
@@ -63,7 +79,14 @@ data class DeviceProfile(
     }
 
     companion object {
-        const val RAM_SAFETY_FACTOR = 0.6
+        /** Of total RAM: what a model may plan for regardless of momentary free memory. */
+        const val BASE_RAM_FRACTION = 0.35
+
+        /** Of genuinely free RAM, when that is the larger figure. */
+        const val FREE_RAM_SAFETY_FACTOR = 0.6
+
+        /** Hard ceiling as a share of total RAM. */
+        const val MAX_RAM_FRACTION = 0.55
 
         /** Weights under ~35% of total RAM leave comfortable room for KV cache and activations. */
         const val RECOMMENDED_RAM_FRACTION = 0.35

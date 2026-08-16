@@ -50,13 +50,14 @@ fun binding(
 /** ~12 GB RAM with 10 GB free — enough for one mid-size model, not for two. */
 fun device(
     availableRamBytes: Long = 10 * GB,
+    totalRamBytes: Long = 12 * GB,
     availableStorageBytes: Long = 40 * GB,
     supportedRuntimes: Set<RuntimeKind> = setOf(RuntimeKind.LLAMA_CPP, RuntimeKind.WHISPER_CPP),
     hasGpuDelegate: Boolean = false,
     androidApiLevel: Int = 35,
     performanceIndex: Double = 1.0,
 ) = DeviceProfile(
-    totalRamBytes = 12 * GB,
+    totalRamBytes = totalRamBytes,
     availableRamBytes = availableRamBytes,
     availableStorageBytes = availableStorageBytes,
     cpuCores = 8,

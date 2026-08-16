@@ -23,6 +23,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // A fixed debug key, committed on purpose. AGP generates a throwaway
+    // debug keystore when none exists, and CI starts from a clean home every
+    // run — so consecutive builds were signed with different keys and Android
+    // refused to install one over the other ("App not installed"). This key
+    // guards nothing; it exists so that build N+1 upgrades build N.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildFeatures {
         viewBinding = true
     }
@@ -43,6 +57,7 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
             isMinifyEnabled = false

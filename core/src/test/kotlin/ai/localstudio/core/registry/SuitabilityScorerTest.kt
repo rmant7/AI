@@ -139,10 +139,33 @@ class SuitabilityScorerTest {
         )
 
         val flagship = scorer.rank(models, device(availableRamBytes = 10 * GB), Capability.REASONING)
-        val budgetPhone = scorer.rank(models, device(availableRamBytes = 4 * GB), Capability.REASONING)
+        val budgetPhone = scorer.rank(
+            models,
+            device(availableRamBytes = 3 * GB, totalRamBytes = 4 * GB),
+            Capability.REASONING,
+        )
 
         assertEquals(setOf("small", "mid"), flagship.map { it.model.id }.toSet())
         assertEquals(listOf("small"), budgetPhone.map { it.model.id })
+    }
+
+    @Test
+    fun `a phone with lots of RAM but little free still gets a real budget`() {
+        // Measured on a real device: 15 GB total, 1.8 GB reported free. Android
+        // evicts cached processes on demand, so the budget must not collapse to
+        // a fraction of that 1.8 GB.
+        val phone = device(availableRamBytes = 1_800_000_000, totalRamBytes = 15_000_000_000)
+        val model = model("mid", bindings = listOf(binding(ramBytes = 3 * GB, fileSizeBytes = 2 * GB)))
+
+        assertTrue(phone.usableRamBytes > 5 * GB, "budget was ${phone.usableRamBytes}")
+        assertIs<Suitability.Compatible>(scorer.evaluate(model, phone, Capability.TEXT_GENERATION))
+    }
+
+    @Test
+    fun `the budget never claims more than half the machine`() {
+        val phone = device(availableRamBytes = 15_000_000_000, totalRamBytes = 16_000_000_000)
+
+        assertTrue(phone.usableRamBytes <= (16_000_000_000 * 0.55).toLong())
     }
 
     @Test
