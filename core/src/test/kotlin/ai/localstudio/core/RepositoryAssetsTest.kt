@@ -63,7 +63,7 @@ class RepositoryAssetsTest {
             capability = Capability.TEXT_GENERATION,
         )
         assertTrue(ranked.isNotEmpty(), "no model from the example catalog runs on the reference device")
-        assertTrue(ranked.all { it.suitability.binding.requiredRamBytes <= 6 * GB })
+        assertTrue(ranked.all { it.suitability.binding.effectiveRequiredRamBytes <= 6 * GB })
     }
 
     @Test

@@ -78,11 +78,12 @@ class RuntimeManager(
         if (!runtime.canRun(model, binding)) {
             throw ModelLoadException("Runtime ${binding.runtime.id} cannot run ${model.id}")
         }
-        if (binding.requiredRamBytes > budgetBytes) {
-            throw InsufficientMemoryException(binding.requiredRamBytes, budgetBytes, residentBytes)
+        val requiredBytes = binding.effectiveRequiredRamBytes
+        if (requiredBytes > budgetBytes) {
+            throw InsufficientMemoryException(requiredBytes, budgetBytes, residentBytes)
         }
 
-        evictUntilFits(binding.requiredRamBytes)
+        evictUntilFits(requiredBytes)
 
         val loaded = runtime.load(model, binding)
         resident[model.id] = Entry(loaded, binding.runtime, refCount = 1, lastUsedAt = clock())

@@ -53,7 +53,8 @@ data class RuntimeBinding(
     val runtime: RuntimeKind,
     val artifact: String,
     val fileSizeBytes: Long,
-    val requiredRamBytes: Long,
+    /** Peak RAM measured on a device. Null until someone has actually measured it. */
+    val requiredRamBytes: Long? = null,
     val requiresGpu: Boolean = false,
     val requiresNpu: Boolean = false,
     val minAndroidApi: Int = 0,
@@ -61,7 +62,30 @@ data class RuntimeBinding(
 ) {
     init {
         require(fileSizeBytes > 0) { "fileSizeBytes must be positive for $artifact" }
-        require(requiredRamBytes > 0) { "requiredRamBytes must be positive for $artifact" }
+        require(requiredRamBytes == null || requiredRamBytes > 0) {
+            "requiredRamBytes must be positive for $artifact"
+        }
+    }
+
+    /**
+     * RAM to plan for. A catalog entry resolved from a model hub knows the file
+     * size and nothing else, so an unmeasured binding falls back to an estimate.
+     *
+     * The estimate is intentionally crude and intentionally high: weights are
+     * the bulk of the footprint but not all of it — the KV cache, activations
+     * and the loader's own copies sit on top. It exists so an unmeasured model
+     * is planned for pessimistically rather than optimistically, and the first
+     * real measurement on a device should replace it.
+     */
+    val effectiveRequiredRamBytes: Long
+        get() = requiredRamBytes ?: (fileSizeBytes * ESTIMATED_RAM_NUMERATOR / ESTIMATED_RAM_DENOMINATOR)
+
+    /** True when the RAM figure is a guess rather than a measurement — worth showing in the UI. */
+    val isRamEstimated: Boolean get() = requiredRamBytes == null
+
+    private companion object {
+        const val ESTIMATED_RAM_NUMERATOR = 13L
+        const val ESTIMATED_RAM_DENOMINATOR = 10L
     }
 }
 

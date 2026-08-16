@@ -56,6 +56,7 @@
 |---|---|---|
 | Capability | `Capability` | `core/src/main/kotlin/ai/localstudio/core/capability/Capability.kt` |
 | Реестр моделей | `ModelDescriptor`, `ModelRegistry` | `core/src/main/kotlin/ai/localstudio/core/registry/` |
+| Аудио | `UtteranceAccumulator`, `AudioAnalysis` | `core/src/main/kotlin/ai/localstudio/core/audio/VoiceActivity.kt` |
 | Подбор под устройство | `DeviceProfile`, `SuitabilityScorer` | `core/src/main/kotlin/ai/localstudio/core/registry/SuitabilityScorer.kt` |
 | Runtime | `ModelRuntime`, `RuntimeManager` | `core/src/main/kotlin/ai/localstudio/core/runtime/` |
 | Память | `MemoryProvider` | `core/src/main/kotlin/ai/localstudio/core/memory/MemoryProvider.kt` |
@@ -125,4 +126,4 @@ Context Engine.
 позволяет отлаживать архитектуру до появления UI.
 
 Дальше: [02-capabilities.md](02-capabilities.md) ·
-[10-stack-and-roadmap.md](10-stack-and-roadmap.md)
+[10-stack-and-roadmap.md](10-stack-and-roadmap.md) · [12-audio.md](12-audio.md)

@@ -4,8 +4,8 @@
   "description": "Голосовой запрос: транскрипция, поиск в памяти и документах, ответ, обновление памяти.",
   "nodes": [
     { "id": "mic", "type": "microphone" },
-    { "id": "vad", "type": "vad", "params": { "min_silence_ms": "500" } },
-    { "id": "stt", "type": "speech_to_text", "params": { "language": "auto" } },
+    { "id": "vad", "type": "vad", "params": { "silence_to_finalize_ms": "800", "max_utterance_s": "25" } },
+    { "id": "stt", "type": "speech_to_text", "params": { "language": "auto", "refresh_ms": "2000", "min_transcribe_ms": "400" } },
     { "id": "memory", "type": "memory_search", "params": { "scopes": "episodic,semantic", "limit": "8" } },
     { "id": "rag", "type": "knowledge_search", "params": { "limit": "6", "rerank": "true" } },
     { "id": "context", "type": "context_build" },

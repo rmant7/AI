@@ -19,11 +19,31 @@ interface LoadedModel : AutoCloseable {
     val ramBytes: Long
 }
 
-interface TextModelHandle : LoadedModel {
+/**
+ * Something whose in-flight work can be interrupted.
+ *
+ * Cancelling the coroutine is not enough: a native inference call blocks in C++
+ * and will run to completion regardless. The runtime has to raise a flag the
+ * engine checks between steps (whisper.cpp's `abort_callback`, llama.cpp's
+ * equivalent), so cancellation takes effect at the next checkpoint rather than
+ * immediately — and leaving it unwired means a Stop button that does nothing on
+ * a long transcription.
+ */
+interface Interruptible {
+    fun requestCancel()
+}
+
+interface TextModelHandle : LoadedModel, Interruptible {
     fun generate(request: GenerationRequest): Flow<String>
 }
 
-interface SpeechModelHandle : LoadedModel {
+interface SpeechModelHandle : LoadedModel, Interruptible {
+    /**
+     * Transcribes a whole buffer. Live dictation is built on this same call:
+     * the current utterance is re-transcribed as it grows, which is what lets
+     * the model revise earlier words once it has heard the end of the sentence.
+     * See `ai.localstudio.core.audio.UtteranceAccumulator` and docs/12-audio.md.
+     */
     suspend fun transcribe(audio: AudioRef, language: String? = null): Transcript
 }
 

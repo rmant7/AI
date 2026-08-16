@@ -13,7 +13,7 @@
 ## Состав репозитория
 
 ```
-docs/           архитектура (11 документов, читать по порядку)
+docs/           архитектура (12 документов, читать по порядку)
 core/           контракты и логика ядра на Kotlin, с тестами
 pipelines/      готовые пайплайны в JSON
 registry/       пример каталога моделей
@@ -34,6 +34,7 @@ registry/       пример каталога моделей
 | [09 — Хранение](docs/09-storage.md) | раскладка файлов на устройстве |
 | [10 — Стек и план](docs/10-stack-and-roadmap.md) | что берём готовым, MVP, риски |
 | [11 — UI](docs/11-ui.md) | экраны |
+| [12 — Audio Engine](docs/12-audio.md) | захват, VAD, жизненный цикл реплики, параметры whisper |
 
 ## Модуль core
 
@@ -46,6 +47,8 @@ registry/       пример каталога моделей
 | `registry/ModelDescriptor` | модель, её capabilities и bindings под разные runtime |
 | `registry/SuitabilityScorer` | топ-N моделей под конкретное устройство: жёсткие фильтры + оценка |
 | `registry/ModelRegistry` | installed/available, merge каталога, diff обновлений |
+| `registry/ArtifactResolver` | выбор конкретного файла в репозитории модели: приоритет квантования, отсев многотомных |
+| `audio/UtteranceAccumulator` | VAD по измеренному шумовому порогу, накопление реплики, момент финализации |
 | `runtime/ModelRuntime` | абстракция llama.cpp / MediaPipe / MLC / ONNX / OpenAI-совместимого API |
 | `runtime/RuntimeManager` | что держать в RAM: переиспользование, LRU-вытеснение, защита используемых |
 | `memory/MemoryProvider` | working / episodic / semantic память за интерфейсом |
@@ -63,9 +66,19 @@ Android SDK не нужен — это обычный JVM-модуль, что �
 ./gradlew :core:test
 ```
 
-53 теста: подбор моделей под устройство, вытеснение из памяти, сборка контекста,
-маршрутизация, валидация и исполнение пайплайнов. Тест `RepositoryAssetsTest`
-проверяет, что JSON в `pipelines/` и `registry/` не разошёлся с кодом.
+77 тестов: подбор моделей под устройство, вытеснение из памяти, сборка
+контекста, маршрутизация, валидация и исполнение пайплайнов, VAD и жизненный
+цикл реплики, выбор артефакта модели. Тест `RepositoryAssetsTest` проверяет,
+что JSON в `pipelines/` и `registry/` не разошёлся с кодом.
+
+## Откуда взяты числа
+
+Параметры аудио, флаги нативной сборки, тиринг моделей по RAM и правила выбора
+артефакта — не проектные допущения, а результаты работающей реализации
+whisper.cpp на Android (`WhisperTranscriber`, ветка
+`claude/android-whisper-transcription-3tuggu` в `rmant7/claude-code`).
+Подробности и причины — в [docs/12](docs/12-audio.md),
+[docs/04](docs/04-runtime.md) и [docs/03](docs/03-model-registry.md).
 
 ## Статус
 

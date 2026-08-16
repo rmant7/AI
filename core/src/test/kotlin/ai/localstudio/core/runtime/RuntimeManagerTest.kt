@@ -28,7 +28,7 @@ private class FakeRuntime(override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
 
     override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel {
         loads += model.id
-        return FakeLoadedModel(model.id, binding.requiredRamBytes) { unloads += it }
+        return FakeLoadedModel(model.id, binding.effectiveRequiredRamBytes) { unloads += it }
     }
 }
 

@@ -139,5 +139,5 @@ class ModelRegistry(entries: List<RegistryEntry> = emptyList()) {
         bindings.mapNotNull { it.referenceTokensPerSecond }.maxOrNull() ?: 0.0
 
     private fun ModelDescriptor.minRequiredRam(): Long =
-        bindings.minOf { it.requiredRamBytes }
+        bindings.minOf { it.effectiveRequiredRamBytes }
 }

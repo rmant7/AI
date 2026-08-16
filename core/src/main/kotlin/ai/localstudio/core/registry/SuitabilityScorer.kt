@@ -36,6 +36,8 @@ sealed interface Suitability {
 data class RankedModel(
     val model: ModelDescriptor,
     val suitability: Suitability.Compatible,
+    /** Pre-download verdict against total RAM — the label the Models screen shows. */
+    val fit: ModelFit,
 ) {
     val score: Double get() = suitability.breakdown.total
 }
@@ -100,7 +102,9 @@ class SuitabilityScorer(
     ): List<RankedModel> = models
         .mapNotNull { model ->
             val suitability = evaluate(model, device, capability, model.id in installedIds)
-            (suitability as? Suitability.Compatible)?.let { RankedModel(model, it) }
+            (suitability as? Suitability.Compatible)?.let {
+                RankedModel(model, it, device.classifyFit(it.binding.fileSizeBytes))
+            }
         }
         .sortedWith(compareByDescending<RankedModel> { it.score }.thenBy { it.model.id })
         .take(limit)
@@ -111,7 +115,7 @@ class SuitabilityScorer(
         alreadyInstalled: Boolean,
     ): Set<IncompatibilityReason> = buildSet {
         if (binding.runtime !in device.supportedRuntimes) add(IncompatibilityReason.NO_SUPPORTED_RUNTIME)
-        if (binding.requiredRamBytes > device.usableRamBytes) add(IncompatibilityReason.NOT_ENOUGH_RAM)
+        if (binding.effectiveRequiredRamBytes > device.usableRamBytes) add(IncompatibilityReason.NOT_ENOUGH_RAM)
         if (!alreadyInstalled && binding.fileSizeBytes > device.availableStorageBytes) {
             add(IncompatibilityReason.NOT_ENOUGH_STORAGE)
         }
@@ -129,7 +133,7 @@ class SuitabilityScorer(
         val quality = (model.benchmarks.scoreFor(capability) ?: DEFAULT_QUALITY) / 100.0
         val estimatedTps = binding.referenceTokensPerSecond?.times(device.performanceIndex)
         val speed = estimatedTps?.let { min(1.0, it / targetTokensPerSecond) } ?: DEFAULT_SPEED
-        val memory = 1.0 - binding.requiredRamBytes.toDouble() / device.usableRamBytes.toDouble()
+        val memory = 1.0 - binding.effectiveRequiredRamBytes.toDouble() / device.usableRamBytes.toDouble()
 
         val total = geometricMean(
             values = doubleArrayOf(quality, speed, memory),
