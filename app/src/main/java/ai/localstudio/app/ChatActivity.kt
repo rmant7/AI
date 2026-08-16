@@ -15,7 +15,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import ai.localstudio.app.attach.DocumentIngest
-import ai.localstudio.app.camera.CameraActivity
 import ai.localstudio.app.databinding.ActivityChatBinding
 import ai.localstudio.app.history.ChatHistoryStore
 import ai.localstudio.app.history.Conversation
@@ -86,10 +85,9 @@ class ChatActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_MEMORY, 0, memoryTitle()).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(0, MENU_MODELS, 1, R.string.menu_models)
-        menu.add(0, MENU_CAMERA, 2, R.string.menu_camera)
-        menu.add(0, MENU_SETTINGS, 3, R.string.menu_settings)
-        menu.add(0, MENU_HISTORY, 4, R.string.menu_history)
-        menu.add(0, MENU_CLEAR, 5, R.string.menu_clear)
+        menu.add(0, MENU_SETTINGS, 2, R.string.menu_settings)
+        menu.add(0, MENU_HISTORY, 3, R.string.menu_history)
+        menu.add(0, MENU_CLEAR, 4, R.string.menu_clear)
         return true
     }
 
@@ -106,11 +104,6 @@ class ChatActivity : AppCompatActivity() {
 
         MENU_MODELS -> {
             startActivity(Intent(this, ModelsActivity::class.java))
-            true
-        }
-
-        MENU_CAMERA -> {
-            startActivity(Intent(this, CameraActivity::class.java))
             true
         }
 
@@ -332,9 +325,8 @@ class ChatActivity : AppCompatActivity() {
     private companion object {
         const val MENU_MEMORY = 1
         const val MENU_MODELS = 2
-        const val MENU_CAMERA = 3
-        const val MENU_SETTINGS = 4
-        const val MENU_HISTORY = 5
-        const val MENU_CLEAR = 6
+        const val MENU_SETTINGS = 3
+        const val MENU_HISTORY = 4
+        const val MENU_CLEAR = 5
     }
 }

@@ -50,11 +50,19 @@ jobs:
         id: apk
         run: |
           set -euo pipefail
-          src=$(find app/build/outputs/apk/debug -name "*.apk" | head -n1)
+          # ABI splits (see app/build.gradle.kts) produce one APK per ABI
+          # instead of a universal one carrying both native library sets —
+          # arm64-v8a is what every phone worth running a model on actually
+          # uses, so that is the one worth handing someone directly. The
+          # x86_64 split still gets built (it's what the smoke-test job
+          # installs onto the emulator) but is not the release asset.
+          src=$(find app/build/outputs/apk/debug -name "*arm64-v8a*.apk" | head -n1)
           out="local-ai-studio-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
           ls -la "$out"
+          echo "--- all split outputs ---"
+          find app/build/outputs/apk/debug -name "*.apk" -exec ls -la {} \;
 
       - uses: actions/upload-artifact@v4
         with:
