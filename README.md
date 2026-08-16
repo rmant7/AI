@@ -13,8 +13,9 @@
 ## Состав репозитория
 
 ```
-docs/           архитектура (12 документов, читать по порядку)
-core/           контракты и логика ядра на Kotlin, с тестами
+docs/           архитектура (13 документов, читать по порядку)
+core/           ядро: контракты, оркестратор, память, RAG, пайплайны
+openai/         runtime поверх OpenAI-совместимого API (Ollama, llama-server)
 pipelines/      готовые пайплайны в JSON
 registry/       пример каталога моделей
 ```
@@ -35,6 +36,7 @@ registry/       пример каталога моделей
 | [10 — Стек и план](docs/10-stack-and-roadmap.md) | что берём готовым, MVP, риски |
 | [11 — UI](docs/11-ui.md) | экраны |
 | [12 — Audio Engine](docs/12-audio.md) | захват, VAD, жизненный цикл реплики, параметры whisper |
+| [13 — Orchestrator](docs/13-orchestrator.md) | путь запроса целиком, выбор модели, что видно наружу |
 
 ## Модуль core
 
@@ -56,20 +58,45 @@ registry/       пример каталога моделей
 | `context/ContextEngine` | сборка промпта под бюджет токенов с приоритетами и отчётом об отброшенном |
 | `router/CapabilityRouter` | запрос → список capability и стадий |
 | `pipeline/*` | JSON-схема графа, валидатор, исполнитель |
+| `engine/Orchestrator` | запрос → маршрут → граф → исполнение → ответ с трассой |
+| `engine/PipelineBuilder` | маршрут роутера превращается в граф: чат идёт тем же путём, что и пайплайн |
+| `engine/ModelSelector` | какая установленная модель закрывает capability на этом устройстве |
+| `engine/NodeExecutors` | стадии графа поверх runtime, памяти, RAG и контекста |
+| `knowledge/LocalKnowledgeProvider` | parse → chunk → embed → cosine → rerank |
+| `memory/InMemoryMemoryProvider` | working / episodic / semantic без внешних зависимостей |
 
 Android SDK не нужен — это обычный JVM-модуль, что позволяет отлаживать
 архитектуру до появления UI.
 
+## Модуль openai
+
+`OpenAiRuntime` — реализация `ModelRuntime` поверх OpenAI-совместимого API
+(Ollama, llama-server): генерация со стримингом, эмбеддинги, транскрипция
+(multipart), отмена, разбор ошибок сервера. Зависимостей, кроме JDK-клиента и
+kotlinx-serialization, нет.
+
+Это режим разработки из [docs/10](docs/10-stack-and-roadmap.md): те же роутер,
+пайплайны и контекст, что пойдут на телефон, отлаживаются на десктопном железе.
+На устройстве меняется только зарегистрированный runtime.
+
+```kotlin
+val runtime = OpenAiRuntime(OpenAiConfig(baseUrl = "http://localhost:11434/v1"))
+val manager = RuntimeManager(budgetBytes = 1_000_000, runtimes = mapOf(REMOTE_OPENAI to runtime))
+val answer = orchestrator.handle(UserRequest(conversationId = "dev", text = "привет"))
+```
+
 ## Сборка и тесты
 
 ```bash
-./gradlew :core:test
+./gradlew test
 ```
 
-77 тестов: подбор моделей под устройство, вытеснение из памяти, сборка
-контекста, маршрутизация, валидация и исполнение пайплайнов, VAD и жизненный
-цикл реплики, выбор артефакта модели. Тест `RepositoryAssetsTest` проверяет,
-что JSON в `pipelines/` и `registry/` не разошёлся с кодом.
+137 тестов: подбор моделей под устройство, вытеснение из памяти, сборка
+контекста, маршрутизация, построение и исполнение графов, чанкинг и векторный
+поиск, память, VAD и жизненный цикл реплики, выбор артефакта модели.
+`RepositoryAssetsTest` проверяет, что JSON в `pipelines/` и `registry/` не
+разошёлся с кодом, а `:openai` гоняет runtime против настоящего HTTP-сервера,
+включая сквозной прогон «голос → расшифровка → память → ответ».
 
 ## Откуда взяты числа
 
@@ -82,6 +109,7 @@ whisper.cpp на Android (`WhisperTranscriber`, ветка
 
 ## Статус
 
-Этап 0 из плана в [docs/10](docs/10-stack-and-roadmap.md): зафиксированы
-контракты и ядро логики. Реализации runtime, Android UI и хранилищ — следующие
-этапы.
+Этапы 0 и 1 из плана в [docs/10](docs/10-stack-and-roadmap.md): зафиксированы
+контракты, собрано ядро и оркестратор, запрос проходит систему целиком против
+OpenAI-совместимого эндпоинта. Дальше — llama.cpp/ASR на устройстве, Android UI
+и постоянные хранилища.

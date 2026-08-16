@@ -64,6 +64,7 @@
 | Сборка контекста | `ContextEngine` | `core/src/main/kotlin/ai/localstudio/core/context/ContextEngine.kt` |
 | Маршрутизация | `CapabilityRouter` | `core/src/main/kotlin/ai/localstudio/core/router/CapabilityRouter.kt` |
 | Пайплайны | `PipelineSpec`, `PipelineEngine` | `core/src/main/kotlin/ai/localstudio/core/pipeline/` |
+| Оркестратор | `Orchestrator`, `PipelineBuilder`, `ModelSelector` | `core/src/main/kotlin/ai/localstudio/core/engine/` |
 
 ## Три опоры
 
@@ -126,4 +127,5 @@ Context Engine.
 позволяет отлаживать архитектуру до появления UI.
 
 Дальше: [02-capabilities.md](02-capabilities.md) ·
+[13-orchestrator.md](13-orchestrator.md) ·
 [10-stack-and-roadmap.md](10-stack-and-roadmap.md) · [12-audio.md](12-audio.md)
