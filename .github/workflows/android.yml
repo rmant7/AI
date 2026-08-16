@@ -10,6 +10,12 @@ on:
 permissions:
   contents: write
 
+# Without pipefail a `... | tee log` step reports tee's exit code, which turns a
+# failing build into a green job. That happened once; hence this.
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -137,7 +143,9 @@ jobs:
             echo "sha: ${GITHUB_SHA}"
             echo "job status: ${{ job.status }}"
             echo "---"
-            grep -E "FAILED|PASSED|tests? completed|BUILD (SUCCESSFUL|FAILED)|Execution failed|^\s+> |Error|error:" smoke.log 2>/dev/null | tail -60 || echo "no smoke log"
+            grep -E "FAILED|PASSED|tests? completed|BUILD (SUCCESSFUL|FAILED)|Execution failed|^\s+> |Error|error:" smoke.log 2>/dev/null | tail -40 || echo "no smoke log"
+            echo "--- failures ---"
+            grep -h -A6 "<failure" app/build/outputs/androidTest-results/connected/*.xml 2>/dev/null | head -60 || echo "no test result xml"
           } > /tmp/smoke/status.txt
           cd /tmp/smoke
           git init -q .

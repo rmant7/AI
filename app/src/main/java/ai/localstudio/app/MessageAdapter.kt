@@ -23,6 +23,9 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
 
     private val messages = mutableListOf<Message>()
 
+    /** Read-only view of what is on screen — used by the instrumented smoke test. */
+    fun messages(): List<Message> = messages.toList()
+
     class Holder(val binding: ItemMessageBinding) : RecyclerView.ViewHolder(binding.root)
 
     fun add(message: Message) {

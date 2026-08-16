@@ -1,11 +1,11 @@
 package ai.localstudio.app
 
+import android.widget.EditText
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
-import androidx.test.espresso.action.ViewActions.click
-import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
-import androidx.test.espresso.action.ViewActions.typeText
+import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -20,6 +20,12 @@ import org.junit.runner.RunWith
  * With no endpoint configured the stub runtime answers, so this exercises the
  * real path — router, pipeline builder, validator, model selection, context
  * assembly, memory — on a real Android runtime, with no network involved.
+ *
+ * The chat is driven by setting the field and clicking the button directly
+ * rather than through Espresso's typing: Espresso synchronises on an idle main
+ * looper, and this screen deliberately keeps an indeterminate progress bar
+ * animating while the pipeline runs. Driving the widgets on the main thread
+ * tests the same behaviour without fighting that.
  */
 @RunWith(AndroidJUnit4::class)
 class ChatSmokeTest {
@@ -28,28 +34,46 @@ class ChatSmokeTest {
     val activityRule = ActivityScenarioRule(ChatActivity::class.java)
 
     @Test
-    fun sending_a_message_produces_an_answer() {
-        onView(withId(R.id.input)).perform(typeText("что ты умеешь?"), closeSoftKeyboard())
-        onView(withId(R.id.sendButton)).perform(click())
-
-        // Espresso does not know about the coroutine that runs the pipeline, so
-        // the adapter is polled rather than assumed to be up to date.
-        val messages = await(timeoutMs = 30_000) { activity ->
-            activity.findViewById<RecyclerView>(R.id.messages).adapter?.itemCount ?: 0
-        }
-
-        assertTrue("expected the question and an answer, got $messages message(s)", messages >= 2)
+    fun the_chat_screen_renders() {
+        onView(withId(R.id.input)).check(matches(isDisplayed()))
+        onView(withId(R.id.sendButton)).check(matches(isDisplayed()))
+        onView(withId(R.id.statusText)).check(matches(isDisplayed()))
     }
 
-    private fun await(timeoutMs: Long, read: (ChatActivity) -> Int): Int {
+    @Test
+    fun sending_a_message_produces_an_answer() {
+        activityRule.scenario.onActivity { activity ->
+            activity.findViewById<EditText>(R.id.input).setText("что ты умеешь?")
+            activity.findViewById<android.view.View>(R.id.sendButton).performClick()
+        }
+
+        val messages = awaitMessages(timeoutMs = 60_000)
+        assertTrue("expected the question and an answer, got $messages message(s)", messages >= 2)
+
+        var last: Message? = null
+        activityRule.scenario.onActivity { activity ->
+            val adapter = activity.findViewById<RecyclerView>(R.id.messages).adapter as MessageAdapter
+            last = adapter.messages().lastOrNull()
+        }
+
+        val answer = last
+        assertTrue("no answer was rendered", answer != null)
+        assertTrue("the pipeline reported an error: ${answer?.body}", answer?.isError == false)
+        assertTrue("the answer is empty", !answer?.body.isNullOrBlank())
+        assertTrue("the answer carries no provenance", !answer?.details.isNullOrBlank())
+    }
+
+    private fun awaitMessages(timeoutMs: Long): Int {
         val deadline = System.currentTimeMillis() + timeoutMs
-        var value = 0
+        var count = 0
         while (System.currentTimeMillis() < deadline) {
-            activityRule.scenario.onActivity { value = read(it) }
-            if (value >= 2) return value
+            activityRule.scenario.onActivity { activity ->
+                count = activity.findViewById<RecyclerView>(R.id.messages).adapter?.itemCount ?: 0
+            }
+            if (count >= 2) return count
             Thread.sleep(250)
         }
-        return value
+        return count
     }
 }
 
