@@ -46,9 +46,24 @@ fun interface TokenCounter {
  * Approximation used until a real tokenizer for the selected model is wired in.
  * Deliberately pessimistic: overestimating tokens truncates context, whereas
  * underestimating overflows it mid-generation.
+ *
+ * A flat 4-chars-per-token rule is an English-text average; most tokenizers
+ * spend closer to 1-2 characters per token on Cyrillic (and most other
+ * non-Latin scripts), so counting Russian text at the same rate as English
+ * underestimated it by roughly half. That gap is exactly what let an
+ * assembled context look like it fit the budget while the model's real
+ * tokenizer still overflowed the context window — a silent generation
+ * failure a Russian-speaking user would just see as "the model doesn't work".
  */
 object HeuristicTokenCounter : TokenCounter {
-    override fun count(text: String): Int = (text.length + 3) / 4
+    override fun count(text: String): Int {
+        var asciiChars = 0
+        var wideChars = 0
+        for (ch in text) {
+            if (ch.code < 128) asciiChars++ else wideChars++
+        }
+        return (asciiChars + 3) / 4 + (wideChars + 1) / 2
+    }
 }
 
 /**

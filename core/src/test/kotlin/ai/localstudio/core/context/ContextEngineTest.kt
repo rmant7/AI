@@ -58,6 +58,21 @@ class ContextEngineTest {
     }
 
     @Test
+    fun `cyrillic text is not undercounted the way a flat 4-chars-per-token rule would`() {
+        // Reproduces the failure this heuristic used to invite: a Russian
+        // conversation that "fit" the estimated budget while the model's
+        // real tokenizer still overflowed the actual context window, which
+        // surfaced on-device as generation silently refusing to run.
+        val cyrillic = "а".repeat(400)
+        val ascii = "a".repeat(400)
+
+        assertTrue(
+            HeuristicTokenCounter.count(cyrillic) > HeuristicTokenCounter.count(ascii),
+            "Cyrillic text of the same length must not be estimated as cheaper than ASCII",
+        )
+    }
+
+    @Test
     fun `low-priority fragments are dropped, not silently lost`() {
         val big = "a".repeat(4 * 600) // ~600 tokens with the heuristic counter
         val assembled = engine.assemble(

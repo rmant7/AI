@@ -9,6 +9,7 @@
 #include <android/log.h>
 #include <sys/resource.h>
 
+#include <algorithm>
 #include <atomic>
 #include <string>
 #include <vector>
@@ -218,9 +219,25 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     tokens.resize(count);
 
     const uint32_t contextSize = llama_n_ctx(session->ctx);
-    if ((uint32_t) count >= contextSize) {
-        LOGE("prompt of %d tokens does not fit a context of %u", count, contextSize);
-        return -4;
+    // The context engine above this layer estimates tokens with a heuristic,
+    // not this model's real tokenizer — for Cyrillic text especially, that
+    // estimate can undercount enough that an assembled prompt looks like it
+    // fits and then does not. Failing outright here turned that estimation
+    // gap into "the model doesn't respond, no explanation" for exactly the
+    // conversations most likely to be long: many turns, attached documents,
+    // recalled memory. Truncating to the most recent tokens — the ones most
+    // likely to matter for the answer — keeps the turn alive instead.
+    const uint32_t reserved = std::min<uint32_t>((uint32_t) std::max(maxTokens, 0), contextSize / 4);
+    if ((uint32_t) count + reserved >= contextSize) {
+        const int32_t keep = (int32_t) contextSize - (int32_t) reserved - 1;
+        if (keep <= 0) return -4; // context too small to hold any prompt at all
+        const int32_t drop = count - keep;
+        if (drop > 0) {
+            tokens.erase(tokens.begin(), tokens.begin() + drop);
+            LOGI("prompt of %d tokens truncated to %d to fit context of %u",
+                 count, keep, contextSize);
+            count = keep;
+        }
     }
 
     if (llama_decode(session->ctx, llama_batch_get_one(tokens.data(), count)) != 0) {
