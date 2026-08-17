@@ -21,6 +21,12 @@ data class CloudProvider(
     val keyHint: String,
     val needsKey: Boolean = true,
     val editableUrl: Boolean = false,
+    /**
+     * Model IDs actually reachable on this provider's free tier, offered as
+     * tap-to-fill suggestions next to the model field — which stays editable,
+     * since this list will drift out of date before the code does.
+     */
+    val freeModels: List<String> = emptyList(),
 )
 
 object CloudProviders {
@@ -51,35 +57,65 @@ object CloudProviders {
             title = "Google Gemini",
             baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
             defaultModel = "gemini-3.7-flash",
-            keyHint = "Ключ: aistudio.google.com → Get API key",
+            keyHint = "Ключ: aistudio.google.com → Get API key. Бесплатный уровень — только Flash/Flash-Lite; Pro — платно.",
+            freeModels = listOf(
+                "gemini-3.7-flash",
+                "gemini-3.5-flash",
+                "gemini-3.1-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash-lite",
+            ),
         ),
         CloudProvider(
             id = "mistral",
             title = "Mistral",
             baseUrl = "https://api.mistral.ai/v1",
             defaultModel = "mistral-small-latest",
-            keyHint = "Ключ: console.mistral.ai → API keys",
+            keyHint = "Ключ: console.mistral.ai → API keys. Бесплатный уровень Experiment даёт доступ ко всем моделям с ограничением по скорости.",
+            freeModels = listOf(
+                "mistral-small-latest",
+                "devstral-small-latest",
+                "ministral-8b-latest",
+                "mistral-large-latest",
+                "codestral-latest",
+            ),
         ),
         CloudProvider(
             id = "groq",
             title = "Groq",
             baseUrl = "https://api.groq.com/openai/v1",
-            defaultModel = "llama-3.3-70b-versatile",
-            keyHint = "Ключ: console.groq.com → API keys",
+            defaultModel = "openai/gpt-oss-120b",
+            keyHint = "Ключ: console.groq.com → API keys. Бесплатно, без карты — лимит по запросам в день.",
+            freeModels = listOf(
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.6-27b",
+                "meta-llama/llama-4-scout-17b-16e-instruct",
+                "meta-llama/llama-4-maverick-17b-128e-instruct",
+            ),
         ),
         CloudProvider(
             id = "xai",
             title = "xAI Grok",
             baseUrl = "https://api.x.ai/v1",
-            defaultModel = "grok-2-latest",
-            keyHint = "Ключ: console.x.ai",
+            defaultModel = "grok-4-fast",
+            keyHint = "Ключ: console.x.ai. Бесплатных моделей нет — при регистрации дают \$25 кредита, дальше платно.",
+            freeModels = listOf(
+                "grok-4-fast",
+                "grok-4.1-fast",
+                "grok-code-fast-1",
+            ),
         ),
         CloudProvider(
             id = "openrouter",
             title = "OpenRouter",
             baseUrl = "https://openrouter.ai/api/v1",
             defaultModel = "meta-llama/llama-3.3-70b-instruct:free",
-            keyHint = "Ключ: openrouter.ai → Keys. Модели с суффиксом :free бесплатны.",
+            keyHint = "Ключ: openrouter.ai → Keys. Модели с суффиксом :free бесплатны, но список часто меняется.",
+            freeModels = listOf(
+                "meta-llama/llama-3.3-70b-instruct:free",
+                "qwen/qwen-2.5-7b-instruct:free",
+            ),
         ),
         CloudProvider(
             id = "custom",
@@ -89,6 +125,7 @@ object CloudProviders {
             keyHint = "Адрес OpenAI-совместимого сервера в вашей сети.",
             needsKey = false,
             editableUrl = true,
+            freeModels = listOf("qwen3:8b", "llama3.1:8b", "gemma3:12b", "deepseek-r1:8b"),
         ),
     )
 

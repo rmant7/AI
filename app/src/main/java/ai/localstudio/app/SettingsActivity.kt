@@ -103,6 +103,17 @@ class SettingsActivity : AppCompatActivity() {
         binding.endpointInput.setText(settings.customEndpoint.ifBlank { provider.baseUrl })
         binding.apiKeyInput.setText(settings.apiKey)
         binding.chatModelInput.setText(settings.chatModel)
+
+        binding.chatModelInput.setAdapter(
+            ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, provider.freeModels),
+        )
+        binding.chatModelInput.setOnClickListener { binding.chatModelInput.showDropDown() }
+        binding.chatModelHint.text = if (provider.freeModels.isEmpty()) {
+            ""
+        } else {
+            getString(R.string.settings_chat_model_hint)
+        }
+        binding.chatModelHint.visibility = if (provider.freeModels.isEmpty()) View.GONE else View.VISIBLE
     }
 
     private fun save() {

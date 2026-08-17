@@ -87,12 +87,21 @@
             android:text="@string/settings_chat_model"
             android:textStyle="bold" />
 
-        <EditText
+        <AutoCompleteTextView
             android:id="@+id/chatModelInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:autofillHints="no"
+            android:completionThreshold="0"
             android:inputType="text" />
+
+        <TextView
+            android:id="@+id/chatModelHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:text="@string/settings_chat_model_hint"
+            android:textSize="12sp" />
 
         <TextView
             android:layout_width="match_parent"

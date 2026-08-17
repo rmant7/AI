@@ -39,6 +39,7 @@
     <string name="settings_endpoint_hint">http://192.168.1.10:11434/v1</string>
     <string name="settings_api_key">API-ключ</string>
     <string name="settings_chat_model">Модель для текста</string>
+    <string name="settings_chat_model_hint">Нажмите на поле, чтобы увидеть модели этого провайдера — можно также ввести своё название вручную.</string>
     <string name="settings_asr_model">Модель для речи</string>
     <string name="settings_save">Сохранить</string>
     <string name="settings_explainer">Выберите, кто генерирует ответ. Для облачных провайдеров нужен только API-ключ — никаких серверов поднимать не надо. Маршрутизация, сборка контекста и память от выбора не зависят.</string>
