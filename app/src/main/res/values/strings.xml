@@ -75,10 +75,12 @@
     <string name="model_fit_heavy">тяжёлая, но пойдёт</string>
     <string name="model_fit_too_large">очень большая</string>
     <string name="model_catalog_stale">⚠ источник недоступен (проверено при запуске)</string>
+    <string name="model_ram_warning">Эта модель превышает бюджет памяти для вашего устройства. Скорее всего система принудительно закроет приложение во время генерации ответа — без сообщения об ошибке, просто закроется. Продолжить всё равно?</string>
+    <string name="model_ram_warning_continue">Всё равно использовать</string>
     <string name="dialog_ok">Понятно</string>
     <string name="dialog_cancel">Отмена</string>
     <string name="settings_ram">Бюджет памяти на модель, % от общей RAM</string>
-    <string name="settings_ram_hint">90</string>
+    <string name="settings_ram_hint">60</string>
     <string name="settings_hf_token">Токен Hugging Face (для закрытых репозиториев)</string>
     <string name="models_device">Устройство</string>
 

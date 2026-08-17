@@ -50,9 +50,17 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putString(KEY_WHISPER_MODEL, value).apply()
 
     /**
-     * Share of total RAM a model may claim, in percent. Defaults high: this is
-     * an app whose whole purpose is running a model, and on a 16 GB phone the
-     * cautious default kept every worthwhile model out.
+     * Share of total RAM a model may claim, in percent.
+     *
+     * Used to default to 90: reasoned as "this app's whole purpose is running
+     * a model, and a cautious default kept every worthwhile model off a
+     * 16 GB phone" — true, but the same 90% on a 6 GB phone budgets over
+     * 5 GB to one model with the OS, launcher and everything else fighting
+     * over what's left. That is not a graceful failure: Android's low-memory
+     * killer terminates the process outright, no exception, no dialog — a
+     * silent crash right after sending a message is exactly what that looks
+     * like. 60% still lets a 16 GB phone reach for a large model; it no
+     * longer waves a 6 GB phone into near-certain death.
      */
     var ramBudgetPercent: Int
         get() = prefs.getInt(KEY_RAM_PERCENT, DEFAULT_RAM_PERCENT).coerceIn(10, 95)
@@ -132,7 +140,7 @@ class Settings(context: Context) {
         const val KEY_TOP_K = "topK"
         const val KEY_REPEAT_PENALTY = "repeatPenalty"
         const val KEY_CONTEXT_TOKENS = "contextTokens"
-        const val DEFAULT_RAM_PERCENT = 90
+        const val DEFAULT_RAM_PERCENT = 60
         const val DEFAULT_ASR_MODEL = "whisper-1"
         const val DEFAULT_TEMPERATURE = 0.7f
         const val DEFAULT_TOP_P = 0.95f

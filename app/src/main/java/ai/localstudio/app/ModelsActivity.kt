@@ -118,13 +118,38 @@ class ModelsActivity : AppCompatActivity() {
         }
     }
 
-    /** Switching the provider is what makes the downloaded model answer. */
+    /**
+     * Switching the provider is what makes the downloaded model answer.
+     *
+     * A model that doesn't fit the RAM budget isn't refused outright — see
+     * the class doc on why — but it fails in a way a confirmation is worth
+     * interrupting for: Android's low-memory killer terminates the process
+     * outright once it's loaded and generating, no exception, no dialog, just
+     * gone. That is a worse experience than one extra tap for anyone who
+     * would have picked a smaller model had they known.
+     */
     private fun useLocally(seed: LocalModelSeed) {
+        if (!fitsRamBudget(seed, container.device)) {
+            AlertDialog.Builder(this)
+                .setTitle(seed.title)
+                .setMessage(R.string.model_ram_warning)
+                .setPositiveButton(R.string.model_ram_warning_continue) { _, _ -> switchToLocal(seed) }
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .show()
+            return
+        }
+        switchToLocal(seed)
+    }
+
+    private fun switchToLocal(seed: LocalModelSeed) {
         container.settings.providerId = CloudProviders.LOCAL.id
         container.settings.chatModel = seed.id
         Toast.makeText(this, getString(R.string.models_switched_chat, seed.title), Toast.LENGTH_SHORT).show()
         render()
     }
+
+    private fun fitsRamBudget(seed: LocalModelSeed, device: DeviceProfile): Boolean =
+        seed.approxSizeBytes == 0L || seed.approxSizeBytes * 13 / 10 <= device.usableRamBytes
 
     // ── Voice models ───────────────────────────────────────────────────────
 
@@ -178,8 +203,7 @@ class ModelsActivity : AppCompatActivity() {
             val state = container.downloads.stateOf(seed)
             val selected = container.settings.providerId == CloudProviders.LOCAL.id &&
                 container.settings.chatModel == seed.id
-            val fitsBudget = seed.approxSizeBytes == 0L ||
-                seed.approxSizeBytes * 13 / 10 <= device.usableRamBytes
+            val fitsBudget = fitsRamBudget(seed, device)
             // Checked at the last app launch, not at render time — this is
             // what "недоступен" means below: at least one source 404'd or
             // was gated the last time this catalogue was refreshed, before
