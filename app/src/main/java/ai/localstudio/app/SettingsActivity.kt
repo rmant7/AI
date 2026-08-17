@@ -57,16 +57,16 @@ class SettingsActivity : AppCompatActivity() {
         binding.asrModelInput.setText(settings.speechModel)
         binding.ramInput.setText(settings.ramBudgetPercent.toString())
         binding.hfTokenInput.setText(settings.huggingFaceToken)
-        binding.temperatureInput.setText(settings.temperature.toString())
-        binding.topPInput.setText(settings.topP.toString())
-        binding.topKInput.setText(settings.topK.toString())
-        binding.repeatPenaltyInput.setText(settings.repeatPenalty.toString())
-        binding.contextTokensInput.setText(settings.contextTokens.toString())
         showProvider(settings.provider)
 
         binding.saveButton.setOnClickListener { save() }
+        binding.generationSettingsButton.setOnClickListener {
+            startActivity(Intent(this, GenerationSettingsActivity::class.java))
+        }
+        // Voice models live in the Models screen next to the chat models now,
+        // not in a corner of Settings — this only points there.
         binding.whisperManageButton.setOnClickListener {
-            startActivity(Intent(this, WhisperModelsActivity::class.java))
+            startActivity(Intent(this, ModelsActivity::class.java))
         }
 
         lifecycleScope.launch { container.whisperDownloads.state.collect { renderWhisper() } }
@@ -117,12 +117,6 @@ class SettingsActivity : AppCompatActivity() {
         settings.speechModel = binding.asrModelInput.text?.toString().orEmpty()
         binding.ramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.ramBudgetPercent = it }
         settings.huggingFaceToken = binding.hfTokenInput.text?.toString().orEmpty()
-
-        binding.temperatureInput.text?.toString()?.trim()?.toDoubleOrNull()?.let { settings.temperature = it }
-        binding.topPInput.text?.toString()?.trim()?.toDoubleOrNull()?.let { settings.topP = it }
-        binding.topKInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.topK = it }
-        binding.repeatPenaltyInput.text?.toString()?.trim()?.toDoubleOrNull()?.let { settings.repeatPenalty = it }
-        binding.contextTokensInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.contextTokens = it }
 
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
         finish()

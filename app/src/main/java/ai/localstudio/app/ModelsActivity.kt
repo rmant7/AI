@@ -22,25 +22,37 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
+import ai.localstudio.app.whisper.WhisperDownloadState
+import ai.localstudio.app.whisper.WhisperModelSeed
+import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.ModelFit
 import kotlinx.coroutines.launch
 
 /**
- * Every model here can be downloaded — including the ones that do not fit
- * comfortably.
+ * Every model the app can run, grouped by what it is *for* — chat models and
+ * voice models are one catalog under a task switcher, the way Edge Gallery
+ * organises its own. Voice models used to be buried in Settings, which made
+ * them feel like a different kind of thing than the chat models they sit
+ * beside conceptually.
  *
- * The fit label is advice, not a gate: it is the user's device, the user knows
- * what they run on it, and a list where the interesting entries are read-only
- * descriptions is a catalogue of things you cannot have. What the label does is
- * tell them what to expect before a multi-gigabyte download.
+ * Image and agent categories are the reason [Category] is an enum rather than
+ * a boolean: adding one is a new entry and a new row builder, not a rewrite.
+ *
+ * The fit label is advice, not a gate: it is the user's device, and a list
+ * whose interesting entries are read-only descriptions is a catalogue of
+ * things you cannot have. What the label does is set expectations before a
+ * multi-gigabyte download.
  */
 class ModelsActivity : AppCompatActivity() {
 
+    enum class Category { TEXT, VOICE }
+
     private lateinit var binding: ActivityModelsBinding
     private lateinit var container: AppContainer
-    private val adapter = RowAdapter(::onPrimary, ::onSecondary)
+    private val adapter = RowAdapter()
     private val customSeeds = mutableListOf<LocalModelSeed>()
+    private var category = Category.TEXT
 
     // A denial here does not block downloads — it only means the foreground
     // service's progress notification stays invisible, so no fallback is needed.
@@ -58,6 +70,12 @@ class ModelsActivity : AppCompatActivity() {
         binding.models.layoutManager = LinearLayoutManager(this)
         binding.models.adapter = adapter
 
+        binding.categoryToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            category = if (checkedId == R.id.categoryVoice) Category.VOICE else Category.TEXT
+            render()
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -66,6 +84,7 @@ class ModelsActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch { container.downloads.state.collect { render() } }
+        lifecycleScope.launch { container.whisperDownloads.state.collect { render() } }
         render()
     }
 
@@ -79,7 +98,9 @@ class ModelsActivity : AppCompatActivity() {
         return true
     }
 
-    private fun onPrimary(seed: LocalModelSeed) {
+    // ── Text models ────────────────────────────────────────────────────────
+
+    private fun onTextPrimary(seed: LocalModelSeed) {
         when (container.downloads.stateOf(seed)) {
             is DownloadState.Installed -> useLocally(seed)
             is DownloadState.Running, is DownloadState.Resolving -> container.downloads.cancel(seed)
@@ -87,14 +108,9 @@ class ModelsActivity : AppCompatActivity() {
         }
     }
 
-    private fun onSecondary(seed: LocalModelSeed) {
+    private fun onTextSecondary(seed: LocalModelSeed) {
         when (val state = container.downloads.stateOf(seed)) {
-            is DownloadState.Failed -> AlertDialog.Builder(this)
-                .setTitle(seed.title)
-                .setMessage(state.message)
-                .setPositiveButton("Понятно", null)
-                .show()
-
+            is DownloadState.Failed -> showDetails(seed.title, state.message)
             else -> {
                 container.downloads.delete(seed)
                 render()
@@ -106,40 +122,160 @@ class ModelsActivity : AppCompatActivity() {
     private fun useLocally(seed: LocalModelSeed) {
         container.settings.providerId = CloudProviders.LOCAL.id
         container.settings.chatModel = seed.id
-        Toast.makeText(this, "Чат переключён на ${seed.title}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.models_switched_chat, seed.title), Toast.LENGTH_SHORT).show()
         render()
     }
+
+    // ── Voice models ───────────────────────────────────────────────────────
+
+    private fun onVoicePrimary(seed: WhisperModelSeed) {
+        when (container.whisperDownloads.stateOf(seed)) {
+            is WhisperDownloadState.Installed -> useForVoice(seed)
+            is WhisperDownloadState.Running -> container.whisperDownloads.cancel(seed)
+            else -> container.whisperDownloads.start(seed)
+        }
+    }
+
+    private fun onVoiceSecondary(seed: WhisperModelSeed) {
+        when (val state = container.whisperDownloads.stateOf(seed)) {
+            is WhisperDownloadState.Failed -> showDetails(seed.title, state.message)
+            else -> {
+                container.whisperDownloads.delete(seed)
+                render()
+            }
+        }
+    }
+
+    private fun useForVoice(seed: WhisperModelSeed) {
+        container.settings.whisperModelId = seed.id
+        Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
+        render()
+    }
+
+    private fun showDetails(title: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(R.string.dialog_ok, null)
+            .show()
+    }
+
+    // ── Rendering ──────────────────────────────────────────────────────────
 
     private fun render() {
         val device = container.device
         binding.deviceText.text = describeDevice(device)
+        adapter.submit(if (category == Category.VOICE) voiceRows(device) else textRows(device))
+    }
 
-        val rows = mutableListOf<Row>()
-        if (!LlamaBridge.isAvailable) {
-            rows += Row.Header(getString(R.string.model_native_missing))
-        }
-        rows += Row.Header(getString(R.string.models_local_header))
+    private fun textRows(device: DeviceProfile): List<Row> = buildList {
+        if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
+        add(Row.Header(getString(R.string.models_local_header)))
 
         (LocalModels.SEEDS + customSeeds).forEach { seed ->
-            rows += Row.Local(
-                seed = seed,
-                state = container.downloads.stateOf(seed),
-                installedBytes = container.modelStore.installedSize(seed),
-                fit = device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1),
-                fitsBudget = seed.approxSizeBytes == 0L ||
-                    seed.approxSizeBytes * 13 / 10 <= device.usableRamBytes,
-                selected = container.settings.providerId == CloudProviders.LOCAL.id &&
-                    container.settings.chatModel == seed.id,
+            val state = container.downloads.stateOf(seed)
+            val selected = container.settings.providerId == CloudProviders.LOCAL.id &&
+                container.settings.chatModel == seed.id
+            val fitsBudget = seed.approxSizeBytes == 0L ||
+                seed.approxSizeBytes * 13 / 10 <= device.usableRamBytes
+
+            add(
+                Row.Model(
+                    title = seed.title,
+                    subtitle = buildString {
+                        append(seed.paramsLabel)
+                        if (seed.approxSizeBytes > 0) append(" · ~${size(seed.approxSizeBytes)}")
+                        append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
+                        if (!fitsBudget) append(" · превышает бюджет памяти")
+                        append("\n").append(seed.note)
+                    },
+                    selected = selected,
+                    status = textStatus(state, container.modelStore.installedSize(seed)),
+                    progress = (state as? DownloadState.Running)?.progress?.fraction,
+                    indeterminate = state is DownloadState.Resolving,
+                    primaryLabel = when (state) {
+                        is DownloadState.Installed ->
+                            getString(if (selected) R.string.model_installed else R.string.model_use)
+                        is DownloadState.Running, is DownloadState.Resolving -> getString(R.string.model_cancel)
+                        is DownloadState.Failed -> getString(R.string.model_retry)
+                        DownloadState.Idle -> getString(R.string.model_download)
+                    },
+                    primaryEnabled = !(state is DownloadState.Installed && selected),
+                    secondaryLabel = when (state) {
+                        is DownloadState.Failed -> getString(R.string.model_details)
+                        is DownloadState.Installed -> getString(R.string.model_delete)
+                        else -> null
+                    },
+                    onPrimary = { onTextPrimary(seed) },
+                    onSecondary = { onTextSecondary(seed) },
+                ),
             )
         }
+        add(Row.Custom)
+    }
 
-        rows += Row.Custom
-        adapter.submit(rows)
+    private fun voiceRows(device: DeviceProfile): List<Row> = buildList {
+        add(Row.Header(getString(R.string.models_voice_header)))
+        val selectedSeed = container.whisperStore.installedSeed(container.settings.whisperModelId)
+        val anyRunning = container.whisperDownloads.state.value.values
+            .any { it is WhisperDownloadState.Running }
+
+        WhisperModels.SEEDS.forEach { seed ->
+            val state = container.whisperDownloads.stateOf(seed)
+            val selected = selectedSeed?.id == seed.id
+            val blocked = anyRunning && state is WhisperDownloadState.Idle
+
+            add(
+                Row.Model(
+                    title = seed.title,
+                    subtitle = "~${size(seed.approxSizeBytes)} · ${fitLabel(device.classifyFit(seed.approxSizeBytes))}",
+                    selected = selected,
+                    status = when {
+                        state is WhisperDownloadState.Installed -> getString(R.string.model_state_installed)
+                        state is WhisperDownloadState.Running ->
+                            "${state.stage}: ${size(state.progress.bytesDownloaded)} из " +
+                                (if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?")
+                        state is WhisperDownloadState.Failed ->
+                            getString(R.string.model_state_error, state.message.lineSequence().first())
+                        blocked -> getString(R.string.model_state_wait_other)
+                        else -> null
+                    },
+                    progress = (state as? WhisperDownloadState.Running)?.progress?.fraction,
+                    indeterminate = false,
+                    primaryLabel = when (state) {
+                        is WhisperDownloadState.Installed ->
+                            getString(if (selected) R.string.model_installed else R.string.model_use)
+                        is WhisperDownloadState.Running -> getString(R.string.model_cancel)
+                        is WhisperDownloadState.Failed -> getString(R.string.model_retry)
+                        WhisperDownloadState.Idle -> getString(R.string.model_download)
+                    },
+                    primaryEnabled = !(state is WhisperDownloadState.Installed && selected) && !blocked,
+                    secondaryLabel = when (state) {
+                        is WhisperDownloadState.Failed -> getString(R.string.model_details)
+                        is WhisperDownloadState.Installed -> getString(R.string.model_delete)
+                        else -> null
+                    },
+                    onPrimary = { onVoicePrimary(seed) },
+                    onSecondary = { onVoiceSecondary(seed) },
+                ),
+            )
+        }
+        add(Row.Note(getString(R.string.settings_whisper_note)))
+    }
+
+    private fun textStatus(state: DownloadState, installedBytes: Long): String? = when (state) {
+        is DownloadState.Installed -> getString(R.string.model_state_installed) + " · ${size(installedBytes)}"
+        is DownloadState.Resolving -> getString(R.string.model_state_resolving, state.repoId)
+        is DownloadState.Running ->
+            "${state.source}: ${size(state.progress.bytesDownloaded)} из " +
+                (if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?")
+        is DownloadState.Failed -> getString(R.string.model_state_error, state.message.lineSequence().first())
+        DownloadState.Idle -> null
     }
 
     private fun addCustomRepo() {
         val input = android.widget.EditText(this).apply {
-            hint = "owner/repo с GGUF-файлом"
+            hint = getString(R.string.models_custom_input_hint)
             setSingleLine()
         }
         AlertDialog.Builder(this)
@@ -154,42 +290,62 @@ class ModelsActivity : AppCompatActivity() {
                     container.downloads.start(seed)
                     render()
                 } else {
-                    Toast.makeText(this, "Нужен формат owner/repo", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, R.string.models_custom_bad_format, Toast.LENGTH_SHORT).show()
                 }
             }
-            .setNegativeButton("Отмена", null)
+            .setNegativeButton(R.string.dialog_cancel, null)
             .show()
     }
 
     private fun describeDevice(device: DeviceProfile) = buildString {
         append("RAM: ${gb(device.totalRamBytes)} всего, ${gb(device.availableRamBytes)} свободно\n")
         append("Бюджет на модель: ${gb(device.usableRamBytes)} (${container.settings.ramBudgetPercent}% RAM)\n")
-        append("Ядер: ${device.cpuCores} · свободно на диске: ${gb(device.availableStorageBytes)}\n")
-        append("Runtime: ${container.runtimeLabel}")
+        append("Ядер: ${device.cpuCores} · свободно на диске: ${gb(device.availableStorageBytes)}")
     }
 
     private fun gb(bytes: Long): String =
         if (bytes >= 1_000_000_000) "%.1f ГБ".format(bytes / 1_000_000_000.0)
         else "%.0f МБ".format(bytes / 1_000_000.0)
 
+    private fun size(bytes: Long): String =
+        if (bytes >= 1_000_000_000) "%.2f ГБ".format(bytes / 1_000_000_000.0)
+        else "%.0f МБ".format(bytes / 1_000_000.0)
+
+    private fun fitLabel(fit: ModelFit): String = getString(
+        when (fit) {
+            ModelFit.LIGHTWEIGHT -> R.string.model_fit_light
+            ModelFit.RECOMMENDED -> R.string.model_fit_recommended
+            ModelFit.ADVANCED -> R.string.model_fit_heavy
+            ModelFit.TOO_LARGE -> R.string.model_fit_too_large
+        },
+    )
+
+    /**
+     * One row shape for both categories: the screen differs in what it lists,
+     * not in how a listing behaves, so the holder takes already-resolved
+     * labels and callbacks rather than branching on model type itself.
+     */
     sealed interface Row {
         data class Header(val title: String) : Row
-        data class Local(
-            val seed: LocalModelSeed,
-            val state: DownloadState,
-            val installedBytes: Long,
-            val fit: ModelFit,
-            val fitsBudget: Boolean,
-            val selected: Boolean,
-        ) : Row
-
+        data class Note(val text: String) : Row
         data object Custom : Row
+
+        data class Model(
+            val title: String,
+            val subtitle: String,
+            val selected: Boolean,
+            val status: String?,
+            val progress: Float?,
+            val indeterminate: Boolean,
+            val primaryLabel: String,
+            val primaryEnabled: Boolean,
+            val secondaryLabel: String?,
+            val onPrimary: () -> Unit,
+            val onSecondary: () -> Unit,
+        ) : Row
     }
 
-    private inner class RowAdapter(
-        private val onPrimary: (LocalModelSeed) -> Unit,
-        private val onSecondary: (LocalModelSeed) -> Unit,
-    ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+    private inner class RowAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
         private var rows: List<Row> = emptyList()
 
@@ -201,37 +357,40 @@ class ModelsActivity : AppCompatActivity() {
         override fun getItemCount(): Int = rows.size
 
         override fun getItemViewType(position: Int): Int = when (rows[position]) {
-            is Row.Header -> TYPE_HEADER
-            is Row.Local -> TYPE_LOCAL
-            Row.Custom -> TYPE_CUSTOM
+            is Row.Header, is Row.Note -> TYPE_HEADER
+            is Row.Model, Row.Custom -> TYPE_MODEL
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
             val inflater = LayoutInflater.from(parent.context)
-            return when (viewType) {
-                TYPE_LOCAL, TYPE_CUSTOM -> LocalHolder(ItemLocalModelBinding.inflate(inflater, parent, false))
-                else -> HeaderHolder(ItemModelBinding.inflate(inflater, parent, false))
+            return if (viewType == TYPE_MODEL) {
+                ModelHolder(ItemLocalModelBinding.inflate(inflater, parent, false))
+            } else {
+                HeaderHolder(ItemModelBinding.inflate(inflater, parent, false))
             }
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
             when (val row = rows[position]) {
-                is Row.Header -> (holder as HeaderHolder).bind(row.title)
-                is Row.Local -> (holder as LocalHolder).bind(row, onPrimary, onSecondary)
-                Row.Custom -> (holder as LocalHolder).bindCustom { addCustomRepo() }
+                is Row.Header -> (holder as HeaderHolder).bind(row.title, bold = true)
+                is Row.Note -> (holder as HeaderHolder).bind(row.text, bold = false)
+                is Row.Model -> (holder as ModelHolder).bind(row)
+                Row.Custom -> (holder as ModelHolder).bindCustom { addCustomRepo() }
             }
         }
     }
 
     private class HeaderHolder(val binding: ItemModelBinding) : RecyclerView.ViewHolder(binding.root) {
-        fun bind(title: String) {
+        fun bind(title: String, bold: Boolean) {
             binding.modelName.text = title
+            binding.modelName.setTypeface(null, if (bold) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+            binding.modelName.textSize = if (bold) 15f else 12f
             binding.modelSpecs.visibility = View.GONE
             binding.modelVerdict.visibility = View.GONE
         }
     }
 
-    private class LocalHolder(val binding: ItemLocalModelBinding) : RecyclerView.ViewHolder(binding.root) {
+    private class ModelHolder(val binding: ItemLocalModelBinding) : RecyclerView.ViewHolder(binding.root) {
 
         fun bindCustom(onClick: () -> Unit) {
             val context = binding.root.context
@@ -245,89 +404,29 @@ class ModelsActivity : AppCompatActivity() {
             binding.localPrimaryButton.setOnClickListener { onClick() }
         }
 
-        fun bind(
-            row: Row.Local,
-            onPrimary: (LocalModelSeed) -> Unit,
-            onSecondary: (LocalModelSeed) -> Unit,
-        ) {
-            val context = binding.root.context
-            binding.localTitle.text = row.seed.title + if (row.selected) "  ✓" else ""
-            binding.localSubtitle.text = buildString {
-                append(row.seed.paramsLabel)
-                if (row.seed.approxSizeBytes > 0) append(" · ~${size(row.seed.approxSizeBytes)}")
-                append(" · ").append(fitLabel(row.fit))
-                if (!row.fitsBudget) append(" · превышает бюджет памяти")
-                append("\n").append(row.seed.note)
-                append("\nисточники: ").append(row.seed.repoIds.joinToString(", "))
-            }
+        fun bind(row: Row.Model) {
+            binding.localTitle.text = if (row.selected) "${row.title}  ✓" else row.title
+            binding.localSubtitle.text = row.subtitle
 
-            var progressVisible = false
-            var secondaryVisible = false
-            var secondaryText = context.getString(R.string.model_delete)
-            var primaryText = context.getString(R.string.model_download)
+            binding.localStatus.text = row.status.orEmpty()
+            binding.localStatus.visibility = if (row.status.isNullOrBlank()) View.GONE else View.VISIBLE
 
-            binding.localStatus.text = when (val state = row.state) {
-                is DownloadState.Installed -> {
-                    secondaryVisible = true
-                    primaryText = context.getString(
-                        if (row.selected) R.string.model_installed else R.string.model_use,
-                    )
-                    "Установлена · ${size(row.installedBytes)}"
-                }
+            binding.localProgress.visibility = if (row.progress != null || row.indeterminate) View.VISIBLE else View.GONE
+            binding.localProgress.isIndeterminate = row.indeterminate
+            row.progress?.let { binding.localProgress.progress = (it * 100).toInt() }
 
-                is DownloadState.Resolving -> {
-                    progressVisible = true
-                    primaryText = context.getString(R.string.model_cancel)
-                    "Ищу файл: ${state.repoId}…"
-                }
+            binding.localPrimaryButton.text = row.primaryLabel
+            binding.localPrimaryButton.isEnabled = row.primaryEnabled
+            binding.localPrimaryButton.setOnClickListener { row.onPrimary() }
 
-                is DownloadState.Running -> {
-                    progressVisible = true
-                    primaryText = context.getString(R.string.model_cancel)
-                    binding.localProgress.progress = (state.progress.fraction * 100).toInt()
-                    val total = if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?"
-                    "${state.source}: ${size(state.progress.bytesDownloaded)} из $total"
-                }
-
-                is DownloadState.Failed -> {
-                    secondaryVisible = true
-                    secondaryText = context.getString(R.string.model_details)
-                    primaryText = context.getString(R.string.model_retry)
-                    "Ошибка: " + state.message.lineSequence().first()
-                }
-
-                DownloadState.Idle -> ""
-            }
-
-            binding.localStatus.visibility =
-                if (binding.localStatus.text.isNullOrBlank()) View.GONE else View.VISIBLE
-            binding.localProgress.visibility = if (progressVisible) View.VISIBLE else View.GONE
-            binding.localProgress.isIndeterminate = row.state is DownloadState.Resolving
-            binding.localSecondaryButton.visibility = if (secondaryVisible) View.VISIBLE else View.GONE
-            binding.localSecondaryButton.text = secondaryText
-            binding.localPrimaryButton.text = primaryText
-            binding.localPrimaryButton.isEnabled =
-                !(row.state is DownloadState.Installed && row.selected)
-
-            binding.localPrimaryButton.setOnClickListener { onPrimary(row.seed) }
-            binding.localSecondaryButton.setOnClickListener { onSecondary(row.seed) }
+            binding.localSecondaryButton.visibility = if (row.secondaryLabel == null) View.GONE else View.VISIBLE
+            binding.localSecondaryButton.text = row.secondaryLabel.orEmpty()
+            binding.localSecondaryButton.setOnClickListener { row.onSecondary() }
         }
-
-        private fun fitLabel(fit: ModelFit): String = when (fit) {
-            ModelFit.LIGHTWEIGHT -> "лёгкая"
-            ModelFit.RECOMMENDED -> "рекомендуется"
-            ModelFit.ADVANCED -> "тяжёлая, но пойдёт"
-            ModelFit.TOO_LARGE -> "очень большая"
-        }
-
-        private fun size(bytes: Long): String =
-            if (bytes >= 1_000_000_000) "%.2f ГБ".format(bytes / 1_000_000_000.0)
-            else "%.0f МБ".format(bytes / 1_000_000.0)
     }
 
     private companion object {
         const val TYPE_HEADER = 0
-        const val TYPE_LOCAL = 1
-        const val TYPE_CUSTOM = 2
+        const val TYPE_MODEL = 1
     }
 }

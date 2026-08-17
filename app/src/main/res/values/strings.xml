@@ -19,7 +19,7 @@
     <string name="chat_attach_failed">Не удалось прочитать файл: %1$s</string>
     <string name="chat_recording">Идёт запись… нажмите ещё раз, чтобы остановить</string>
     <string name="chat_transcribing">Распознаю…</string>
-    <string name="chat_mic_no_model">Модель распознавания речи не установлена. Скачайте её в Настройках.</string>
+    <string name="chat_mic_no_model">Модель распознавания речи не установлена. Откройте «Модели» → «Голос» и скачайте любую.</string>
     <string name="chat_mic_permission">Нужен доступ к микрофону</string>
 
     <string name="menu_files">Файлы</string>
@@ -28,7 +28,7 @@
     <string name="files_subtitle">%1$d фрагм. · %2$s</string>
 
     <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
-    <string name="settings_whisper_manage">Управление моделями голоса</string>
+    <string name="settings_whisper_manage">Открыть модели → Голос</string>
     <string name="settings_whisper_installed">Установлена: %1$s</string>
     <string name="settings_whisper_none">Не установлена</string>
     <string name="settings_whisper_note">Распознавание работает офлайн через TensorFlow Lite. Один словарь подходит для всех размеров и всех языков — скачивается один раз вместе с первой моделью, отдельно ничего загружать не нужно.</string>
@@ -45,6 +45,8 @@
     <string name="settings_saved">Сохранено</string>
 
     <string name="models_title">Модели</string>
+    <string name="models_category_text">Чат</string>
+    <string name="models_category_voice">Голос</string>
     <string name="models_local_header">Локальные модели — работают без сети</string>
     <string name="models_catalog_header">Каталог (справочно)</string>
     <string name="model_download">Скачать</string>
@@ -58,21 +60,50 @@
     <string name="models_custom_title">Своя модель с Hugging Face</string>
     <string name="models_custom_hint">Укажите репозиторий вида owner/repo, содержащий файл .gguf — приложение само выберет подходящее квантование.</string>
     <string name="models_custom_add">Добавить</string>
+    <string name="models_custom_input_hint">owner/repo с GGUF-файлом</string>
+    <string name="models_custom_bad_format">Нужен формат owner/repo</string>
+    <string name="models_voice_header">Модели распознавания речи — работают офлайн</string>
+    <string name="models_switched_chat">Чат переключён на %1$s</string>
+    <string name="models_switched_voice">Голосовой ввод переключён на %1$s</string>
+    <string name="model_state_installed">Установлена</string>
+    <string name="model_state_resolving">Ищу файл: %1$s…</string>
+    <string name="model_state_error">Ошибка: %1$s</string>
+    <string name="model_state_wait_other">Дождитесь окончания текущей загрузки</string>
+    <string name="model_fit_light">лёгкая</string>
+    <string name="model_fit_recommended">рекомендуется</string>
+    <string name="model_fit_heavy">тяжёлая, но пойдёт</string>
+    <string name="model_fit_too_large">очень большая</string>
+    <string name="dialog_ok">Понятно</string>
+    <string name="dialog_cancel">Отмена</string>
     <string name="settings_ram">Бюджет памяти на модель, % от общей RAM</string>
     <string name="settings_ram_hint">90</string>
     <string name="settings_hf_token">Токен Hugging Face (для закрытых репозиториев)</string>
     <string name="models_device">Устройство</string>
 
     <string name="settings_generation_header">Параметры генерации</string>
-    <string name="settings_generation_hint">Влияют на то, как модель выбирает следующее слово. Если ответы бессвязные или зацикливаются — увеличьте штраф за повтор; если слишком предсказуемые — увеличьте температуру.</string>
-    <string name="settings_temperature">Температура (0–2, обычно 0.6–0.9)</string>
+    <string name="settings_generation_open">Параметры генерации</string>
+    <string name="settings_generation_hint">Влияют на то, как модель выбирает следующее слово: связность, разнообразие, склонность к повторам.</string>
+    <string name="settings_generation_intro">Модель на каждом шаге выбирает следующее слово из списка вариантов. Эти параметры управляют тем, насколько широко она смотрит и насколько охотно рискует. Если что-то испортилось — кнопка «Сбросить» внизу вернёт значения по умолчанию.</string>
+    <string name="settings_generation_reset">Сбросить к значениям по умолчанию</string>
+    <string name="settings_generation_reset_done">Значения по умолчанию восстановлены</string>
+
+    <string name="settings_temperature">Температура</string>
     <string name="settings_temperature_hint">0.7</string>
-    <string name="settings_top_p">Top-p (0–1)</string>
+    <string name="settings_temperature_help">Диапазон: 0–2. По умолчанию 0.7.\nНасколько модель рискует при выборе слова. Ниже 0.5 — ответы точные и предсказуемые, но суховатые и повторяющиеся; выше 1.0 — живее и разнообразнее, но растёт риск выдумок и бессвязности. 0 — всегда самый вероятный вариант.\nЕсли ответы скучные и однообразные — поднимите до 0.8–1.0. Если модель «уплывает» и несёт чушь — опустите до 0.5–0.6.</string>
+
+    <string name="settings_top_p">Top-p (nucleus sampling)</string>
     <string name="settings_top_p_hint">0.95</string>
+    <string name="settings_top_p_help">Диапазон: 0–1. По умолчанию 0.95.\nМодель рассматривает только самые вероятные слова, суммарная вероятность которых не превышает это значение. 0.95 — отбрасывается длинный «хвост» маловероятной чепухи, но выбор остаётся широким. 0.5 — только самые очевидные варианты.\nОбычно менять не нужно. Если ответы всё ещё странные при низкой температуре — попробуйте 0.9.</string>
+
     <string name="settings_top_k">Top-k</string>
     <string name="settings_top_k_hint">40</string>
-    <string name="settings_repeat_penalty">Штраф за повтор (1 = выкл, обычно 1.05–1.3)</string>
+    <string name="settings_top_k_help">Диапазон: 0–200. По умолчанию 40. 0 — выключено.\nЖёсткое ограничение: сколько лучших вариантов вообще рассматривать. 40 означает «выбирай из 40 самых вероятных слов». Работает вместе с top-p — применяется то ограничение, которое строже.\nМеньше (10–20) — строже и предсказуемее, больше (80–100) — разнообразнее.</string>
+
+    <string name="settings_repeat_penalty">Штраф за повтор</string>
     <string name="settings_repeat_penalty_hint">1.1</string>
-    <string name="settings_context_tokens">Размер контекста, токенов (только локальные модели)</string>
+    <string name="settings_repeat_penalty_help">Диапазон: 1–2. По умолчанию 1.1. 1 — выключено.\nНасколько сильно модель избегает слов, которые уже недавно произносила. Без штрафа маленькие модели любят зацикливаться и повторять одну фразу до конца лимита.\nЕсли видите повторы или зацикливание — поднимите до 1.15–1.3. Слишком высокое значение (выше 1.4) ломает нормальную речь: модель начинает избегать даже нужных слов вроде предлогов.</string>
+
+    <string name="settings_context_tokens">Размер контекста, токенов</string>
     <string name="settings_context_tokens_hint">4096</string>
+    <string name="settings_context_tokens_help">Обычные значения: 2048–8192. По умолчанию 4096. Только для локальных моделей.\nСколько текста модель держит «в голове»: история чата, фрагменты из файлов, системная инструкция. Примерно 1 токен ≈ 3–4 символа русского текста.\nБольше — модель помнит более длинный разговор, но каждая модель занимает заметно больше оперативной памяти, и на телефоне это прямой путь к вылету. Поднимайте только если памяти с запасом, и уменьшайте до 2048, если приложение падает на больших моделях.</string>
 </resources>

@@ -39,9 +39,9 @@
             android:parentActivityName=".ChatActivity" />
 
         <activity
-            android:name=".WhisperModelsActivity"
+            android:name=".GenerationSettingsActivity"
             android:exported="false"
-            android:label="@string/settings_whisper_manage"
+            android:label="@string/settings_generation_header"
             android:parentActivityName=".SettingsActivity" />
 
         <activity

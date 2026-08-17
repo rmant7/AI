@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="16dp"
+            android:text="@string/settings_generation_intro"
+            android:textSize="13sp" />
+
+        <!-- One card per parameter: name, the value field, and the full
+             explanation of range/default/effect right underneath it, so the
+             guidance is where the decision is made rather than in a preamble
+             the user has already scrolled past. -->
+        <include
+            android:id="@+id/temperature"
+            layout="@layout/item_generation_param" />
+
+        <include
+            android:id="@+id/topP"
+            layout="@layout/item_generation_param" />
+
+        <include
+            android:id="@+id/topK"
+            layout="@layout/item_generation_param" />
+
+        <include
+            android:id="@+id/repeatPenalty"
+            layout="@layout/item_generation_param" />
+
+        <include
+            android:id="@+id/contextTokens"
+            layout="@layout/item_generation_param" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/resetButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_generation_reset" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/saveButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_save" />
+
+    </LinearLayout>
+
+</ScrollView>

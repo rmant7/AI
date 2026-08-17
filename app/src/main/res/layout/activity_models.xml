@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
@@ -13,11 +14,43 @@
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="12sp" />
 
+    <!-- Task-type switcher, the way Edge Studio groups its catalog: one
+         capability per tab. Only Text and Voice exist today; Image and
+         Agents are the reason this is a toggle group and not a hardcoded
+         pair of buttons — a third/fourth entry is one more button, not a
+         restructure. -->
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/categoryToggle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="12dp"
+        app:checkedButton="@id/categoryText"
+        app:selectionRequired="true"
+        app:singleSelection="true">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/categoryText"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/models_category_text" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/categoryVoice"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/models_category_voice" />
+
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/models"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:padding="12dp" />
+        android:paddingHorizontal="12dp" />
 
 </LinearLayout>

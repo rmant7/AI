@@ -102,6 +102,21 @@ class Settings(context: Context) {
         get() = prefs.getInt(KEY_CONTEXT_TOKENS, LlamaBridge.DEFAULT_CONTEXT_TOKENS)
         set(value) = prefs.edit().putInt(KEY_CONTEXT_TOKENS, value).apply()
 
+    /**
+     * Clears the sampling keys rather than writing the defaults back, so each
+     * property falls through to the same default a fresh install would use —
+     * one definition of "default", not two that can drift apart.
+     */
+    fun resetGenerationDefaults() {
+        prefs.edit()
+            .remove(KEY_TEMPERATURE)
+            .remove(KEY_TOP_P)
+            .remove(KEY_TOP_K)
+            .remove(KEY_REPEAT_PENALTY)
+            .remove(KEY_CONTEXT_TOKENS)
+            .apply()
+    }
+
     private companion object {
         const val KEY_PROVIDER = "provider"
         const val KEY_ENDPOINT = "endpoint"
