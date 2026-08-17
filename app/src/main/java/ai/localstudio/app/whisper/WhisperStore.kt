@@ -55,6 +55,8 @@ sealed interface WhisperDownloadState {
 class WhisperDownloads(
     private val store: WhisperStore,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    /** Same reasoning as ModelDownloads: without a foreground service, the process — and this download — dies the moment the screen locks. */
+    private val onDownloadStarted: () -> Unit = {},
 ) {
 
     private val states = MutableStateFlow<Map<String, WhisperDownloadState>>(emptyMap())
@@ -71,6 +73,7 @@ class WhisperDownloads(
         // file, and two concurrent downloads would race writing it.
         if (jobs.values.any { it.isActive }) return
 
+        onDownloadStarted()
         val downloader = ModelDownloader()
         activeDownloader = downloader
         jobs[seed.id] = scope.launch {

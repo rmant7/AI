@@ -37,6 +37,7 @@ class ChatActivity : AppCompatActivity() {
     private val adapter = MessageAdapter()
     private var conversationId = "chat-" + System.currentTimeMillis()
     private val recorder = AudioRecorder()
+    private var isGenerating = false
 
     private val pickDocument = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { ingestDocument(it) }
@@ -194,6 +195,13 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun send() {
+        // Belt and suspenders on top of the disabled send button: a native
+        // llama.cpp context is not safe to decode into from two calls at
+        // once, so a second request slipping through while the first is
+        // still in flight risks hanging the session rather than erroring —
+        // exactly what "sent three messages, got zero replies, no error
+        // either" looks like from the outside.
+        if (isGenerating) return
         val text = binding.input.text?.toString()?.trim().orEmpty()
         if (text.isEmpty()) return
 
@@ -201,20 +209,28 @@ class ChatActivity : AppCompatActivity() {
         adapter.add(Message.user(text))
         binding.messages.scrollToPosition(adapter.itemCount - 1)
         persist()
+        isGenerating = true
         setBusy(true)
 
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    container.orchestrator().handle(
-                        UserRequest(
-                            conversationId = conversationId,
-                            text = text,
-                            memoryEnabled = container.settings.memoryEnabled,
-                        ),
-                    )
+                    // A hang anywhere below this — native, network, wherever
+                    // — must not be silent forever. Cancelling here at least
+                    // frees the UI to try again instead of the send button
+                    // staying disabled with nothing to explain why.
+                    kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
+                        container.orchestrator().handle(
+                            UserRequest(
+                                conversationId = conversationId,
+                                text = text,
+                                memoryEnabled = container.settings.memoryEnabled,
+                            ),
+                        )
+                    }
                 }
             }
+            isGenerating = false
             setBusy(false)
             result
                 .onSuccess { answer ->
@@ -231,12 +247,13 @@ class ChatActivity : AppCompatActivity() {
                     )
                 }
                 .onFailure { error ->
-                    adapter.add(
-                        Message.error(
-                            body = error.message ?: error.toString(),
-                            details = error.javaClass.simpleName,
-                        ),
-                    )
+                    val body = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                        "Модель не ответила за ${GENERATION_TIMEOUT_MS / 1000} с. Возможно, модель слишком тяжёлая " +
+                            "для этого устройства, или что-то зависло — попробуйте ещё раз или выберите модель полегче."
+                    } else {
+                        error.message ?: error.toString()
+                    }
+                    adapter.add(Message.error(body = body, details = error.javaClass.simpleName))
                 }
             binding.messages.scrollToPosition(adapter.itemCount - 1)
             persist()
@@ -332,5 +349,11 @@ class ChatActivity : AppCompatActivity() {
         const val MENU_SETTINGS = 4
         const val MENU_HISTORY = 5
         const val MENU_CLEAR = 6
+
+        // Generous on purpose: a large local model on a slow phone can
+        // legitimately take a while to produce a first token. This exists to
+        // catch the case where nothing is ever coming back, not to rush a
+        // model that is working.
+        const val GENERATION_TIMEOUT_MS = 180_000L
     }
 }

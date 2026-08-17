@@ -28,15 +28,31 @@ class InMemoryMemoryProvider(
     private val items = LinkedHashMap<String, MemoryItem>()
     private var counter = 0L
 
+    /**
+     * Every read and write goes through this.
+     *
+     * Memory is genuinely concurrent in this app: a generation reads it from
+     * a background thread for the whole length of a turn, while attaching a
+     * document writes to it from the UI thread. Without a lock, that pair is
+     * a `ConcurrentModificationException` waiting to happen — and it did,
+     * reliably, as "started a prompt, attached a PDF, app died". Reads take a
+     * snapshot rather than iterating the live map, so a write during a long
+     * search cannot invalidate the iteration either.
+     */
+    private val lock = Any()
+
+    private fun snapshot(): List<MemoryItem> = synchronized(lock) { items.values.toList() }
+
     override suspend fun search(query: MemoryQuery): List<MemoryItem> {
         val terms = tokenize(query.text)
         if (terms.isEmpty()) return emptyList()
 
-        val newest = items.values.maxOfOrNull { it.createdAt } ?: return emptyList()
-        val oldest = items.values.minOfOrNull { it.createdAt } ?: newest
+        val all = snapshot()
+        val newest = all.maxOfOrNull { it.createdAt } ?: return emptyList()
+        val oldest = all.minOfOrNull { it.createdAt } ?: newest
         val span = (newest - oldest).coerceAtLeast(1)
 
-        return items.values
+        return all
             .filter { it.scope in query.scopes }
             .filter { item -> query.metadataFilter.all { (k, v) -> item.metadata[k] == v } }
             .mapNotNull { item ->
@@ -55,14 +71,15 @@ class InMemoryMemoryProvider(
             .take(query.limit)
     }
 
-    override suspend fun remember(text: String, scope: MemoryScope, metadata: Map<String, String>): String {
-        val id = "mem-${++counter}"
-        items[id] = MemoryItem(id, text.trim(), scope, clock(), metadata = metadata)
-        return id
-    }
+    override suspend fun remember(text: String, scope: MemoryScope, metadata: Map<String, String>): String =
+        synchronized(lock) {
+            val id = "mem-${++counter}"
+            items[id] = MemoryItem(id, text.trim(), scope, clock(), metadata = metadata)
+            id
+        }
 
     override suspend fun forget(id: String) {
-        items.remove(id)
+        synchronized(lock) { items.remove(id) }
     }
 
     /**
@@ -71,22 +88,28 @@ class InMemoryMemoryProvider(
      * leak with a nicer name.
      */
     override suspend fun consolidate(conversationId: String): List<MemoryItem> {
-        val working = items.values.filter {
+        val working = snapshot().filter {
             it.scope == MemoryScope.WORKING && it.metadata[CONVERSATION_KEY] == conversationId
         }
         if (working.isEmpty()) return emptyList()
 
+        // Extraction is a model call in a real implementation — deliberately
+        // outside the lock, so a slow extractor cannot block every other
+        // read and write for its whole duration.
         val extracted = extractor.extract(conversationId, working)
-        working.forEach { items.remove(it.id) }
-        return extracted.map { item ->
-            val id = "mem-${++counter}"
-            val stored = item.copy(id = id, createdAt = clock())
-            items[id] = stored
-            stored
+
+        return synchronized(lock) {
+            working.forEach { items.remove(it.id) }
+            extracted.map { item ->
+                val id = "mem-${++counter}"
+                val stored = item.copy(id = id, createdAt = clock())
+                items[id] = stored
+                stored
+            }
         }
     }
 
-    fun all(): List<MemoryItem> = items.values.toList()
+    fun all(): List<MemoryItem> = snapshot()
 
     private fun tokenize(text: String): Set<String> =
         text.lowercase()

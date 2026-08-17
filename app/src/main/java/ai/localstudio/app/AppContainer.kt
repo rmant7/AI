@@ -36,6 +36,11 @@ import ai.localstudio.app.whisper.WhisperEngine
 import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiRuntime
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -63,24 +68,39 @@ class AppContainer private constructor(private val context: Context) {
     private val documentMemoryIds = mutableMapOf<String, List<String>>()
 
     init {
-        documents.list().forEach { doc ->
-            val ids = kotlinx.coroutines.runBlocking {
-                doc.chunks.map { chunk -> memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to doc.name)) }
+        // Off the main thread: this reads a file and re-inserts every chunk of
+        // every attached document, and it runs during the first
+        // AppContainer.get() — which happens in Activity.onCreate. As
+        // runBlocking there, a few large PDFs was a visible freeze on launch
+        // at best and an ANR at worst. Memory is safe to fill in late: a
+        // search that lands before the replay finishes simply sees fewer
+        // fragments, and the provider itself is now synchronized.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            documents.list().forEach { doc ->
+                val ids = doc.chunks.map { chunk ->
+                    memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to doc.name))
+                }
+                synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
             }
-            documentMemoryIds[doc.id] = ids
         }
     }
 
-    suspend fun rememberDocument(name: String, chunks: List<String>): AttachedDocument {
+    suspend fun rememberDocument(name: String, chunks: List<String>): AttachedDocument = withContext(Dispatchers.IO) {
         val ids = chunks.map { chunk -> memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to name)) }
-        val doc = AttachedDocument(id = "doc-${System.currentTimeMillis()}", name = name, chunks = chunks, addedAt = System.currentTimeMillis())
+        val doc = AttachedDocument(
+            id = "doc-${System.currentTimeMillis()}",
+            name = name,
+            chunks = chunks,
+            addedAt = System.currentTimeMillis(),
+        )
         documents.add(doc)
-        documentMemoryIds[doc.id] = ids
-        return doc
+        synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
+        doc
     }
 
-    suspend fun forgetDocument(id: String) {
-        documentMemoryIds.remove(id)?.forEach { memoryId -> memory.forget(memoryId) }
+    suspend fun forgetDocument(id: String) = withContext(Dispatchers.IO) {
+        val ids = synchronized(documentMemoryIds) { documentMemoryIds.remove(id) }
+        ids?.forEach { memoryId -> memory.forget(memoryId) }
         documents.remove(id)
     }
 
@@ -96,7 +116,10 @@ class AppContainer private constructor(private val context: Context) {
     )
 
     val whisperStore = WhisperStore(context)
-    val whisperDownloads = WhisperDownloads(whisperStore)
+    val whisperDownloads = WhisperDownloads(
+        whisperStore,
+        onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+    )
     val whisperEngine = WhisperEngine(whisperStore)
 
     /** Seeds that are on disk right now, newest state each time it is asked. */

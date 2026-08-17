@@ -126,4 +126,36 @@ class InMemoryMemoryProviderTest {
     fun `nothing to consolidate is not an error`() = runBlocking {
         assertTrue(provider().consolidate("unknown").isEmpty())
     }
+
+    /**
+     * Reading while writing is the app's normal case, not an edge case: a
+     * generation searches memory on a background thread for the length of a
+     * turn, while attaching a document writes to it from the UI thread. That
+     * pair used to throw ConcurrentModificationException and take the whole
+     * app down with it.
+     */
+    @Test
+    fun `searching while remembering from another thread does not blow up`() {
+        val memory = InMemoryMemoryProvider()
+        runBlocking { repeat(200) { memory.remember("исходный фрагмент $it", MemoryScope.SEMANTIC) } }
+
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val writer = Thread {
+            runCatching {
+                runBlocking { repeat(500) { memory.remember("новый фрагмент $it", MemoryScope.SEMANTIC) } }
+            }.onFailure(failure::set)
+        }
+        val reader = Thread {
+            runCatching {
+                runBlocking { repeat(500) { memory.search(MemoryQuery("фрагмент")) } }
+            }.onFailure(failure::set)
+        }
+
+        writer.start()
+        reader.start()
+        writer.join()
+        reader.join()
+
+        assertEquals(null, failure.get(), "concurrent read/write threw: ${failure.get()}")
+    }
 }

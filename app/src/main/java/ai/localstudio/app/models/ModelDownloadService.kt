@@ -13,10 +13,12 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import ai.localstudio.app.AppContainer
 import ai.localstudio.app.R
+import ai.localstudio.app.whisper.WhisperDownloadState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
@@ -33,10 +35,12 @@ import kotlinx.coroutines.flow.onEach
  * ongoing notification is the standard, and only, fix for that — the process
  * is not eligible for that kind of kill while one is running.
  *
- * The service does not run the downloads itself; it observes the same
- * [ModelDownloads] state everything else observes, and exists purely to hold
- * the process open and show progress. It starts itself when a download begins
- * and stops itself the moment none are left running.
+ * The service does not run any download itself; it observes the same state
+ * every download screen observes — GGUF chat models and Whisper voice
+ * models alike, since both die the same way in the background without
+ * this — and exists purely to hold the process open and show progress. It
+ * starts itself when a download begins and stops itself the moment none
+ * are left running, in either category.
  */
 class ModelDownloadService : Service() {
 
@@ -47,25 +51,28 @@ class ModelDownloadService : Service() {
         createNotificationChannel()
         startForegroundCompat(buildNotification("Подготовка загрузки…"))
 
-        AppContainer.get(this).downloads.state
-            .onEach { states ->
-                val running = states.values.filterIsInstance<DownloadState.Running>()
-                val resolving = states.values.any { it is DownloadState.Resolving }
+        val container = AppContainer.get(this)
+        combine(container.downloads.state, container.whisperDownloads.state) { ggufStates, whisperStates ->
+            ggufStates to whisperStates
+        }
+            .onEach { (ggufStates, whisperStates) ->
+                val ggufRunning = ggufStates.values.filterIsInstance<DownloadState.Running>()
+                val ggufResolving = ggufStates.values.any { it is DownloadState.Resolving }
+                val whisperRunning = whisperStates.values.filterIsInstance<WhisperDownloadState.Running>()
+                val activeCount = ggufRunning.size + whisperRunning.size
 
-                if (running.isEmpty() && !resolving) {
+                if (activeCount == 0 && !ggufResolving) {
                     ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return@onEach
                 }
 
-                val text = when {
-                    running.isNotEmpty() -> running.joinToString(" · ") {
-                        "${(it.progress.fraction * 100).toInt()}%"
-                    }
-
-                    else -> "Поиск файла…"
+                val parts = buildList {
+                    ggufRunning.forEach { add("${(it.progress.fraction * 100).toInt()}%") }
+                    whisperRunning.forEach { add("Whisper: ${(it.progress.fraction * 100).toInt()}%") }
+                    if (isEmpty() && ggufResolving) add("Поиск файла…")
                 }
-                notificationManager.notify(NOTIFICATION_ID, buildNotification(text, running.size))
+                notificationManager.notify(NOTIFICATION_ID, buildNotification(parts.joinToString(" · "), activeCount))
             }
             .launchIn(scope)
     }
