@@ -30,6 +30,57 @@ data class LocalModelSeed(
 object LocalModels {
 
     val SEEDS = listOf(
+        // Gemma 4 (released April 2026) listed first — the newest, and the
+        // one repeatedly asked for by name. Gemma 3 stays below as a
+        // known-good fallback rather than being removed: this repo's GGUF
+        // quants are new enough that a still-shifting file layout on the
+        // community mirrors is a real possibility this app cannot verify
+        // ahead of time, and "ни один источник не подошёл" for every Gemma
+        // entry would be strictly worse than keeping the proven version
+        // available too.
+        LocalModelSeed(
+            id = "gemma-4-e4b-it-q4",
+            title = "Gemma 4 E4B Instruct",
+            repoIds = listOf(
+                "unsloth/gemma-4-E4B-it-GGUF",
+            ),
+            paramsLabel = "E4B · Q4",
+            note = "Новейшая Gemma; сопоставима по размеру с Gemma 3 4B.",
+            approxSizeBytes = 2_600_000_000,
+        ),
+        LocalModelSeed(
+            id = "gemma-4-12b-it-q4",
+            title = "Gemma 4 12B Instruct",
+            repoIds = listOf(
+                "unsloth/gemma-4-12B-it-GGUF",
+                "bartowski/gemma-4-12B-it-GGUF",
+                "unsloth/gemma-4-12B-it-qat-GGUF",
+            ),
+            paramsLabel = "12B · Q4",
+            note = "Новейшая Gemma среднего размера.",
+            approxSizeBytes = 7_200_000_000,
+        ),
+        LocalModelSeed(
+            id = "gemma-4-26b-a4b-it-q4",
+            title = "Gemma 4 26B-A4B Instruct",
+            repoIds = listOf(
+                "unsloth/gemma-4-26B-A4B-it-GGUF",
+                "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+            ),
+            paramsLabel = "26B (MoE, ~4B активных) · Q4",
+            note = "MoE-модель: качество крупной модели при инференсе на уровне ~4B активных параметров.",
+            approxSizeBytes = 15_600_000_000,
+        ),
+        LocalModelSeed(
+            id = "gemma-4-31b-it-q4",
+            title = "Gemma 4 31B Instruct",
+            repoIds = listOf(
+                "unsloth/gemma-4-31B-it-GGUF",
+            ),
+            paramsLabel = "31B · Q4",
+            note = "Самая большая новая Gemma. Нужно много памяти и терпение к скорости.",
+            approxSizeBytes = 18_600_000_000,
+        ),
         LocalModelSeed(
             id = "gemma-3-1b-it-q4",
             title = "Gemma 3 1B Instruct",
@@ -79,27 +130,38 @@ object LocalModels {
             approxSizeBytes = 16_000_000_000,
         ),
         LocalModelSeed(
-            id = "qwen2.5-7b-instruct-q4",
-            title = "Qwen2.5 7B Instruct",
+            id = "qwen3.5-9b-q4",
+            title = "Qwen3.5 9B",
             repoIds = listOf(
-                "bartowski/Qwen2.5-7B-Instruct-GGUF",
-                "Qwen/Qwen2.5-7B-Instruct-GGUF",
+                "unsloth/Qwen3.5-9B-GGUF",
+                "bartowski/Qwen3.5-9B-GGUF",
             ),
-            paramsLabel = "7B · Q4",
-            note = "Сильна в коде и языках.",
-            approxSizeBytes = 4_700_000_000,
+            paramsLabel = "9B · Q4",
+            note = "Новейший Qwen; сильна в коде и языках.",
+            approxSizeBytes = 5_500_000_000,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
         ),
         LocalModelSeed(
-            id = "qwen2.5-3b-instruct-q4",
-            title = "Qwen2.5 3B Instruct",
+            id = "qwen3.5-4b-q4",
+            title = "Qwen3.5 4B",
             repoIds = listOf(
-                "bartowski/Qwen2.5-3B-Instruct-GGUF",
-                "Qwen/Qwen2.5-3B-Instruct-GGUF",
+                "unsloth/Qwen3.5-4B-GGUF",
+                "bartowski/Qwen3.5-4B-GGUF",
             ),
-            paramsLabel = "3B · Q4",
-            note = "Компромисс между 1B и 7B.",
-            approxSizeBytes = 2_000_000_000,
+            paramsLabel = "4B · Q4",
+            note = "Новейший Qwen среднего размера.",
+            approxSizeBytes = 2_500_000_000,
+            capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
+        ),
+        LocalModelSeed(
+            id = "qwen3.5-0.8b-q4",
+            title = "Qwen3.5 0.8B",
+            repoIds = listOf(
+                "unsloth/Qwen3.5-0.8B-GGUF",
+            ),
+            paramsLabel = "0.8B · Q4",
+            note = "Совсем маленькая — для слабых устройств или быстрой проверки.",
+            approxSizeBytes = 550_000_000,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
         ),
         LocalModelSeed(
