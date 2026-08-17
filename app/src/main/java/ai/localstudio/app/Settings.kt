@@ -99,8 +99,8 @@ class Settings(context: Context) {
      * once raised app-wide, so it defaults low and is opt-in to raise.
      */
     var contextTokens: Int
-        get() = prefs.getInt(KEY_CONTEXT_TOKENS, LlamaBridge.DEFAULT_CONTEXT_TOKENS)
-        set(value) = prefs.edit().putInt(KEY_CONTEXT_TOKENS, value).apply()
+        get() = prefs.getInt(KEY_CONTEXT_TOKENS, LlamaBridge.DEFAULT_CONTEXT_TOKENS).coerceIn(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS)
+        set(value) = prefs.edit().putInt(KEY_CONTEXT_TOKENS, value.coerceIn(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS)).apply()
 
     /**
      * Clears the sampling keys rather than writing the defaults back, so each
@@ -138,5 +138,13 @@ class Settings(context: Context) {
         const val DEFAULT_TOP_P = 0.95f
         const val DEFAULT_TOP_K = 40
         const val DEFAULT_REPEAT_PENALTY = 1.1f
+
+        // Unlike temperature/topP/topK/repeatPenalty, this one was never
+        // clamped — a stray value here (0, negative, or absurdly large) goes
+        // straight into a native n_ctx allocation. A negative Int cast to
+        // uint32_t in llama_jni.cpp wraps to billions, which is a crash on
+        // model load, not a graceful error.
+        const val MIN_CONTEXT_TOKENS = 512
+        const val MAX_CONTEXT_TOKENS = 8192
     }
 }

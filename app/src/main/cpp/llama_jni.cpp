@@ -138,7 +138,12 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     }
 
     llama_context_params contextParams = llama_context_default_params();
-    contextParams.n_ctx = (uint32_t) contextTokens;
+    // Defensive: a zero, negative, or unreasonable value here should not be
+    // trusted at this boundary, whatever the Kotlin side currently clamps to
+    // — a negative jint cast straight to uint32_t wraps to billions, which
+    // llama_init_from_model then tries to allocate and crashes on.
+    const int32_t clampedContextTokens = std::min(std::max(contextTokens, 512), 32768);
+    contextParams.n_ctx = (uint32_t) clampedContextTokens;
     // Larger batches process the prompt in fewer passes at the cost of memory
     // during that phase — a good trade on a device with RAM to spare.
     contextParams.n_batch = 512;
