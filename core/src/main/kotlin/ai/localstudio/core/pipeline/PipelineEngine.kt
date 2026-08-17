@@ -22,10 +22,21 @@ sealed interface NodeValue {
     data class Bundle(val values: List<NodeValue>) : NodeValue
 }
 
+/** One earlier turn of the same conversation, for context building. */
+data class ConversationTurn(val role: String, val text: String)
+
 /** Per-run state shared by all nodes: conversation id, user turn, cancellation. */
 data class RunContext(
     val conversationId: String,
     val userMessage: String? = null,
+    /**
+     * Recent turns of *this* conversation, oldest first. This is what makes a
+     * reply to "и второе?" make sense: without it, every turn is generated as
+     * if it were the first message ever sent, because [MemoryScope.WORKING]
+     * (where turns are also stored) is only searched when the message itself
+     * contains a recall keyword — see [ai.localstudio.core.router.CapabilityRouter].
+     */
+    val history: List<ConversationTurn> = emptyList(),
     val params: Map<String, String> = emptyMap(),
 )
 

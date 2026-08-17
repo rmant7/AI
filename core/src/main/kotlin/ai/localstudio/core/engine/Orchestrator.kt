@@ -2,6 +2,7 @@ package ai.localstudio.core.engine
 
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.context.AssembledContext
+import ai.localstudio.core.pipeline.ConversationTurn
 import ai.localstudio.core.pipeline.NodeTrace
 import ai.localstudio.core.pipeline.NodeValue
 import ai.localstudio.core.pipeline.PipelineEngine
@@ -18,6 +19,8 @@ data class UserRequest(
     val attachment: NodeValue = NodeValue.Empty,
     val memoryEnabled: Boolean = true,
     val knowledgeEnabled: Boolean = false,
+    /** Recent turns of this same conversation, oldest first — not the message being asked now. */
+    val history: List<ConversationTurn> = emptyList(),
 )
 
 data class Answer(
@@ -71,7 +74,11 @@ class Orchestrator(
         val result = engine.run(
             spec = pipeline,
             input = input,
-            context = RunContext(conversationId = request.conversationId, userMessage = request.text),
+            context = RunContext(
+                conversationId = request.conversationId,
+                userMessage = request.text,
+                history = request.history,
+            ),
         )
 
         return Answer(

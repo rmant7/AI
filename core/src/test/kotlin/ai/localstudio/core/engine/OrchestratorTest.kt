@@ -10,6 +10,7 @@ import ai.localstudio.core.memory.InMemoryMemoryProvider
 import ai.localstudio.core.memory.MemoryQuery
 import ai.localstudio.core.memory.MemoryScope
 import ai.localstudio.core.model
+import ai.localstudio.core.pipeline.ConversationTurn
 import ai.localstudio.core.pipeline.NodeType
 import ai.localstudio.core.pipeline.NodeValue
 import ai.localstudio.core.registry.Benchmarks
@@ -131,6 +132,26 @@ class OrchestratorTest {
         assertTrue(NodeType.MEMORY_SEARCH in second.pipeline.nodes.map { it.type })
         val recalled = second.context!!.fragments.filter { it.source == FragmentSource.EPISODIC_MEMORY }
         assertTrue(recalled.any { it.text.contains("capability registry") }, "recalled: $recalled")
+    }
+
+    @Test
+    fun `earlier turns of this conversation reach the prompt without any recall keyword`() = runBlocking {
+        val answer = orchestrator().handle(
+            UserRequest(
+                conversationId = "c1",
+                text = "и второе?",
+                history = listOf(
+                    ConversationTurn("Вы", "Назови три языка программирования"),
+                    ConversationTurn("Модель", "Kotlin, Rust, Python"),
+                ),
+            ),
+        )
+
+        val conversation = answer.context!!.fragments.single { it.source == FragmentSource.CONVERSATION }
+        assertTrue(conversation.text.contains("Kotlin, Rust, Python"))
+        assertTrue(runtime.prompts.single().contains("Kotlin, Rust, Python"))
+        // Not the keyword-triggered path — this is plain conversational continuity.
+        assertTrue(NodeType.MEMORY_SEARCH !in answer.pipeline.nodes.map { it.type })
     }
 
     @Test

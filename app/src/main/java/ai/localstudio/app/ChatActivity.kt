@@ -22,6 +22,7 @@ import ai.localstudio.app.history.toMessage
 import ai.localstudio.app.history.toStored
 import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.core.engine.UserRequest
+import ai.localstudio.core.pipeline.ConversationTurn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -212,6 +213,17 @@ class ChatActivity : AppCompatActivity() {
         isGenerating = true
         setBusy(true)
 
+        // Everything already on screen except the turn just added above,
+        // which the orchestrator already gets as `text` — without this the
+        // model answers each message as if it were the start of a brand new
+        // conversation, since memory recall only fires on an explicit
+        // "remind me" style message, not on ordinary follow-ups.
+        val history = adapter.messages()
+            .dropLast(1)
+            .filterNot { it.isError }
+            .takeLast(MAX_HISTORY_TURNS)
+            .map { ConversationTurn(it.role, it.body) }
+
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -225,6 +237,7 @@ class ChatActivity : AppCompatActivity() {
                                 conversationId = conversationId,
                                 text = text,
                                 memoryEnabled = container.settings.memoryEnabled,
+                                history = history,
                             ),
                         )
                     }
@@ -355,5 +368,10 @@ class ChatActivity : AppCompatActivity() {
         // catch the case where nothing is ever coming back, not to rush a
         // model that is working.
         const val GENERATION_TIMEOUT_MS = 180_000L
+
+        // Turns, not tokens: the context engine's own budget trims whatever
+        // does not fit. This just bounds how much history gets rendered and
+        // handed over in the first place.
+        const val MAX_HISTORY_TURNS = 12
     }
 }

@@ -153,6 +153,17 @@ class NodeExecutors(
         val fragments = mutableListOf<ContextFragment>()
         systemPrompt?.let { fragments += ContextFragment(FragmentSource.SYSTEM, it) }
 
+        // The ordinary "does the model remember what I just said" case — as
+        // opposed to MEMORY_SEARCH, which only runs for an explicit recall
+        // ("напомни", "что мы решили вчера") and searches across
+        // conversations, not just this one's immediate back-and-forth.
+        if (context.history.isNotEmpty()) {
+            fragments += ContextFragment(
+                source = FragmentSource.CONVERSATION,
+                text = context.history.joinToString("\n") { "${it.role}: ${it.text}" },
+            )
+        }
+
         for (value in inputs) {
             when (value) {
                 is NodeValue.Fragments -> fragments += value.fragments
