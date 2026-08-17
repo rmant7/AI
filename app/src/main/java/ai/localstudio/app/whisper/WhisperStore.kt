@@ -27,7 +27,11 @@ class WhisperStore(private val context: Context) {
 
     fun hasVocab(): Boolean = vocabFile().let { it.isFile && it.length() > MIN_PLAUSIBLE_VOCAB_SIZE }
 
-    fun installedSeed(): WhisperModelSeed? = WhisperModels.SEEDS.firstOrNull { isInstalled(it) }
+    /** [preferredId] wins if that size is actually installed; otherwise whichever is. */
+    fun installedSeed(preferredId: String? = null): WhisperModelSeed? {
+        val preferred = preferredId?.let { id -> WhisperModels.byId(id) }?.takeIf { isInstalled(it) }
+        return preferred ?: WhisperModels.SEEDS.firstOrNull { isInstalled(it) }
+    }
 
     fun delete(seed: WhisperModelSeed) {
         modelFile(seed).delete()

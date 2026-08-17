@@ -44,6 +44,11 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_ASR_MODEL, DEFAULT_ASR_MODEL).orEmpty().ifBlank { DEFAULT_ASR_MODEL }
         set(value) = prefs.edit().putString(KEY_ASR_MODEL, value.trim()).apply()
 
+    /** Which downloaded Whisper size to use for voice input. Empty means "whichever is installed". */
+    var whisperModelId: String
+        get() = prefs.getString(KEY_WHISPER_MODEL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_WHISPER_MODEL, value).apply()
+
     /**
      * Share of total RAM a model may claim, in percent. Defaults high: this is
      * an app whose whole purpose is running a model, and on a 16 GB phone the
@@ -103,6 +108,7 @@ class Settings(context: Context) {
         const val KEY_API_KEY = "apiKey"
         const val KEY_CHAT_MODEL = "chatModel"
         const val KEY_ASR_MODEL = "asrModel"
+        const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"

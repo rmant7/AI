@@ -235,27 +235,13 @@
             android:paddingTop="4dp"
             android:textSize="13sp" />
 
-        <ProgressBar
-            android:id="@+id/whisperProgress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:visibility="gone" />
-
-        <HorizontalScrollView
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/whisperManageButton"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:scrollbars="none">
-
-            <LinearLayout
-                android:id="@+id/whisperButtons"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal" />
-
-        </HorizontalScrollView>
+            android:text="@string/settings_whisper_manage" />
 
         <TextView
             android:layout_width="match_parent"

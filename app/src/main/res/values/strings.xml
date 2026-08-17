@@ -24,11 +24,10 @@
     <string name="chat_mic_permission">Нужен доступ к микрофону</string>
 
     <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
-    <string name="settings_whisper_download">Скачать</string>
-    <string name="settings_whisper_delete">Удалить</string>
+    <string name="settings_whisper_manage">Управление моделями голоса</string>
     <string name="settings_whisper_installed">Установлена: %1$s</string>
     <string name="settings_whisper_none">Не установлена</string>
-    <string name="settings_whisper_note">Распознавание работает офлайн через TensorFlow Lite. При первой загрузке модели скачивается и словарь — без него распознавание не запустится.</string>
+    <string name="settings_whisper_note">Распознавание работает офлайн через TensorFlow Lite. Один словарь подходит для всех размеров и всех языков — скачивается один раз вместе с первой моделью, отдельно ничего загружать не нужно.</string>
 
     <string name="settings_title">Настройки</string>
     <string name="settings_provider">Провайдер модели</string>

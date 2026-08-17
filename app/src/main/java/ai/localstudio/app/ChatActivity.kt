@@ -281,7 +281,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun toggleRecording() {
         if (!recorder.isRecording) {
-            val seed = container.whisperStore.installedSeed()
+            val seed = container.whisperStore.installedSeed(container.settings.whisperModelId)
             if (seed == null) {
                 Toast.makeText(this, R.string.chat_mic_no_model, Toast.LENGTH_LONG).show()
                 return
@@ -295,7 +295,7 @@ class ChatActivity : AppCompatActivity() {
         val audio = recorder.stop()
         binding.micButton.text = getString(R.string.chat_mic)
         updateStatus()
-        val seed = container.whisperStore.installedSeed() ?: return
+        val seed = container.whisperStore.installedSeed(container.settings.whisperModelId) ?: return
 
         lifecycleScope.launch {
             binding.statusText.text = getString(R.string.chat_transcribing)

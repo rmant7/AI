@@ -38,6 +38,12 @@
             android:label="@string/models_title"
             android:parentActivityName=".ChatActivity" />
 
+        <activity
+            android:name=".WhisperModelsActivity"
+            android:exported="false"
+            android:label="@string/settings_whisper_manage"
+            android:parentActivityName=".SettingsActivity" />
+
         <service
             android:name=".models.ModelDownloadService"
             android:exported="false"
