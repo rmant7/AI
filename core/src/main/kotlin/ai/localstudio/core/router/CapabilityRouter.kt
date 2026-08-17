@@ -61,9 +61,21 @@ class CapabilityRouter(
             why += "image input: vision analysis before generation"
         }
 
-        if (signals.memoryEnabled && recallKeywords.any { it in text }) {
+        if (signals.memoryEnabled) {
+            // Unconditional, not gated on a recall keyword: attached documents
+            // live in semantic memory (see AppContainer.rememberDocument), and
+            // gating this on "напомни"/"вчера" meant a plain "what's in the
+            // files I attached?" never searched memory at all — the model
+            // denied having any files. The search itself is still lexical
+            // (InMemoryMemoryProvider.search), so an unrelated query still
+            // returns nothing; this only removes the keyword as a second gate
+            // on top of that.
             stages += NodeType.MEMORY_SEARCH
-            why += "request refers to earlier work: memory retrieval"
+            why += if (recallKeywords.any { it in text }) {
+                "request refers to earlier work: memory retrieval"
+            } else {
+                "memory retrieval: surface anything relevant already known"
+            }
         }
 
         if (signals.knowledgeEnabled && signals.hasDocumentContext) {

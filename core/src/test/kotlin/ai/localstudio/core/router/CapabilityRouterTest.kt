@@ -45,6 +45,17 @@ class CapabilityRouterTest {
     }
 
     @Test
+    fun `memory retrieval also runs on a plain question with no recall keyword`() {
+        // Attached-document content lives in semantic memory (see
+        // AppContainer.rememberDocument), so gating this stage on a keyword
+        // like "напомни" meant an ordinary "what's in my files?" never
+        // searched memory at all.
+        val plan = router.route(RequestSignals(text = "Что в моих файлах?"))
+
+        assertTrue(NodeType.MEMORY_SEARCH in plan.stages)
+    }
+
+    @Test
     fun `memory retrieval is skipped when memory is off`() {
         val plan = router.route(RequestSignals(text = "продолжи вчерашнее", memoryEnabled = false))
 
@@ -79,6 +90,9 @@ class CapabilityRouterTest {
         val plan = router.route(RequestSignals(text = "привет"))
 
         assertEquals(listOf(Capability.TEXT_GENERATION), plan.capabilities)
-        assertEquals(listOf(NodeType.CONTEXT_BUILD, NodeType.TEXT_GENERATION, NodeType.RESPONSE), plan.stages)
+        assertEquals(
+            listOf(NodeType.MEMORY_SEARCH, NodeType.CONTEXT_BUILD, NodeType.TEXT_GENERATION, NodeType.RESPONSE),
+            plan.stages,
+        )
     }
 }

@@ -21,6 +21,8 @@ data class UserRequest(
     val knowledgeEnabled: Boolean = false,
     /** Recent turns of this same conversation, oldest first — not the message being asked now. */
     val history: List<ConversationTurn> = emptyList(),
+    /** Names of every document currently attached, regardless of relevance to this turn. */
+    val attachedDocuments: List<String> = emptyList(),
 )
 
 data class Answer(
@@ -78,6 +80,7 @@ class Orchestrator(
                 conversationId = request.conversationId,
                 userMessage = request.text,
                 history = request.history,
+                attachedDocuments = request.attachedDocuments,
             ),
         )
 

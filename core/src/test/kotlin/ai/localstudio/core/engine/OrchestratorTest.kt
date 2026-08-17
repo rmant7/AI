@@ -150,9 +150,33 @@ class OrchestratorTest {
         val conversation = answer.context!!.fragments.single { it.source == FragmentSource.CONVERSATION }
         assertTrue(conversation.text.contains("Kotlin, Rust, Python"))
         assertTrue(runtime.prompts.single().contains("Kotlin, Rust, Python"))
-        // Not the keyword-triggered path — this is plain conversational continuity.
-        assertTrue(NodeType.MEMORY_SEARCH !in answer.pipeline.nodes.map { it.type })
     }
+
+    @Test
+    fun `memory search runs on an ordinary question, not just an explicit recall`() = runBlocking {
+        val answer = orchestrator().handle(
+            UserRequest(conversationId = "c1", text = "Объясни, как работает runtime manager"),
+        )
+
+        assertTrue(NodeType.MEMORY_SEARCH in answer.pipeline.nodes.map { it.type })
+    }
+
+    @Test
+    fun `attached documents are named in the prompt even when the question shares no words with their content`() =
+        runBlocking {
+            val answer = orchestrator().handle(
+                UserRequest(
+                    conversationId = "c1",
+                    text = "Что там у меня загружено?",
+                    attachedDocuments = listOf("рецепты.pdf", "заметки.pdf"),
+                ),
+            )
+
+            val knowledge = answer.context!!.fragments.single { it.source == FragmentSource.KNOWLEDGE }
+            assertTrue(knowledge.text.contains("рецепты.pdf"))
+            assertTrue(knowledge.text.contains("заметки.pdf"))
+            assertTrue(runtime.prompts.single().contains("рецепты.pdf"))
+        }
 
     @Test
     fun `memory is not touched when the user turns it off`() = runBlocking {

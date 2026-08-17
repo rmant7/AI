@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.RecyclerView
 import ai.localstudio.app.databinding.ItemMessageBinding
 import com.google.android.material.R as MaterialR
 import com.google.android.material.color.MaterialColors
+import io.noties.markwon.Markwon
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,6 +47,13 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
 
     private val messages = mutableListOf<Message>()
 
+    // Built once, lazily, against a real context — an LLM's output is full of
+    // markdown syntax (**bold**, lists, code) that looks like a rendering bug
+    // rather than formatting when shown as raw text. User messages are left
+    // as plain text: typed input rarely contains markdown on purpose, and
+    // rendering it would be surprising rather than helpful.
+    private var markwon: Markwon? = null
+
     /** Read-only view of what is on screen — used by the instrumented smoke test. */
     fun messages(): List<Message> = messages.toList()
 
@@ -62,8 +70,10 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         notifyItemRangeRemoved(0, size)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
-        Holder(ItemMessageBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+        if (markwon == null) markwon = Markwon.create(parent.context)
+        return Holder(ItemMessageBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+    }
 
     override fun getItemCount(): Int = messages.size
 
@@ -71,7 +81,12 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         val message = messages[position]
         val binding = holder.binding
         binding.roleText.text = message.role
-        binding.bodyText.text = message.body
+        val isAssistantReply = !message.isError && message.role != "Вы"
+        if (isAssistantReply) {
+            markwon?.setMarkdown(binding.bodyText, message.body) ?: run { binding.bodyText.text = message.body }
+        } else {
+            binding.bodyText.text = message.body
+        }
         binding.detailsText.text = message.details.orEmpty()
         binding.detailsText.visibility = if (message.details.isNullOrBlank()) View.GONE else View.VISIBLE
 

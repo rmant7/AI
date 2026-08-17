@@ -33,10 +33,20 @@ class PipelineBuilderTest {
 
     @Test
     fun `a typed request is the minimal chain`() {
+        // Memory search runs by default (memoryEnabled defaults to true) even
+        // without a recall keyword — see CapabilityRouter — so it is part of
+        // the minimal chain, not an addition on top of it.
         val spec = build(RequestSignals(text = "привет"))
 
         assertEquals(
-            listOf(NodeType.TEXT_INPUT, NodeType.CONTEXT_BUILD, NodeType.TEXT_GENERATION, NodeType.MEMORY_UPDATE, NodeType.RESPONSE),
+            listOf(
+                NodeType.TEXT_INPUT,
+                NodeType.CONTEXT_BUILD,
+                NodeType.MEMORY_SEARCH,
+                NodeType.TEXT_GENERATION,
+                NodeType.MEMORY_UPDATE,
+                NodeType.RESPONSE,
+            ),
             spec.nodes.map { it.type },
         )
     }

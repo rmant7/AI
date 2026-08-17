@@ -164,6 +164,14 @@ class NodeExecutors(
             )
         }
 
+        if (context.attachedDocuments.isNotEmpty()) {
+            fragments += ContextFragment(
+                source = FragmentSource.KNOWLEDGE,
+                text = "Пользователь прикрепил файлы: ${context.attachedDocuments.joinToString(", ")}. " +
+                    "Их содержимое доступно через фрагменты ниже, если они относятся к вопросу.",
+            )
+        }
+
         for (value in inputs) {
             when (value) {
                 is NodeValue.Fragments -> fragments += value.fragments

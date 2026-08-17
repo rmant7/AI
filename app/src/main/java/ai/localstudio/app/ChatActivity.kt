@@ -223,6 +223,7 @@ class ChatActivity : AppCompatActivity() {
             .filterNot { it.isError }
             .takeLast(MAX_HISTORY_TURNS)
             .map { ConversationTurn(it.role, it.body) }
+        val attachedDocuments = container.documents.list().map { it.name }
 
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -238,6 +239,7 @@ class ChatActivity : AppCompatActivity() {
                                 text = text,
                                 memoryEnabled = container.settings.memoryEnabled,
                                 history = history,
+                                attachedDocuments = attachedDocuments,
                             ),
                         )
                     }
@@ -320,13 +322,13 @@ class ChatActivity : AppCompatActivity() {
                 return
             }
             recorder.start()
-            binding.micButton.text = "■"
+            binding.micButton.setIconResource(R.drawable.ic_stop)
             binding.statusText.text = getString(R.string.chat_recording)
             return
         }
 
         val audio = recorder.stop()
-        binding.micButton.text = getString(R.string.chat_mic)
+        binding.micButton.setIconResource(R.drawable.ic_mic)
         updateStatus()
         val seed = container.whisperStore.installedSeed(container.settings.whisperModelId) ?: return
 

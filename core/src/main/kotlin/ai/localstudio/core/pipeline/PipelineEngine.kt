@@ -37,6 +37,14 @@ data class RunContext(
      * contains a recall keyword — see [ai.localstudio.core.router.CapabilityRouter].
      */
     val history: List<ConversationTurn> = emptyList(),
+    /**
+     * Names of documents attached to this conversation, regardless of whether
+     * memory search happens to find a relevant excerpt. Without this, a
+     * generic "what files do I have?" — which shares no words with the actual
+     * document text — retrieved nothing, and the model denied any files were
+     * attached at all.
+     */
+    val attachedDocuments: List<String> = emptyList(),
     val params: Map<String, String> = emptyMap(),
 )
 

@@ -34,46 +34,60 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="bottom"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="8dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/attachButton"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
-            android:minWidth="0dp"
-            android:paddingHorizontal="8dp"
-            android:text="@string/chat_attach" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/micButton"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
-            android:minWidth="0dp"
-            android:paddingHorizontal="8dp"
-            android:text="@string/chat_mic" />
-
-        <EditText
-            android:id="@+id/input"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:autofillHints="no"
-            android:hint="@string/chat_hint"
-            android:inputType="textMultiLine|textCapSentences"
-            android:maxLines="4"
-            android:minHeight="48dp" />
+            android:background="@drawable/bg_input_pill"
+            android:gravity="bottom"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="8dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/attachButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/chat_attach"
+                app:icon="@drawable/ic_attach_file" />
+
+            <EditText
+                android:id="@+id/input"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:autofillHints="no"
+                android:background="@null"
+                android:hint="@string/chat_hint"
+                android:inputType="textMultiLine|textCapSentences"
+                android:maxLines="4"
+                android:minHeight="48dp"
+                android:paddingVertical="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/micButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/chat_mic"
+                app:icon="@drawable/ic_mic" />
+
+        </LinearLayout>
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/sendButton"
+            style="@style/Widget.Material3.Button.IconButton.Filled"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
-            android:text="@string/send" />
+            android:layout_marginStart="4dp"
+            android:contentDescription="@string/send"
+            app:icon="@drawable/ic_send" />
 
     </LinearLayout>
 

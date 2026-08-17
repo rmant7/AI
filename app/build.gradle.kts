@@ -99,6 +99,10 @@ dependencies {
     // Text-file / PDF attachment → RAG context.
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
+    // Renders the assistant's markdown (lists, **bold**, code) as formatted
+    // text instead of the raw asterisks and hashes an LLM's output is full of.
+    implementation("io.noties.markwon:core:4.6.2")
+
     // On-device speech-to-text (Whisper, TFLite).
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
 
