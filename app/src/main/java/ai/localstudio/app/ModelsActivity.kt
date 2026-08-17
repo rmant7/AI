@@ -172,12 +172,19 @@ class ModelsActivity : AppCompatActivity() {
         if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
         add(Row.Header(getString(R.string.models_local_header)))
 
+        val freshness = container.catalogFreshness.cached()
+
         (LocalModels.SEEDS + customSeeds).forEach { seed ->
             val state = container.downloads.stateOf(seed)
             val selected = container.settings.providerId == CloudProviders.LOCAL.id &&
                 container.settings.chatModel == seed.id
             val fitsBudget = seed.approxSizeBytes == 0L ||
                 seed.approxSizeBytes * 13 / 10 <= device.usableRamBytes
+            // Checked at the last app launch, not at render time — this is
+            // what "недоступен" means below: at least one source 404'd or
+            // was gated the last time this catalogue was refreshed, before
+            // the user ever tapped Download.
+            val knownStale = freshness[seed.id]?.ok == false && state !is DownloadState.Installed
 
             add(
                 Row.Model(
@@ -187,6 +194,7 @@ class ModelsActivity : AppCompatActivity() {
                         if (seed.approxSizeBytes > 0) append(" · ~${size(seed.approxSizeBytes)}")
                         append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
                         if (!fitsBudget) append(" · превышает бюджет памяти")
+                        if (knownStale) append(" · ").append(getString(R.string.model_catalog_stale))
                         append("\n").append(seed.note)
                     },
                     selected = selected,

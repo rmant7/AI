@@ -26,6 +26,7 @@ import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.llama.LlamaCppRuntime
+import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
 import ai.localstudio.app.models.ModelDownloadService
@@ -59,6 +60,8 @@ class AppContainer private constructor(private val context: Context) {
 
     val documents = DocumentStore(context)
 
+    val catalogFreshness = CatalogFreshness(context)
+
     // InMemoryMemoryProvider, as the name says, does not survive the process
     // being killed — routine on Android the moment the app is backgrounded.
     // [documents] does survive it (it's a file), so on every fresh start its
@@ -81,6 +84,17 @@ class AppContainer private constructor(private val context: Context) {
                     memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to doc.name))
                 }
                 synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
+            }
+        }
+
+        // Re-checks every catalogue entry against Hugging Face, throttled to
+        // once an hour so relaunching the app repeatedly does not repeat it.
+        // Best-effort and silent: a stale or offline check just means the
+        // Models screen shows whatever it showed last, not a crash or a
+        // blocked launch.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching {
+                catalogFreshness.refreshIfStale(LocalModels.SEEDS, settings.huggingFaceToken.ifBlank { null })
             }
         }
     }

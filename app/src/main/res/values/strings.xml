@@ -74,6 +74,7 @@
     <string name="model_fit_recommended">рекомендуется</string>
     <string name="model_fit_heavy">тяжёлая, но пойдёт</string>
     <string name="model_fit_too_large">очень большая</string>
+    <string name="model_catalog_stale">⚠ источник недоступен (проверено при запуске)</string>
     <string name="dialog_ok">Понятно</string>
     <string name="dialog_cancel">Отмена</string>
     <string name="settings_ram">Бюджет памяти на модель, % от общей RAM</string>
