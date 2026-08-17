@@ -43,31 +43,6 @@ android {
         }
     }
 
-    // A universal APK carries every ABI's native libraries at once — with
-    // MediaPipe/TFLite/llama.cpp all shipping their own .so per ABI, that
-    // doubled the download for a phone, which only ever uses one of them. A
-    // debug build's native libraries are stored uncompressed, so this is not
-    // a rounding difference: splitting is what makes the arm64-v8a build (the
-    // one that matters — every phone worth running a model on) small enough
-    // to hand someone directly instead of only through a release page.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = false
-        }
-    }
-
-    packaging {
-        resources {
-            // Pulled in transitively for PDF crypto this app never exercises
-            // (post-quantum schemes at that — Picnic, SIKE); several
-            // megabytes of property tables for code paths nothing calls.
-            excludes += "org/bouncycastle/pqc/**"
-        }
-    }
-
     // A fixed debug key, committed on purpose. AGP generates a throwaway
     // debug keystore when none exists, and CI starts from a clean home every
     // run — so consecutive builds were signed with different keys and Android

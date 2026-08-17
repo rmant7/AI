@@ -50,13 +50,7 @@ jobs:
         id: apk
         run: |
           set -euo pipefail
-          # ABI splits (see app/build.gradle.kts) produce one APK per ABI
-          # instead of a universal one carrying both native library sets —
-          # arm64-v8a is what every phone worth running a model on actually
-          # uses, so that is the one worth handing someone directly. The
-          # x86_64 split still gets built (it's what the smoke-test job
-          # installs onto the emulator) but is not the release asset.
-          src=$(find app/build/outputs/apk/debug -name "*arm64-v8a*.apk" | head -n1)
+          src=$(find app/build/outputs/apk/debug -name "*.apk" | head -n1)
           out="local-ai-studio-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
@@ -84,6 +78,11 @@ jobs:
             echo "job status: ${{ job.status }}"
             echo "---"
             grep -E "^e: |error:|FAILURE:|BUILD (SUCCESSFUL|FAILED)|Execution failed|Caused by:|ninja: build stopped|C/C\+\+:.*error|^\s+> " build.log 2>/dev/null | tail -60 || echo "no build log"
+            echo "--- script/config errors (build.gradle.kts syntax, unresolved DSL, etc.) ---"
+            # A broken Gradle *script* (as opposed to app source) fails before
+            # any of the above patterns appear — this is what surfaced nothing
+            # useful the first time a build.gradle.kts edit had a bad DSL call.
+            grep -A 25 "What went wrong" build.log 2>/dev/null | tail -80 || echo "none"
           } > /tmp/status/status.txt
           cd /tmp/status
           git init -q .
