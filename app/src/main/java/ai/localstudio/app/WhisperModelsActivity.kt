@@ -15,6 +15,8 @@ import ai.localstudio.app.databinding.ItemLocalModelBinding
 import ai.localstudio.app.whisper.WhisperDownloadState
 import ai.localstudio.app.whisper.WhisperModelSeed
 import ai.localstudio.app.whisper.WhisperModels
+import ai.localstudio.core.registry.DeviceProfile
+import ai.localstudio.core.registry.ModelFit
 import kotlinx.coroutines.launch
 
 /**
@@ -82,6 +84,9 @@ class WhisperModelsActivity : AppCompatActivity() {
     }
 
     private fun render() {
+        val device = container.device
+        binding.whisperHint.text = describeDevice(device)
+
         val states = container.whisperDownloads.state.value
         val anyRunning = states.values.any { it is WhisperDownloadState.Running }
         val selectedId = container.settings.whisperModelId
@@ -93,16 +98,27 @@ class WhisperModelsActivity : AppCompatActivity() {
                 state = container.whisperDownloads.stateOf(seed),
                 selected = installed?.id == seed.id,
                 downloadBlocked = anyRunning && container.whisperDownloads.stateOf(seed) is WhisperDownloadState.Idle,
+                fit = device.classifyFit(seed.approxSizeBytes),
             )
         }
         adapter.submit(rows)
     }
+
+    private fun describeDevice(device: DeviceProfile): String = buildString {
+        append("RAM: ${gb(device.totalRamBytes)} всего, ${gb(device.availableRamBytes)} свободно\n")
+        append(getString(R.string.settings_whisper_note))
+    }
+
+    private fun gb(bytes: Long): String =
+        if (bytes >= 1_000_000_000) "%.1f ГБ".format(bytes / 1_000_000_000.0)
+        else "%.0f МБ".format(bytes / 1_000_000.0)
 
     data class Row(
         val seed: WhisperModelSeed,
         val state: WhisperDownloadState,
         val selected: Boolean,
         val downloadBlocked: Boolean,
+        val fit: ModelFit,
     )
 
     private inner class RowAdapter(
@@ -136,7 +152,7 @@ class WhisperModelsActivity : AppCompatActivity() {
         ) {
             val context = binding.root.context
             binding.localTitle.text = row.seed.title + if (row.selected) "  ✓" else ""
-            binding.localSubtitle.text = "~${size(row.seed.approxSizeBytes)}"
+            binding.localSubtitle.text = "~${size(row.seed.approxSizeBytes)} · ${fitLabel(row.fit)}"
 
             var progressVisible = false
             var secondaryVisible = false
@@ -192,5 +208,12 @@ class WhisperModelsActivity : AppCompatActivity() {
         private fun size(bytes: Long): String =
             if (bytes >= 1_000_000_000) "%.2f ГБ".format(bytes / 1_000_000_000.0)
             else "%.0f МБ".format(bytes / 1_000_000.0)
+
+        private fun fitLabel(fit: ModelFit): String = when (fit) {
+            ModelFit.LIGHTWEIGHT -> "лёгкая"
+            ModelFit.RECOMMENDED -> "рекомендуется"
+            ModelFit.ADVANCED -> "тяжёлая, но пойдёт"
+            ModelFit.TOO_LARGE -> "очень большая"
+        }
     }
 }

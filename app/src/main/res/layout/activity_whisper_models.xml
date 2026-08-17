@@ -10,7 +10,6 @@
         android:layout_height="wrap_content"
         android:background="?attr/colorSurfaceVariant"
         android:padding="16dp"
-        android:text="@string/settings_whisper_note"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="12sp" />
 
