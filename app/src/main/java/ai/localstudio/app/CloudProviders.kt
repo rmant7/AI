@@ -50,7 +50,7 @@ object CloudProviders {
             id = "gemini",
             title = "Google Gemini",
             baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
-            defaultModel = "gemini-2.0-flash",
+            defaultModel = "gemini-3.7-flash",
             keyHint = "Ключ: aistudio.google.com → Get API key",
         ),
         CloudProvider(
