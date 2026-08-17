@@ -9,17 +9,36 @@ import androidx.recyclerview.widget.RecyclerView
 import ai.localstudio.app.databinding.ItemMessageBinding
 import com.google.android.material.R as MaterialR
 import com.google.android.material.color.MaterialColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 data class Message(
     val role: String,
     val body: String,
     val details: String? = null,
     val isError: Boolean = false,
+    /** Wall-clock time the message appeared. 0 for conversations saved before this existed. */
+    val timestamp: Long = System.currentTimeMillis(),
 ) {
     companion object {
         fun user(text: String) = Message("Вы", text)
         fun assistant(body: String, details: String?) = Message("Модель", body, details)
         fun error(body: String, details: String?) = Message("Ошибка", body, details, isError = true)
+
+        /**
+         * Moscow time, always — pinned rather than device-local because the
+         * user reads these against their own clock, and a phone that travels
+         * or sits on a different timezone would otherwise silently relabel
+         * every message in the history.
+         */
+        private val clockFormat = SimpleDateFormat("HH:mm", Locale.getDefault()).apply {
+            timeZone = TimeZone.getTimeZone("Europe/Moscow")
+        }
+
+        fun formatTime(timestamp: Long): String =
+            if (timestamp <= 0L) "" else synchronized(clockFormat) { clockFormat.format(Date(timestamp)) }
     }
 }
 
@@ -56,6 +75,10 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         binding.detailsText.text = message.details.orEmpty()
         binding.detailsText.visibility = if (message.details.isNullOrBlank()) View.GONE else View.VISIBLE
 
+        val time = Message.formatTime(message.timestamp)
+        binding.timeText.text = time
+        binding.timeText.visibility = if (time.isBlank()) View.GONE else View.VISIBLE
+
         val isUser = message.role == "Вы"
         val (backgroundRes, textColorAttr) = when {
             message.isError -> R.drawable.bg_bubble_error to MaterialR.attr.colorOnErrorContainer
@@ -72,6 +95,7 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
 
         val textColor = MaterialColors.getColor(binding.root, textColorAttr)
         binding.roleText.setTextColor(textColor)
+        binding.timeText.setTextColor(textColor)
         binding.bodyText.setTextColor(textColor)
         binding.detailsText.setTextColor(textColor)
     }

@@ -14,13 +14,32 @@
         android:paddingHorizontal="14dp"
         android:paddingVertical="10dp">
 
-        <TextView
-            android:id="@+id/roleText"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:alpha="0.7" />
+            android:orientation="horizontal"
+            android:baselineAligned="true">
+
+            <TextView
+                android:id="@+id/roleText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:alpha="0.7"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/timeText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:alpha="0.55"
+                android:gravity="end"
+                android:paddingStart="12dp"
+                android:paddingEnd="0dp"
+                android:textSize="11sp" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/bodyText"

@@ -12,6 +12,8 @@ data class StoredMessage(
     val body: String,
     val details: String? = null,
     val isError: Boolean = false,
+    /** Defaults to 0 so conversations saved before timestamps existed still decode; the UI hides a zero. */
+    val timestamp: Long = 0L,
 )
 
 @Serializable
@@ -66,5 +68,5 @@ class ChatHistoryStore(context: Context) {
     }
 }
 
-fun Message.toStored() = StoredMessage(role, body, details, isError)
-fun StoredMessage.toMessage() = Message(role, body, details, isError)
+fun Message.toStored() = StoredMessage(role, body, details, isError, timestamp)
+fun StoredMessage.toMessage() = Message(role, body, details, isError, timestamp)
