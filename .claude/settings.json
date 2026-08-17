@@ -1,0 +1,6 @@
+{
+  "showMessageTimestamps": true,
+  "permissions": {
+    "deny": ["AskUserQuestion"]
+  }
+}
