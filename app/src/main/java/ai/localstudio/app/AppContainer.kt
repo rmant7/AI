@@ -9,6 +9,7 @@ import ai.localstudio.core.engine.ModelSelector
 import ai.localstudio.core.engine.NodeExecutors
 import ai.localstudio.core.engine.Orchestrator
 import ai.localstudio.core.memory.InMemoryMemoryProvider
+import ai.localstudio.core.memory.MemoryScope
 import ai.localstudio.core.pipeline.PipelineCodec
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.InstallState
@@ -21,6 +22,8 @@ import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.router.CapabilityRouter
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
+import ai.localstudio.app.attach.AttachedDocument
+import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.llama.LlamaCppRuntime
 import ai.localstudio.app.models.LocalModelSeed
@@ -48,6 +51,38 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Memory lives above the models, so it survives switching between runtimes. */
     val memory = InMemoryMemoryProvider()
+
+    val documents = DocumentStore(context)
+
+    // InMemoryMemoryProvider, as the name says, does not survive the process
+    // being killed — routine on Android the moment the app is backgrounded.
+    // [documents] does survive it (it's a file), so on every fresh start its
+    // chunks are re-remembered here; this map is what lets a later delete
+    // remove exactly the memory items *this* document put there, this run,
+    // rather than guess by matching text.
+    private val documentMemoryIds = mutableMapOf<String, List<String>>()
+
+    init {
+        documents.list().forEach { doc ->
+            val ids = kotlinx.coroutines.runBlocking {
+                doc.chunks.map { chunk -> memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to doc.name)) }
+            }
+            documentMemoryIds[doc.id] = ids
+        }
+    }
+
+    suspend fun rememberDocument(name: String, chunks: List<String>): AttachedDocument {
+        val ids = chunks.map { chunk -> memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to name)) }
+        val doc = AttachedDocument(id = "doc-${System.currentTimeMillis()}", name = name, chunks = chunks, addedAt = System.currentTimeMillis())
+        documents.add(doc)
+        documentMemoryIds[doc.id] = ids
+        return doc
+    }
+
+    suspend fun forgetDocument(id: String) {
+        documentMemoryIds.remove(id)?.forEach { memoryId -> memory.forget(memoryId) }
+        documents.remove(id)
+    }
 
     /** Recomputed on demand: free memory moves, and the budget is user-settable. */
     val device: DeviceProfile get() = profileOf(context, settings.ramBudgetFraction)

@@ -44,6 +44,12 @@
             android:label="@string/settings_whisper_manage"
             android:parentActivityName=".SettingsActivity" />
 
+        <activity
+            android:name=".FilesActivity"
+            android:exported="false"
+            android:label="@string/menu_files"
+            android:parentActivityName=".ChatActivity" />
+
         <service
             android:name=".models.ModelDownloadService"
             android:exported="false"

@@ -15,13 +15,17 @@
 
     <string name="chat_attach">Файл</string>
     <string name="chat_mic">Голос</string>
-    <string name="chat_attach_hint">Поддерживаются .txt и .pdf — текст добавляется в память и учитывается в ответах.</string>
     <string name="chat_attach_added">Добавлено в память: %1$s (%2$d фрагм.)</string>
     <string name="chat_attach_failed">Не удалось прочитать файл: %1$s</string>
     <string name="chat_recording">Идёт запись… нажмите ещё раз, чтобы остановить</string>
     <string name="chat_transcribing">Распознаю…</string>
     <string name="chat_mic_no_model">Модель распознавания речи не установлена. Скачайте её в Настройках.</string>
     <string name="chat_mic_permission">Нужен доступ к микрофону</string>
+
+    <string name="menu_files">Файлы</string>
+    <string name="files_hint">Загруженные файлы видны всем чатам и любой выбранной модели — это общая память приложения, а не память одного чата. Здесь можно посмотреть, что загружено, и удалить лишнее.</string>
+    <string name="files_empty">Пока ничего не загружено. Прикрепите файл кнопкой «Файл» в чате.</string>
+    <string name="files_subtitle">%1$d фрагм. · %2$s</string>
 
     <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
     <string name="settings_whisper_manage">Управление моделями голоса</string>

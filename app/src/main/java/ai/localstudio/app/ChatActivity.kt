@@ -22,7 +22,6 @@ import ai.localstudio.app.history.toMessage
 import ai.localstudio.app.history.toStored
 import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.core.engine.UserRequest
-import ai.localstudio.core.memory.MemoryScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -85,9 +84,10 @@ class ChatActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_MEMORY, 0, memoryTitle()).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(0, MENU_MODELS, 1, R.string.menu_models)
-        menu.add(0, MENU_SETTINGS, 2, R.string.menu_settings)
-        menu.add(0, MENU_HISTORY, 3, R.string.menu_history)
-        menu.add(0, MENU_CLEAR, 4, R.string.menu_clear)
+        menu.add(0, MENU_FILES, 2, R.string.menu_files)
+        menu.add(0, MENU_SETTINGS, 3, R.string.menu_settings)
+        menu.add(0, MENU_HISTORY, 4, R.string.menu_history)
+        menu.add(0, MENU_CLEAR, 5, R.string.menu_clear)
         return true
     }
 
@@ -104,6 +104,11 @@ class ChatActivity : AppCompatActivity() {
 
         MENU_MODELS -> {
             startActivity(Intent(this, ModelsActivity::class.java))
+            true
+        }
+
+        MENU_FILES -> {
+            startActivity(Intent(this, FilesActivity::class.java))
             true
         }
 
@@ -249,9 +254,7 @@ class ChatActivity : AppCompatActivity() {
             }
             result
                 .onSuccess { chunks ->
-                    chunks.forEach { chunk ->
-                        container.memory.remember(chunk, MemoryScope.SEMANTIC, metadata = mapOf("source" to name))
-                    }
+                    container.rememberDocument(name, chunks)
                     container.settings.memoryEnabled = true
                     invalidateOptionsMenu()
                     updateStatus()
@@ -325,8 +328,9 @@ class ChatActivity : AppCompatActivity() {
     private companion object {
         const val MENU_MEMORY = 1
         const val MENU_MODELS = 2
-        const val MENU_SETTINGS = 3
-        const val MENU_HISTORY = 4
-        const val MENU_CLEAR = 5
+        const val MENU_FILES = 3
+        const val MENU_SETTINGS = 4
+        const val MENU_HISTORY = 5
+        const val MENU_CLEAR = 6
     }
 }
