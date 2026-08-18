@@ -27,10 +27,17 @@ class WhisperStore(private val context: Context) {
 
     fun hasVocab(): Boolean = vocabFile().let { it.isFile && it.length() > MIN_PLAUSIBLE_VOCAB_SIZE }
 
-    /** [preferredId] wins if that size is actually installed; otherwise whichever is. */
+    /**
+     * [preferredId] wins if that size is actually installed; otherwise the
+     * largest installed size — not just "whichever happens to be first in
+     * [WhisperModels.SEEDS]", which is Tiny. That fallback meant installing
+     * Tiny (for the live preview) silently downgraded the final, accurate
+     * transcription away from whatever larger model someone had actually
+     * been using, the moment nothing had been explicitly selected.
+     */
     fun installedSeed(preferredId: String? = null): WhisperModelSeed? {
         val preferred = preferredId?.let { id -> WhisperModels.byId(id) }?.takeIf { isInstalled(it) }
-        return preferred ?: WhisperModels.SEEDS.firstOrNull { isInstalled(it) }
+        return preferred ?: WhisperModels.SEEDS.filter { isInstalled(it) }.maxByOrNull { it.approxSizeBytes }
     }
 
     fun delete(seed: WhisperModelSeed) {

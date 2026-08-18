@@ -80,6 +80,8 @@
     <string name="model_ram_warning">Эта модель превышает бюджет памяти для вашего устройства. Скорее всего система принудительно закроет приложение во время генерации ответа — без сообщения об ошибке, просто закроется. Продолжить всё равно?</string>
     <string name="model_ram_warning_continue">Всё равно использовать</string>
     <string name="dialog_ok">Понятно</string>
+    <string name="settings_about">О сборке</string>
+    <string name="settings_about_body">Версия: %1$s (код %2$d)\nКоммит: %3$s\nCI-сборка: %4$s\n\nСравните коммит с тем, что было отправлено в чате, чтобы убедиться, что это именно та сборка.</string>
     <string name="dialog_cancel">Отмена</string>
     <string name="settings_ram">Бюджет памяти на модель, % от общей RAM</string>
     <string name="settings_ram_hint">60</string>

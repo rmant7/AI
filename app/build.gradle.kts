@@ -11,6 +11,23 @@ repositories {
     mavenCentral()
 }
 
+// versionName/versionCode are static and near-useless for "is this actually
+// the build I was just sent" — every APK this project has ever produced
+// carries the same "0.1"/1. The commit this APK was built from is the one
+// thing that actually answers that question, so it gets baked in directly
+// rather than relying on anyone to remember to bump a version number.
+val gitSha: String = runCatching {
+    ProcessBuilder("git", "rev-parse", "--short=10", "HEAD")
+        .directory(rootDir)
+        .redirectErrorStream(true)
+        .start()
+        .let { process -> process.inputStream.bufferedReader().readText().trim() to process.waitFor() }
+        .let { (output, exitCode) -> if (exitCode == 0) output else "unknown" }
+}.getOrDefault("unknown")
+
+// Correlates with the "apk-N" GitHub Release tag CI publishes under.
+val ciRun: String = System.getenv("GITHUB_RUN_NUMBER") ?: "local"
+
 android {
     namespace = "ai.localstudio.app"
     compileSdk = 35
@@ -22,6 +39,8 @@ android {
         versionCode = 1
         versionName = "0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "CI_RUN", "\"$ciRun\"")
 
         ndk {
             // arm64 is every phone worth running a model on; x86_64 exists so
@@ -59,6 +78,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     compileOptions {

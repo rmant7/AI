@@ -370,14 +370,20 @@ class ChatActivity : AppCompatActivity() {
         if (!container.whisperStore.isInstalled(previewSeed)) return
 
         previewJob = lifecycleScope.launch {
+            // Shorter than the steady-state interval: a short utterance can
+            // otherwise end (stop tapped) before the first cycle ever
+            // completes, which is indistinguishable from the preview not
+            // working at all.
+            kotlinx.coroutines.delay(PREVIEW_FIRST_DELAY_MS)
             while (recorder.isRecording) {
-                kotlinx.coroutines.delay(PREVIEW_INTERVAL_MS)
-                if (!recorder.isRecording) break
                 val snapshot = recorder.snapshot()
-                if (snapshot.isEmpty()) continue
-                val partial = runCatching { container.whisperPreviewEngine.transcribe(previewSeed, snapshot) }
-                    .getOrNull()
-                if (!partial.isNullOrBlank()) setInputText(partial)
+                if (snapshot.isNotEmpty()) {
+                    val partial = runCatching { container.whisperPreviewEngine.transcribe(previewSeed, snapshot) }
+                        .getOrNull()
+                    if (!partial.isNullOrBlank()) setInputText(partial)
+                }
+                if (!recorder.isRecording) break
+                kotlinx.coroutines.delay(PREVIEW_INTERVAL_MS)
             }
         }
     }
@@ -415,5 +421,6 @@ class ChatActivity : AppCompatActivity() {
         // Short enough to read as "live", long enough that Tiny is done
         // transcribing everything so far well before the next tick.
         const val PREVIEW_INTERVAL_MS = 1_500L
+        const val PREVIEW_FIRST_DELAY_MS = 700L
     }
 }

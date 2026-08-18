@@ -2,10 +2,13 @@ package ai.localstudio.app
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivitySettingsBinding
@@ -135,8 +138,42 @@ class SettingsActivity : AppCompatActivity() {
         finish()
     }
 
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menu.add(0, MENU_ABOUT, 0, R.string.settings_about)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        MENU_ABOUT -> {
+            showAbout()
+            true
+        }
+
+        else -> super.onOptionsItemSelected(item)
+    }
+
+    /** Exactly "is this the build I was just sent" — the git commit an APK was built from, not a version number nobody bumps. */
+    private fun showAbout() {
+        val message = getString(
+            R.string.settings_about_body,
+            BuildConfig.VERSION_NAME,
+            BuildConfig.VERSION_CODE,
+            BuildConfig.GIT_SHA,
+            BuildConfig.CI_RUN,
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.settings_about)
+            .setMessage(message)
+            .setPositiveButton(R.string.dialog_ok, null)
+            .show()
+    }
+
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
+    }
+
+    private companion object {
+        const val MENU_ABOUT = 1
     }
 }
