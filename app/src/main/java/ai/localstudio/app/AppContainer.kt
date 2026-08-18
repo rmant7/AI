@@ -34,6 +34,7 @@ import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
+import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiRuntime
@@ -134,7 +135,32 @@ class AppContainer private constructor(private val context: Context) {
         whisperStore,
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
     )
+
+    /** The model the user picked (or the biggest installed one) — used for the one accurate final transcript. */
     val whisperEngine = WhisperEngine(whisperStore)
+
+    /**
+     * A second, independent engine dedicated to Whisper Tiny, kept loaded on
+     * its own so a live preview during recording never fights the main
+     * engine over which model is currently loaded. [WhisperEngine] only
+     * holds one model at a time and reloads on every seed change, so sharing
+     * one engine between "tiny for live preview" and "whatever the user
+     * picked for the final pass" would thrash between the two on every
+     * recording instead of ever having either warm.
+     */
+    val whisperPreviewEngine = WhisperEngine(whisperStore)
+
+    init {
+        // First launch, voice input should just work: without this, a user
+        // has to already know Models → Голос exists before the mic button
+        // does anything at all. Tiny is 75 MB — small enough to fetch
+        // without asking, and it doubles as the live-preview model.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            if (whisperStore.installedSeed() == null) {
+                WhisperModels.byId(WhisperModels.TINY_ID)?.let { whisperDownloads.start(it) }
+            }
+        }
+    }
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

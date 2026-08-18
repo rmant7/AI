@@ -21,9 +21,12 @@ object WhisperModels {
      */
     const val VOCAB_URL = "https://huggingface.co/openai/whisper-base/resolve/main/vocab.json"
 
+    /** Fast enough to re-run every second or two during recording for a live preview; also the auto-downloaded first-launch default. */
+    const val TINY_ID = "whisper-tiny"
+
     val SEEDS = listOf(
         WhisperModelSeed(
-            id = "whisper-tiny",
+            id = TINY_ID,
             title = "Whisper Tiny",
             modelUrl = "https://huggingface.co/cik009/whisper/resolve/main/whisper-tiny.tflite",
             approxSizeBytes = 75_000_000,

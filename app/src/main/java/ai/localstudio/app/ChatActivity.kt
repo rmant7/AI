@@ -21,6 +21,7 @@ import ai.localstudio.app.history.Conversation
 import ai.localstudio.app.history.toMessage
 import ai.localstudio.app.history.toStored
 import ai.localstudio.app.whisper.AudioRecorder
+import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.engine.UserRequest
 import ai.localstudio.core.pipeline.ConversationTurn
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,11 @@ class ChatActivity : AppCompatActivity() {
     private var conversationId = "chat-" + System.currentTimeMillis()
     private val recorder = AudioRecorder()
     private var isGenerating = false
+    private var previewJob: kotlinx.coroutines.Job? = null
+    // Whatever was already typed before the mic was tapped — live preview
+    // updates the field repeatedly while recording, and each update must
+    // still be "the old text plus what's been said so far", not overwrite it.
+    private var recordingPrefix = ""
 
     private val pickDocument = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { ingestDocument(it) }
@@ -76,6 +82,7 @@ class ChatActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         container.whisperEngine.release()
+        container.whisperPreviewEngine.release()
     }
 
     override fun onResume() {
@@ -321,12 +328,16 @@ class ChatActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.chat_mic_no_model, Toast.LENGTH_LONG).show()
                 return
             }
+            recordingPrefix = binding.input.text?.toString().orEmpty()
             recorder.start()
             binding.micButton.setIconResource(R.drawable.ic_stop)
             binding.statusText.text = getString(R.string.chat_recording)
+            startPreviewLoop()
             return
         }
 
+        previewJob?.cancel()
+        previewJob = null
         val audio = recorder.stop()
         binding.micButton.setIconResource(R.drawable.ic_mic)
         updateStatus()
@@ -339,17 +350,42 @@ class ChatActivity : AppCompatActivity() {
             }
             updateStatus()
             result
-                .onSuccess { text ->
-                    if (text.isNotBlank()) {
-                        val current = binding.input.text?.toString().orEmpty()
-                        binding.input.setText(if (current.isBlank()) text else "$current $text")
-                        binding.input.setSelection(binding.input.text?.length ?: 0)
-                    }
-                }
+                .onSuccess { text -> if (text.isNotBlank()) setInputText(text) }
                 .onFailure { error ->
                     Toast.makeText(this@ChatActivity, error.message ?: error.toString(), Toast.LENGTH_LONG).show()
                 }
         }
+    }
+
+    /**
+     * Re-transcribes the recording so far with the small, fast Tiny model
+     * every couple of seconds — never the model actually selected for the
+     * final pass, which may be far larger and take many seconds per call on
+     * its own. Running that repeatedly during recording would queue up
+     * overlapping multi-second calls instead of ever feeling live; Tiny is
+     * fast enough that "re-run the whole thing so far" reads as continuous.
+     */
+    private fun startPreviewLoop() {
+        val previewSeed = WhisperModels.byId(WhisperModels.TINY_ID) ?: return
+        if (!container.whisperStore.isInstalled(previewSeed)) return
+
+        previewJob = lifecycleScope.launch {
+            while (recorder.isRecording) {
+                kotlinx.coroutines.delay(PREVIEW_INTERVAL_MS)
+                if (!recorder.isRecording) break
+                val snapshot = recorder.snapshot()
+                if (snapshot.isEmpty()) continue
+                val partial = runCatching { container.whisperPreviewEngine.transcribe(previewSeed, snapshot) }
+                    .getOrNull()
+                if (!partial.isNullOrBlank()) setInputText(partial)
+            }
+        }
+    }
+
+    private fun setInputText(recognized: String) {
+        val text = if (recordingPrefix.isBlank()) recognized else "$recordingPrefix $recognized"
+        binding.input.setText(text)
+        binding.input.setSelection(text.length)
     }
 
     private fun setBusy(busy: Boolean) {
@@ -375,5 +411,9 @@ class ChatActivity : AppCompatActivity() {
         // does not fit. This just bounds how much history gets rendered and
         // handed over in the first place.
         const val MAX_HISTORY_TURNS = 12
+
+        // Short enough to read as "live", long enough that Tiny is done
+        // transcribing everything so far well before the next tick.
+        const val PREVIEW_INTERVAL_MS = 1_500L
     }
 }

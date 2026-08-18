@@ -57,6 +57,9 @@ class AudioRecorder {
         return synchronized(buffer) { buffer.toByteArray() }
     }
 
+    /** Everything captured so far, without stopping — for a live preview while still recording. */
+    fun snapshot(): ByteArray = synchronized(buffer) { buffer.toByteArray() }
+
     private companion object {
         const val SAMPLE_RATE = 16000
         const val STOP_JOIN_TIMEOUT_MS = 2_000L
