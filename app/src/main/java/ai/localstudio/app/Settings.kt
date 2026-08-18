@@ -110,6 +110,21 @@ class Settings(context: Context) {
         get() = prefs.getInt(KEY_CONTEXT_TOKENS, LlamaBridge.DEFAULT_CONTEXT_TOKENS).coerceIn(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS)
         set(value) = prefs.edit().putInt(KEY_CONTEXT_TOKENS, value.coerceIn(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS)).apply()
 
+    /** How many tokens a single reply may run to, regardless of how much context is left. */
+    var maxResponseTokens: Int
+        get() = prefs.getInt(KEY_MAX_TOKENS, DEFAULT_MAX_TOKENS).coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)
+        set(value) = prefs.edit().putInt(KEY_MAX_TOKENS, value.coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)).apply()
+
+    /**
+     * What the assistant is told it is, before anything else — persona, tone,
+     * language, house rules. A blank stored value (including one never set)
+     * falls through to [DEFAULT_SYSTEM_PROMPT] rather than an empty prompt,
+     * so clearing the field in Settings is how a user resets it.
+     */
+    var systemPrompt: String
+        get() = prefs.getString(KEY_SYSTEM_PROMPT, null)?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_SYSTEM_PROMPT
+        set(value) = prefs.edit().putString(KEY_SYSTEM_PROMPT, value.trim()).apply()
+
     /**
      * Clears the sampling keys rather than writing the defaults back, so each
      * property falls through to the same default a fresh install would use —
@@ -122,6 +137,7 @@ class Settings(context: Context) {
             .remove(KEY_TOP_K)
             .remove(KEY_REPEAT_PENALTY)
             .remove(KEY_CONTEXT_TOKENS)
+            .remove(KEY_MAX_TOKENS)
             .apply()
     }
 
@@ -140,6 +156,8 @@ class Settings(context: Context) {
         const val KEY_TOP_K = "topK"
         const val KEY_REPEAT_PENALTY = "repeatPenalty"
         const val KEY_CONTEXT_TOKENS = "contextTokens"
+        const val KEY_MAX_TOKENS = "maxResponseTokens"
+        const val KEY_SYSTEM_PROMPT = "systemPrompt"
         const val DEFAULT_RAM_PERCENT = 60
         const val DEFAULT_ASR_MODEL = "whisper-1"
         const val DEFAULT_TEMPERATURE = 0.7f
@@ -158,5 +176,12 @@ class Settings(context: Context) {
         // model load, not a graceful error.
         const val MIN_CONTEXT_TOKENS = 512
         const val MAX_CONTEXT_TOKENS = 8192
+
+        const val DEFAULT_MAX_TOKENS = 1024
+        const val MIN_MAX_TOKENS = 64
+        const val MAX_MAX_TOKENS = 4096
+
+        const val DEFAULT_SYSTEM_PROMPT =
+            "Ты локальный ассистент Local AI Studio. Отвечай кратко и по делу, на языке пользователя."
     }
 }

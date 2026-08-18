@@ -41,6 +41,10 @@
             android:id="@+id/contextTokens"
             layout="@layout/item_generation_param" />
 
+        <include
+            android:id="@+id/maxTokens"
+            layout="@layout/item_generation_param" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/resetButton"
             style="@style/Widget.Material3.Button.TextButton"

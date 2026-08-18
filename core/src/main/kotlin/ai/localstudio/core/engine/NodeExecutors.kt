@@ -48,6 +48,7 @@ class NodeExecutors(
     private val defaultTopP: Double = 0.95,
     private val defaultTopK: Int = 40,
     private val defaultRepeatPenalty: Double = 1.2,
+    private val defaultMaxTokens: Int = 1024,
 ) {
 
     fun build(): Map<NodeType, NodeExecutor> = buildMap {
@@ -207,7 +208,7 @@ class NodeExecutors(
                 GenerationRequest(
                     prompt = assembled.render(),
                     systemPrompt = systemPrompt,
-                    maxTokens = node.params["max_tokens"]?.toIntOrNull() ?: 1024,
+                    maxTokens = node.params["max_tokens"]?.toIntOrNull() ?: defaultMaxTokens,
                     temperature = node.params["temperature"]?.toDoubleOrNull() ?: defaultTemperature,
                     topP = node.params["top_p"]?.toDoubleOrNull() ?: defaultTopP,
                     topK = node.params["top_k"]?.toIntOrNull() ?: defaultTopK,

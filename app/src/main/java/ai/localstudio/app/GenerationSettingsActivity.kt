@@ -59,6 +59,12 @@ class GenerationSettingsActivity : AppCompatActivity() {
             settings.contextTokens.toString(),
             wholeNumber = true,
         )
+        binding.maxTokens.fill(
+            R.string.settings_max_tokens,
+            R.string.settings_max_tokens_help,
+            settings.maxResponseTokens.toString(),
+            wholeNumber = true,
+        )
     }
 
     private fun ItemGenerationParamBinding.fill(
@@ -83,6 +89,7 @@ class GenerationSettingsActivity : AppCompatActivity() {
         binding.topK.paramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.topK = it }
         binding.repeatPenalty.paramInput.text?.toString()?.trim()?.toDoubleOrNull()?.let { settings.repeatPenalty = it }
         binding.contextTokens.paramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.contextTokens = it }
+        binding.maxTokens.paramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.maxResponseTokens = it }
 
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
         finish()

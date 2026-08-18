@@ -155,6 +155,8 @@ class AppContainer private constructor(private val context: Context) {
             settings.topK,
             settings.repeatPenalty,
             settings.contextTokens,
+            settings.maxResponseTokens,
+            settings.systemPrompt,
         ).joinToString("|")
         cachedOrchestrator?.takeIf { cachedSignature == signature }?.let { return it }
 
@@ -177,12 +179,13 @@ class AppContainer private constructor(private val context: Context) {
             runtimeManager = manager,
             contextEngine = ContextEngine(),
             memory = memory,
-            systemPrompt = SYSTEM_PROMPT,
+            systemPrompt = settings.systemPrompt,
             contextWindowTokens = settings.contextTokens,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
             defaultRepeatPenalty = settings.repeatPenalty,
+            defaultMaxTokens = settings.maxResponseTokens,
         )
         return Orchestrator(CapabilityRouter(), executors).also {
             cachedOrchestrator = it
@@ -277,8 +280,6 @@ class AppContainer private constructor(private val context: Context) {
 
     companion object {
         private const val CATALOG_ASSET = "catalog.example.json"
-        private const val SYSTEM_PROMPT =
-            "Ты локальный ассистент Local AI Studio. Отвечай кратко и по делу, на языке пользователя."
 
         @Volatile
         private var instance: AppContainer? = null
