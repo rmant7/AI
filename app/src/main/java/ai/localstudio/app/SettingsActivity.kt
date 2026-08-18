@@ -28,6 +28,12 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var settings: Settings
     private lateinit var container: AppContainer
 
+    // Deferred to Save like every other field on this screen, but tracked
+    // in memory across spinner switches so enabling several providers in
+    // one visit (switch to Gemini, check it, switch to Mistral, check that
+    // too) accumulates correctly instead of only ever remembering one.
+    private var pendingEnabled = mutableSetOf<String>()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
@@ -37,6 +43,7 @@ class SettingsActivity : AppCompatActivity() {
 
         container = AppContainer.get(this)
         settings = container.settings
+        pendingEnabled = settings.enabledProviderIds.toMutableSet()
 
         binding.providerSpinner.adapter = ArrayAdapter(
             this,
@@ -61,7 +68,13 @@ class SettingsActivity : AppCompatActivity() {
         binding.systemPromptInput.setText(settings.systemPrompt)
         binding.ramInput.setText(settings.ramBudgetPercent.toString())
         binding.hfTokenInput.setText(settings.huggingFaceToken)
+        binding.providerEnabledCheck.setOnCheckedChangeListener { _, checked ->
+            val id = settings.providerId
+            if (checked) pendingEnabled += id else pendingEnabled -= id
+            renderEnabledSummary()
+        }
         showProvider(settings.provider)
+        renderEnabledSummary()
 
         binding.saveButton.setOnClickListener { save() }
         binding.generationSettingsButton.setOnClickListener {
@@ -118,6 +131,19 @@ class SettingsActivity : AppCompatActivity() {
             getString(R.string.settings_chat_model_hint)
         }
         binding.chatModelHint.visibility = if (provider.freeModels.isEmpty()) View.GONE else View.VISIBLE
+        // Setting this can re-fire the checkbox's own listener, but that
+        // listener only reproduces the membership state already being set
+        // here, so it's a harmless no-op rather than something to suppress.
+        binding.providerEnabledCheck.isChecked = provider.id in pendingEnabled
+    }
+
+    private fun renderEnabledSummary() {
+        val titles = CloudProviders.ALL.filter { it.id in pendingEnabled }.map { it.title }
+        binding.enabledProvidersSummary.text = if (titles.isEmpty()) {
+            getString(R.string.settings_no_sources)
+        } else {
+            getString(R.string.settings_active_sources, titles.joinToString(" → "))
+        }
     }
 
     private fun save() {
@@ -133,6 +159,7 @@ class SettingsActivity : AppCompatActivity() {
         settings.systemPrompt = binding.systemPromptInput.text?.toString().orEmpty()
         binding.ramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.ramBudgetPercent = it }
         settings.huggingFaceToken = binding.hfTokenInput.text?.toString().orEmpty()
+        settings.enabledProviderIds = pendingEnabled
 
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
         finish()

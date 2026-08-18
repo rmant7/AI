@@ -18,6 +18,22 @@ class Settings(context: Context) {
 
     val provider: CloudProvider get() = CloudProviders.byId(providerId)
 
+    /**
+     * Which providers the router may actually use, in fallback order — never
+     * unset, so this always has at least [providerId] in it even for someone
+     * who has never touched the checkboxes. [CloudProviders.ALL] lists Local
+     * first, so filtering it by this set is what keeps "local first, cloud as
+     * the fallback" true regardless of the order things were enabled in.
+     */
+    var enabledProviderIds: Set<String>
+        get() = prefs.getString(KEY_ENABLED_PROVIDERS, null)
+            ?.split(',')
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?.takeIf { it.isNotEmpty() }
+            ?: setOf(providerId)
+        set(value) = prefs.edit().putString(KEY_ENABLED_PROVIDERS, value.joinToString(",")).apply()
+
     /** Typed by the user only for a self-hosted server; presets supply their own. */
     var customEndpoint: String
         get() = prefs.getString(KEY_ENDPOINT, "").orEmpty().trim()
@@ -35,10 +51,21 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putString("$KEY_API_KEY:$providerId", value.trim()).apply()
 
     var chatModel: String
-        get() = prefs.getString("$KEY_CHAT_MODEL:$providerId", null)
-            ?.takeIf { it.isNotBlank() }
-            ?: provider.defaultModel
+        get() = chatModelFor(providerId)
         set(value) = prefs.edit().putString("$KEY_CHAT_MODEL:$providerId", value.trim()).apply()
+
+    /**
+     * Same storage [chatModel] reads/writes, parameterized by provider
+     * instead of implicitly using [providerId] — for the fallback chain,
+     * which needs each enabled provider's own configured model without
+     * switching the "currently being edited" provider to read it.
+     */
+    fun chatModelFor(id: String): String =
+        prefs.getString("$KEY_CHAT_MODEL:$id", null)
+            ?.takeIf { it.isNotBlank() }
+            ?: CloudProviders.byId(id).defaultModel
+
+    fun apiKeyFor(id: String): String = prefs.getString("$KEY_API_KEY:$id", "").orEmpty().trim()
 
     var speechModel: String
         get() = prefs.getString(KEY_ASR_MODEL, DEFAULT_ASR_MODEL).orEmpty().ifBlank { DEFAULT_ASR_MODEL }
@@ -150,6 +177,7 @@ class Settings(context: Context) {
 
     private companion object {
         const val KEY_PROVIDER = "provider"
+        const val KEY_ENABLED_PROVIDERS = "enabledProviders"
         const val KEY_ENDPOINT = "endpoint"
         const val KEY_API_KEY = "apiKey"
         const val KEY_CHAT_MODEL = "chatModel"

@@ -35,6 +35,10 @@
 
     <string name="settings_title">Настройки</string>
     <string name="settings_provider">Провайдер модели</string>
+    <string name="settings_provider_enabled">Включить как источник ответов</string>
+    <string name="settings_provider_enabled_help">Можно включить несколько сразу — например, локальную модель и Gemini. Раутер сначала обращается к локальной модели (если включена); если та не отвечает или падает, автоматически пробует следующий включённый источник, а не показывает ошибку.</string>
+    <string name="settings_active_sources">Активные источники: %1$s</string>
+    <string name="settings_no_sources">Источники не выбраны — используется демо-режим</string>
     <string name="settings_endpoint">Адрес сервера</string>
     <string name="settings_endpoint_hint">http://192.168.1.10:11434/v1</string>
     <string name="settings_api_key">API-ключ</string>

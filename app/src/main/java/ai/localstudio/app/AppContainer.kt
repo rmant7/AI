@@ -20,6 +20,8 @@ import ai.localstudio.core.registry.RegistryEntry
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.router.CapabilityRouter
+import ai.localstudio.core.runtime.FallbackCandidate
+import ai.localstudio.core.runtime.FallbackTextRuntime
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
 import ai.localstudio.app.attach.AttachedDocument
@@ -170,39 +172,53 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Rebuilt only when the settings that affect wiring have actually changed. */
     fun orchestrator(): Orchestrator {
-        val signature = listOf(
-            settings.providerId,
-            settings.endpoint,
-            settings.apiKey,
-            settings.chatModel,
-            settings.speechModel,
-            settings.temperature,
-            settings.topP,
-            settings.topK,
-            settings.repeatPenalty,
-            settings.contextTokens,
-            settings.maxResponseTokens,
-            settings.systemPrompt,
-        ).joinToString("|")
+        val enabled = enabledProviders()
+        val candidates = enabled.mapNotNull { provider ->
+            if (provider.id == CloudProviders.LOCAL.id) localCandidate() else cloudCandidate(provider)
+        }
+
+        val signature = (
+            listOf(
+                enabled.map { it.id }.sorted().joinToString(","),
+                settings.customEndpoint,
+                settings.speechModel,
+                settings.temperature,
+                settings.topP,
+                settings.topK,
+                settings.repeatPenalty,
+                settings.contextTokens,
+                settings.maxResponseTokens,
+                settings.systemPrompt,
+            ) +
+                enabled.flatMap { listOf(settings.chatModelFor(it.id), settings.apiKeyFor(it.id)) } +
+                // Which local model is actually installed can change without
+                // any setting changing (download finished, model deleted).
+                candidates.map { it.model.id }
+            ).joinToString("|")
         cachedOrchestrator?.takeIf { cachedSignature == signature }?.let { return it }
 
-        val isLocal = settings.providerId == CloudProviders.LOCAL.id
         val runtime: ModelRuntime = when {
-            isLocal -> LlamaCppRuntime(contextTokens = settings.contextTokens)
-            settings.hasEndpoint ->
-                OpenAiRuntime(OpenAiConfig(baseUrl = settings.endpoint, apiKey = settings.apiKey.ifBlank { null }))
-
-            else -> StubRuntime()
+            candidates.isEmpty() -> StubRuntime()
+            candidates.size == 1 -> candidates.single().runtime
+            // CloudProviders.ALL lists Local first, so `enabled` — and
+            // therefore `candidates` — already carries that order: this is
+            // what makes "local first, cloud as the fallback" true.
+            else -> FallbackTextRuntime(candidates)
         }
+        val isLocalOnly = candidates.singleOrNull()?.binding?.runtime == RuntimeKind.LLAMA_CPP
 
         val manager = RuntimeManager(
             // Remote and stub models hold no local weights; the budget starts
-            // mattering the moment an on-device runtime is added.
+            // mattering the moment an on-device runtime is added. Note this
+            // budget does not see inside a fallback chain: FallbackTextModel
+            // loads each wrapped candidate directly rather than through this
+            // manager, so a local model loaded as part of a chain is not
+            // tracked or evicted the way a standalone local model is.
             budgetBytes = device.usableRamBytes,
             runtimes = mapOf(runtime.kind to runtime),
         )
         val executors = NodeExecutors(
-            selector = ModelSelector(registry(), device),
+            selector = ModelSelector(registry(candidates), device),
             runtimeManager = manager,
             contextEngine = ContextEngine(),
             memory = memory,
@@ -213,7 +229,7 @@ class AppContainer private constructor(private val context: Context) {
             // down to survive on-device was also quietly capping how much
             // conversation/memory ever reached Gemini, unrelated to the
             // max-tokens leak fixed the same way in OpenAiRuntime.
-            contextWindowTokens = if (isLocal) settings.contextTokens else CLOUD_CONTEXT_WINDOW_TOKENS,
+            contextWindowTokens = if (isLocalOnly) settings.contextTokens else CLOUD_CONTEXT_WINDOW_TOKENS,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
@@ -226,21 +242,70 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
-    fun registry(): ModelRegistry {
-        if (settings.providerId == CloudProviders.LOCAL.id) return localRegistry()
-        val kind = if (settings.hasEndpoint) RuntimeKind.REMOTE_OPENAI else RuntimeKind.STUB
-        return ModelRegistry(
-            listOf(
-                RegistryEntry(
-                    servedModel(settings.chatModel, kind, Capability.TEXT_GENERATION, Capability.REASONING),
-                    InstallState.INSTALLED,
-                ),
-                RegistryEntry(
-                    servedModel(settings.speechModel, kind, Capability.SPEECH_TO_TEXT),
-                    InstallState.INSTALLED,
-                ),
-            ),
+    /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
+    private fun enabledProviders(): List<CloudProvider> {
+        val ids = settings.enabledProviderIds
+        return CloudProviders.ALL.filter { it.id in ids }
+    }
+
+    /** The best-fit installed local model as a fallback candidate, or null when nothing is installed. */
+    private fun localCandidate(): FallbackCandidate? {
+        val selected = ModelSelector(localRegistry(), device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
+        return FallbackCandidate(
+            label = CloudProviders.LOCAL.title,
+            runtime = LlamaCppRuntime(contextTokens = settings.contextTokens),
+            model = selected.model,
+            binding = selected.binding,
         )
+    }
+
+    /** A configured cloud provider as a fallback candidate, or null when it has no usable endpoint. */
+    private fun cloudCandidate(provider: CloudProvider): FallbackCandidate? {
+        val endpoint = if (provider.editableUrl) settings.customEndpoint else provider.baseUrl
+        if (endpoint.isBlank()) return null
+        val model = servedModel(
+            settings.chatModelFor(provider.id),
+            RuntimeKind.REMOTE_OPENAI,
+            Capability.TEXT_GENERATION,
+            Capability.REASONING,
+        )
+        return FallbackCandidate(
+            label = provider.title,
+            runtime = OpenAiRuntime(
+                OpenAiConfig(baseUrl = endpoint, apiKey = settings.apiKeyFor(provider.id).ifBlank { null }),
+            ),
+            model = model,
+            binding = model.bindings.first(),
+        )
+    }
+
+    private fun registry(candidates: List<FallbackCandidate>): ModelRegistry {
+        val entries = mutableListOf<RegistryEntry>()
+        when {
+            candidates.isEmpty() -> entries += RegistryEntry(
+                servedModel(settings.chatModel, RuntimeKind.STUB, Capability.TEXT_GENERATION, Capability.REASONING),
+                InstallState.INSTALLED,
+            )
+
+            candidates.size == 1 -> {
+                val only = candidates.single()
+                entries += RegistryEntry(only.model, InstallState.INSTALLED)
+                // Voice input never actually goes through the pipeline in
+                // this app (ChatActivity talks to WhisperEngine directly) —
+                // this exists only so a saved pipeline that asks for
+                // SPEECH_TO_TEXT has something to select, using the same
+                // runtime already registered rather than a second one.
+                if (only.binding.runtime == RuntimeKind.REMOTE_OPENAI) {
+                    entries += RegistryEntry(
+                        servedModel(settings.speechModel, RuntimeKind.REMOTE_OPENAI, Capability.SPEECH_TO_TEXT),
+                        InstallState.INSTALLED,
+                    )
+                }
+            }
+
+            else -> entries += RegistryEntry(fallbackChainDescriptor(candidates), InstallState.INSTALLED)
+        }
+        return ModelRegistry(entries)
     }
 
     /**
@@ -281,13 +346,32 @@ class AppContainer private constructor(private val context: Context) {
         },
     )
 
+    private fun fallbackChainDescriptor(candidates: List<FallbackCandidate>) = ModelDescriptor(
+        id = "fallback-chain",
+        family = "fallback",
+        version = "1",
+        parameterCount = 1,
+        contextLength = candidates.maxOf { it.model.contextLength },
+        capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING),
+        bindings = listOf(
+            RuntimeBinding(
+                runtime = RuntimeKind.FALLBACK_CHAIN,
+                artifact = candidates.joinToString(" → ") { it.label },
+                fileSizeBytes = 1,
+                requiredRamBytes = 1,
+            ),
+        ),
+    )
+
     /** The catalog shipped in `registry/`, used by the Models screen to rank against this device. */
     fun catalog(): ModelCatalog = runCatching {
         context.assets.open(CATALOG_ASSET).bufferedReader().use { PipelineCodec.decodeCatalog(it.readText()) }
     }.getOrElse { ModelCatalog(models = emptyList()) }
 
     val runtimeLabel: String
-        get() = settings.provider.title
+        get() = enabledProviders().takeIf { it.isNotEmpty() }
+            ?.joinToString(" → ") { it.title }
+            ?: CloudProviders.DEMO.title
 
     private fun servedModel(
         id: String,
@@ -343,6 +427,7 @@ class AppContainer private constructor(private val context: Context) {
                 supportedRuntimes = buildSet {
                     add(RuntimeKind.REMOTE_OPENAI)
                     add(RuntimeKind.STUB)
+                    add(RuntimeKind.FALLBACK_CHAIN)
                     if (LlamaBridge.isAvailable) add(RuntimeKind.LLAMA_CPP)
                 },
                 hasGpuDelegate = false,

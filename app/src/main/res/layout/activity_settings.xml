@@ -17,6 +17,14 @@
             android:textSize="13sp" />
 
         <TextView
+            android:id="@+id/enabledProvidersSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="12dp"
+            android:textSize="12sp"
+            android:textStyle="italic" />
+
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/settings_provider"
@@ -33,6 +41,20 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="4dp"
+            android:textSize="12sp" />
+
+        <CheckBox
+            android:id="@+id/providerEnabledCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_provider_enabled" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="2dp"
+            android:text="@string/settings_provider_enabled_help"
             android:textSize="12sp" />
 
         <LinearLayout

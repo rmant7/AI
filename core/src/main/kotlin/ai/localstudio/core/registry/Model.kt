@@ -39,7 +39,17 @@ enum class RuntimeKind(val id: String) {
      * exercise the full stack without one.
      */
     @SerialName("stub")
-    STUB("stub");
+    STUB("stub"),
+
+    /**
+     * Not a real backend of its own — wraps an ordered list of other runtimes
+     * (see [ai.localstudio.core.runtime.FallbackTextRuntime]) and tries them
+     * in order within one turn, so a local model that throws or produces
+     * nothing falls through to a configured cloud provider instead of the
+     * turn failing outright.
+     */
+    @SerialName("fallback_chain")
+    FALLBACK_CHAIN("fallback_chain");
 
     companion object {
         private val byId = entries.associateBy(RuntimeKind::id)
