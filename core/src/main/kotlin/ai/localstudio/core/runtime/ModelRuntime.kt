@@ -64,7 +64,7 @@ data class GenerationRequest(
     val topP: Double = 0.95,
     val topK: Int = 40,
     /** >1.0 discourages repeats; 1.0 disables the penalty entirely. */
-    val repeatPenalty: Double = 1.1,
+    val repeatPenalty: Double = 1.2,
     val stopSequences: List<String> = emptyList(),
 )
 

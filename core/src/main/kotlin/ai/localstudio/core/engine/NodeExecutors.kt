@@ -47,7 +47,7 @@ class NodeExecutors(
     private val defaultTemperature: Double = 0.7,
     private val defaultTopP: Double = 0.95,
     private val defaultTopK: Int = 40,
-    private val defaultRepeatPenalty: Double = 1.1,
+    private val defaultRepeatPenalty: Double = 1.2,
 ) {
 
     fun build(): Map<NodeType, NodeExecutor> = buildMap {

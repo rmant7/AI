@@ -145,7 +145,11 @@ class Settings(context: Context) {
         const val DEFAULT_TEMPERATURE = 0.7f
         const val DEFAULT_TOP_P = 0.95f
         const val DEFAULT_TOP_K = 40
-        const val DEFAULT_REPEAT_PENALTY = 1.1f
+        // 1.1 was not enough headroom for small quantized models specifically
+        // — they degenerate into repeating a word or phrase far more readily
+        // than larger models, and that is exactly what "маленькая модель
+        // повторяет слова" is.
+        const val DEFAULT_REPEAT_PENALTY = 1.2f
 
         // Unlike temperature/topP/topK/repeatPenalty, this one was never
         // clamped — a stray value here (0, negative, or absurdly large) goes
