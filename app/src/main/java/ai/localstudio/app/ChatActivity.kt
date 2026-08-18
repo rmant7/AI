@@ -336,6 +336,17 @@ class ChatActivity : AppCompatActivity() {
             return
         }
 
+        finalizeRecording()
+    }
+
+    /**
+     * Stops recording and runs the one accurate transcription pass — called
+     * either from a manual tap on the mic button, or automatically once
+     * [AudioRecorder.shouldFinalize] reports the documented pause (0.8s of
+     * silence after speech) or the 25s window filling up, so a turn does not
+     * require tapping stop at all if the pause is left to do it.
+     */
+    private fun finalizeRecording() {
         previewJob?.cancel()
         previewJob = null
         val audio = recorder.stop()
@@ -364,10 +375,14 @@ class ChatActivity : AppCompatActivity() {
      * its own. Running that repeatedly during recording would queue up
      * overlapping multi-second calls instead of ever feeling live; Tiny is
      * fast enough that "re-run the whole thing so far" reads as continuous.
+     *
+     * Also watches for [AudioRecorder.shouldFinalize] — the documented
+     * pause-based end of an utterance — and finalizes automatically rather
+     * than only ever reacting to a manual tap on stop.
      */
     private fun startPreviewLoop() {
         val previewSeed = WhisperModels.byId(WhisperModels.TINY_ID) ?: return
-        if (!container.whisperStore.isInstalled(previewSeed)) return
+        val previewAvailable = container.whisperStore.isInstalled(previewSeed)
 
         previewJob = lifecycleScope.launch {
             // Shorter than the steady-state interval: a short utterance can
@@ -376,11 +391,17 @@ class ChatActivity : AppCompatActivity() {
             // working at all.
             kotlinx.coroutines.delay(PREVIEW_FIRST_DELAY_MS)
             while (recorder.isRecording) {
-                val snapshot = recorder.snapshot()
-                if (snapshot.isNotEmpty()) {
-                    val partial = runCatching { container.whisperPreviewEngine.transcribe(previewSeed, snapshot) }
-                        .getOrNull()
-                    if (!partial.isNullOrBlank()) setInputText(partial)
+                if (recorder.shouldFinalize) {
+                    finalizeRecording()
+                    return@launch
+                }
+                if (previewAvailable) {
+                    val snapshot = recorder.snapshot()
+                    if (snapshot.isNotEmpty()) {
+                        val partial = runCatching { container.whisperPreviewEngine.transcribe(previewSeed, snapshot) }
+                            .getOrNull()
+                        if (!partial.isNullOrBlank()) setInputText(partial)
+                    }
                 }
                 if (!recorder.isRecording) break
                 kotlinx.coroutines.delay(PREVIEW_INTERVAL_MS)
@@ -420,7 +441,9 @@ class ChatActivity : AppCompatActivity() {
 
         // Short enough to read as "live", long enough that Tiny is done
         // transcribing everything so far well before the next tick.
-        const val PREVIEW_INTERVAL_MS = 1_500L
+        // Matches UtteranceConfig.refreshMs (docs/12-audio.md) — a validated
+        // number from a working implementation, not a guess.
+        const val PREVIEW_INTERVAL_MS = 2_000L
         const val PREVIEW_FIRST_DELAY_MS = 700L
     }
 }

@@ -49,7 +49,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
 
     override fun generate(request: GenerationRequest): Flow<String> = flow {
         val failures = mutableListOf<String>()
-        for (candidate in candidates) {
+        for ((index, candidate) in candidates.withIndex()) {
             val handle = try {
                 candidate.runtime.load(candidate.model, candidate.binding) as? TextModelHandle
                     ?: throw ModelLoadException("${candidate.label} did not load as a text model")
@@ -69,6 +69,13 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
                 handle.generate(request).collect { tokens += it }
                 if (tokens.isNotEmpty()) {
                     tokens.forEach { emit(it) }
+                    // Only when a fallback actually happened: what a
+                    // provider earlier in the chain failed with is exactly
+                    // the signal needed to tell whether "local doesn't
+                    // really work yet" is a real problem or a one-off, and
+                    // silently discarding it once something else answers
+                    // means that signal never reaches anyone.
+                    if (index > 0) emit(fallbackNotice(candidate.label, failures))
                     return@flow
                 }
                 failures += "${candidate.label}: пустой ответ"
@@ -80,6 +87,13 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
             }
         }
         throw ModelLoadException("Ни один источник не ответил:\n" + failures.joinToString("\n"))
+    }
+
+    private fun fallbackNotice(answeredBy: String, failures: List<String>) = buildString {
+        append("\n\n---\n⚠ ")
+        append(failures.joinToString("; "))
+        append("\nОтвет от: ")
+        append(answeredBy)
     }
 
     override fun requestCancel() {

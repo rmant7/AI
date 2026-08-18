@@ -61,7 +61,7 @@ class FallbackTextRuntimeTest {
     }
 
     @Test
-    fun `a throwing candidate falls through to the next one`() = runBlocking {
+    fun `a throwing candidate falls through to the next one, and the failure is not silently discarded`() = runBlocking {
         val runtime = FallbackTextRuntime(
             listOf(
                 candidate("local") { failing("native crash") },
@@ -72,7 +72,9 @@ class FallbackTextRuntimeTest {
         val handle = runtime.load(model("m"), binding()) as TextModelHandle
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
-        assertEquals("cloud answered", text)
+        assertTrue(text.startsWith("cloud answered"))
+        assertTrue(text.contains("native crash"), "the local failure reason should reach the answer: $text")
+        assertTrue(text.contains("cloud"), "which candidate actually answered should be named: $text")
     }
 
     @Test
@@ -87,7 +89,8 @@ class FallbackTextRuntimeTest {
         val handle = runtime.load(model("m"), binding()) as TextModelHandle
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
-        assertEquals("cloud answered", text)
+        assertTrue(text.startsWith("cloud answered"))
+        assertTrue(text.contains("пустой ответ"))
     }
 
     @Test
@@ -126,6 +129,21 @@ class FallbackTextRuntimeTest {
         val handle = runtime.load(model("m"), binding()) as TextModelHandle
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
-        assertEquals("full cloud answer", text)
+        assertTrue(text.startsWith("full cloud answer"))
+        assertTrue(text.contains("decode error"))
+        // The discarded partial tokens must not appear anywhere, including in
+        // the failure note — a truncated answer with a caption is still a
+        // truncated answer.
+        assertTrue(!text.contains("partial words"))
+    }
+
+    @Test
+    fun `no footer at all when the first candidate simply answers`() = runBlocking {
+        val runtime = FallbackTextRuntime(listOf(candidate("local") { succeeding("just an answer") }))
+
+        val handle = runtime.load(model("m"), binding()) as TextModelHandle
+        val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
+
+        assertEquals("just an answer", text)
     }
 }
