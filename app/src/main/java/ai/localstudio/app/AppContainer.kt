@@ -179,7 +179,7 @@ class AppContainer private constructor(private val context: Context) {
             runtimeManager = manager,
             contextEngine = ContextEngine(),
             memory = memory,
-            systemPrompt = settings.systemPrompt,
+            systemPrompt = settings.systemPrompt.ifBlank { null },
             contextWindowTokens = settings.contextTokens,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,

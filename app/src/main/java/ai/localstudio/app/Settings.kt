@@ -117,12 +117,19 @@ class Settings(context: Context) {
 
     /**
      * What the assistant is told it is, before anything else — persona, tone,
-     * language, house rules. A blank stored value (including one never set)
-     * falls through to [DEFAULT_SYSTEM_PROMPT] rather than an empty prompt,
-     * so clearing the field in Settings is how a user resets it.
+     * house rules. Blank by default, and blank is a real state, not a
+     * fallback to some built-in text: Google's own AI Edge Gallery ships its
+     * general chat task with no system prompt at all (Task.defaultSystemPrompt
+     * = ""), and a small quantized model is specifically weak at reliably
+     * obeying an abstract meta-instruction like "answer in the user's
+     * language" — it tends to just answer in whatever language it was asked
+     * in when nothing is layered on top telling it otherwise. Empty here
+     * means [NodeExecutors] gets `null` and skips the system fragment
+     * entirely, not "some other Local AI Studio text instead" — the field is
+     * purely opt-in, for a persona or house rules someone actually wants.
      */
     var systemPrompt: String
-        get() = prefs.getString(KEY_SYSTEM_PROMPT, null)?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_SYSTEM_PROMPT
+        get() = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty().trim()
         set(value) = prefs.edit().putString(KEY_SYSTEM_PROMPT, value.trim()).apply()
 
     /**
@@ -180,8 +187,5 @@ class Settings(context: Context) {
         const val DEFAULT_MAX_TOKENS = 1024
         const val MIN_MAX_TOKENS = 64
         const val MAX_MAX_TOKENS = 4096
-
-        const val DEFAULT_SYSTEM_PROMPT =
-            "Ты локальный ассистент Local AI Studio. Отвечай кратко и по делу, на языке пользователя."
     }
 }
