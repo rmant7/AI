@@ -45,9 +45,6 @@ class AudioRecorder(private val config: UtteranceConfig = UtteranceConfig()) {
         recording = true
 
         thread = Thread {
-            // VOICE_RECOGNITION, not MIC: it skips the aggressive AGC/noise
-            // suppression tuned for phone calls, which docs/12-audio.md
-            // found actively hurts recognition rather than helping it.
             val minBufferBytes = AudioRecord.getMinBufferSize(
                 config.sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
             )
@@ -55,12 +52,22 @@ class AudioRecorder(private val config: UtteranceConfig = UtteranceConfig()) {
             // and can stall this one's consumer; a thin ring buffer means
             // the oldest audio is silently overwritten rather than read —
             // "recording works" with no words in it.
+            val bufferSizeBytes = (minBufferBytes * 8).coerceAtLeast(minBufferBytes)
+            // docs/12-audio.md recommends VOICE_RECOGNITION over MIC (it
+            // skips phone-call AGC/noise suppression that hurts recognition)
+            // — but on this device it produced a signal the relative-
+            // threshold VAD never classified as voiced at all: nothing was
+            // recognized, and the 0.8s pause path never fired because it
+            // requires voiced samples first (only the 25s hard cap could
+            // stop it, matching "very long pause before it turned off").
+            // Reverting to MIC, which at least produced a signal — noisy,
+            // but present — before VOICE_RECOGNITION was tried.
             val record = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC,
                 config.sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
-                (minBufferBytes * 8).coerceAtLeast(minBufferBytes),
+                bufferSizeBytes,
             )
             // ~0.25s per block: frequent enough for the VAD to track a real
             // onset/offset instead of averaging speech and silence together.
