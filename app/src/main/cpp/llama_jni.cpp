@@ -55,6 +55,39 @@ std::string toStdString(JNIEnv *env, jstring value) {
     return result;
 }
 
+int utf8SequenceLength(unsigned char leadByte) {
+    if ((leadByte & 0x80) == 0x00) return 1;
+    if ((leadByte & 0xE0) == 0xC0) return 2;
+    if ((leadByte & 0xF0) == 0xE0) return 3;
+    if ((leadByte & 0xF8) == 0xF0) return 4;
+    return 1; // not a valid lead byte; treat as complete so we don't buffer forever
+}
+
+/**
+ * True once the trailing bytes of `s` are not sitting mid-way through a
+ * multi-byte UTF-8 codepoint.
+ *
+ * llama_token_to_piece returns a token's raw bytes, and a BPE token boundary
+ * routinely lands inside a multi-byte codepoint for non-Latin scripts —
+ * Cyrillic is 2 bytes per character in UTF-8, so a single token's piece can
+ * be exactly the first byte of a letter with the continuation byte arriving
+ * only in the next token. Handing that half-codepoint straight to
+ * NewStringUTF produces invalid modified UTF-8, and ART treats that as a
+ * fatal abort rather than a catchable exception — the whole process dies,
+ * which is what "typed a Russian prompt and it crashed" looks like from the
+ * Kotlin side, since a reply in Cyrillic hits this on nearly every token.
+ */
+bool endsOnCompleteUtf8(const std::string &s) {
+    if (s.empty()) return true;
+    int back = 1;
+    while (back <= 4 && back <= (int) s.size()) {
+        const auto byte = (unsigned char) s[s.size() - back];
+        if ((byte & 0xC0) != 0x80) return utf8SequenceLength(byte) == back;
+        back++;
+    }
+    return true; // four continuation bytes with no lead byte: give up buffering, emit as-is
+}
+
 std::string pieceOf(const llama_vocab *vocab, llama_token token) {
     char buffer[256];
     const int32_t written = llama_token_to_piece(vocab, token, buffer, sizeof(buffer), 0, true);
@@ -266,17 +299,20 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
 
     int32_t produced = 0;
     uint32_t used = (uint32_t) count;
+    // Bytes held back because they end mid-codepoint — see endsOnCompleteUtf8.
+    std::string pendingUtf8;
     while (produced < maxTokens && used + 1 < contextSize) {
         if (session->cancelled.load()) break;
 
         llama_token token = llama_sampler_sample(sampler, session->ctx, -1);
         if (llama_vocab_is_eog(session->vocab, token)) break;
 
-        const std::string piece = pieceOf(session->vocab, token);
-        if (!piece.empty()) {
-            jstring value = env->NewStringUTF(piece.c_str());
+        pendingUtf8 += pieceOf(session->vocab, token);
+        if (!pendingUtf8.empty() && endsOnCompleteUtf8(pendingUtf8)) {
+            jstring value = env->NewStringUTF(pendingUtf8.c_str());
             env->CallVoidMethod(callback, onToken, value);
             env->DeleteLocalRef(value);
+            pendingUtf8.clear();
             if (env->ExceptionCheck()) {
                 env->ExceptionClear();
                 break;
