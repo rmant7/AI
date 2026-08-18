@@ -116,9 +116,15 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                         add(ChatMessage("user", request.prompt))
                     },
                     stream = true,
-                    maxTokens = request.maxTokens,
-                    temperature = request.temperature,
-                    topP = request.topP,
+                    // maxTokens/temperature/topP are deliberately NOT forwarded
+                    // here: GenerationRequest carries whatever the local
+                    // generation settings screen has configured regardless of
+                    // which runtime ends up serving the turn, and those are
+                    // tuned for a local quantized model, not for whatever a
+                    // cloud provider's own defaults are. A user who set max
+                    // response length to 1512 for a small local Gemma got
+                    // every Gemini reply truncated to 1512 tokens too — a
+                    // cloud provider is trusted to pick its own sane defaults.
                     stop = request.stopSequences.takeIf { it.isNotEmpty() },
                 ),
             )

@@ -83,7 +83,17 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         binding.roleText.text = message.role
         val isAssistantReply = !message.isError && message.role != "Вы"
         if (isAssistantReply) {
-            markwon?.setMarkdown(binding.bodyText, message.body) ?: run { binding.bodyText.text = message.body }
+            // A generated response is untrusted input as far as a markdown
+            // parser is concerned: a small model that degenerates into
+            // repeating "**" or an unbalanced code fence for the length of a
+            // long reply is exactly the pathological input that crashes a
+            // naive parser (stack overflow included, hence catching
+            // Throwable, not just Exception) — and that risk scales with how
+            // long a reply is allowed to run, not with context window size,
+            // which is why lowering the context didn't help this crash.
+            val engine = markwon
+            val rendered = engine != null && runCatching { engine.setMarkdown(binding.bodyText, message.body) }.isSuccess
+            if (!rendered) binding.bodyText.text = message.body
         } else {
             binding.bodyText.text = message.body
         }

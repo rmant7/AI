@@ -160,8 +160,9 @@ class AppContainer private constructor(private val context: Context) {
         ).joinToString("|")
         cachedOrchestrator?.takeIf { cachedSignature == signature }?.let { return it }
 
+        val isLocal = settings.providerId == CloudProviders.LOCAL.id
         val runtime: ModelRuntime = when {
-            settings.providerId == CloudProviders.LOCAL.id -> LlamaCppRuntime(contextTokens = settings.contextTokens)
+            isLocal -> LlamaCppRuntime(contextTokens = settings.contextTokens)
             settings.hasEndpoint ->
                 OpenAiRuntime(OpenAiConfig(baseUrl = settings.endpoint, apiKey = settings.apiKey.ifBlank { null }))
 
@@ -180,7 +181,13 @@ class AppContainer private constructor(private val context: Context) {
             contextEngine = ContextEngine(),
             memory = memory,
             systemPrompt = settings.systemPrompt.ifBlank { null },
-            contextWindowTokens = settings.contextTokens,
+            // The context-window setting exists to keep a local llama.cpp
+            // context (and its RAM) small enough for the device — it has
+            // nothing to do with what a cloud model can handle. Tuning it
+            // down to survive on-device was also quietly capping how much
+            // conversation/memory ever reached Gemini, unrelated to the
+            // max-tokens leak fixed the same way in OpenAiRuntime.
+            contextWindowTokens = if (isLocal) settings.contextTokens else CLOUD_CONTEXT_WINDOW_TOKENS,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
@@ -280,6 +287,13 @@ class AppContainer private constructor(private val context: Context) {
 
     companion object {
         private const val CATALOG_ASSET = "catalog.example.json"
+
+        // Not a real ceiling, just "large enough that this app's own context
+        // engine is never the reason a cloud model didn't get enough
+        // conversation/memory" — actual providers support far more than
+        // this, and the request itself grows or shrinks with what's
+        // actually assembled, not with this number.
+        private const val CLOUD_CONTEXT_WINDOW_TOKENS = 32_000
 
         @Volatile
         private var instance: AppContainer? = null
