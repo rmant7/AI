@@ -92,10 +92,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     // The model catalog is a repository asset, not a copy: the Models screen
     // reads exactly the file the tests validate.
     sourceSets["main"].assets.srcDir(rootProject.file("registry"))
@@ -108,6 +104,14 @@ android {
         release {
             isMinifyEnabled = false
         }
+    }
+}
+
+// android.kotlinOptions (String-based jvmTarget) is a hard error under the
+// Kotlin 2.4.0 plugin — this is its replacement, same as core/openai already use.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
