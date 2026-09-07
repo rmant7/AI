@@ -115,7 +115,16 @@ class AppContainer private constructor(private val context: Context) {
         // at best and an ANR at worst. Memory is safe to fill in late: a
         // search that lands before the replay finishes simply sees fewer
         // fragments, and the provider itself is now synchronized.
+        //
+        // Gated on memoryEnabled: with memory off, nothing ever queries
+        // `memory`, so replaying every document's chunks into RAM on every
+        // single launch — regardless of whether the user ever opens a chat —
+        // was pure standing RAM cost for a feature not in use, competing with
+        // whatever local model loads next for exactly the budget that model
+        // needs. Toggling memory back on picks the documents back up the next
+        // time the app starts.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            if (!settings.memoryEnabled) return@launch
             documents.list().forEach { doc ->
                 val ids = doc.chunks.map { chunk ->
                     memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to doc.name))
@@ -261,6 +270,12 @@ class AppContainer private constructor(private val context: Context) {
                 settings.contextTokens,
                 settings.maxResponseTokens,
                 settings.systemPrompt,
+                settings.memoryEnabled,
+                // Whether *any* document is attached is what effectiveContextTokens()
+                // actually keys on — this is what makes attaching or removing
+                // one pick up the right context size on the very next message,
+                // not just whenever some unrelated setting also changes.
+                documents.list().isNotEmpty(),
             ) +
                 enabled.flatMap { listOf(settings.chatModelFor(it.id), settings.apiKeyFor(it.id)) } +
                 // Which local model is actually installed can change without
@@ -310,7 +325,7 @@ class AppContainer private constructor(private val context: Context) {
             // down to survive on-device was also quietly capping how much
             // conversation/memory ever reached Gemini, unrelated to the
             // max-tokens leak fixed the same way in OpenAiRuntime.
-            contextWindowTokens = if (isLocalOnly) settings.contextTokens else CLOUD_CONTEXT_WINDOW_TOKENS,
+            contextWindowTokens = if (isLocalOnly) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
@@ -359,11 +374,28 @@ class AppContainer private constructor(private val context: Context) {
             // a generic label in the log and in the answer's own attribution
             // line answered "was it local?" but not "which local model?".
             label = "${CloudProviders.LOCAL.title}: ${selected.model.id}",
-            runtime = LlamaCppRuntime(contextTokens = settings.contextTokens, log = appLog::record),
+            runtime = LlamaCppRuntime(contextTokens = effectiveContextTokens(), log = appLog::record),
             model = selected.model,
             binding = selected.binding,
         )
     }
+
+    /**
+     * The user's [Settings.contextTokens] is a ceiling for when it's actually
+     * needed — an attached document or memory recall can require the full
+     * window — not a size every plain chat should pay KV-cache RAM for. Most
+     * conversations are a short prompt and a short answer, where 4096 (or
+     * whatever the user raised it to for a big document once) holds roughly
+     * twice the KV cache a plain back-and-forth ever uses. llama_jni.cpp
+     * already truncates a prompt that doesn't fit rather than failing, so
+     * undersizing here degrades gracefully instead of breaking anything.
+     */
+    private fun effectiveContextTokens(): Int =
+        if (documents.list().isEmpty() && !settings.memoryEnabled) {
+            minOf(settings.contextTokens, SMALL_CONTEXT_TOKENS)
+        } else {
+            settings.contextTokens
+        }
 
     /**
      * A configured cloud provider as a run of fallback candidates — one per
@@ -551,6 +583,10 @@ class AppContainer private constructor(private val context: Context) {
         // this, and the request itself grows or shrinks with what's
         // actually assembled, not with this number.
         private const val CLOUD_CONTEXT_WINDOW_TOKENS = 32_000
+
+        // Ceiling for a local context when nothing in this conversation
+        // needs the user's full configured window — see effectiveContextTokens().
+        private const val SMALL_CONTEXT_TOKENS = 2048
 
         @Volatile
         private var instance: AppContainer? = null
