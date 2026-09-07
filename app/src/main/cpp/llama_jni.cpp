@@ -48,6 +48,11 @@ struct Session {
     llama_context *ctx = nullptr;
     const llama_vocab *vocab = nullptr;
     std::atomic<bool> cancelled{false};
+    // Tokens actually resident in the KV cache after the last successful
+    // call — the prompt tokens that were decoded plus whatever generated
+    // tokens were themselves decoded back in. Compared against the next
+    // call's prompt to reuse the shared prefix instead of redecoding it.
+    std::vector<llama_token> cachedTokens;
 };
 
 std::string toStdString(JNIEnv *env, jstring value) {
@@ -227,18 +232,6 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     session->cancelled.store(false);
     raiseThreadPriority();
 
-    // Every call sends the *whole* conversation as prompt text — the Kotlin
-    // side rebuilds full context each turn, it does not send an incremental
-    // continuation. Without this, llama_batch_get_one's automatic position
-    // tracking keeps appending onto the KV cache left over from the previous
-    // turn: positions drift out of sync with the token stream being decoded,
-    // which produced exactly what a real device showed — coherent-length but
-    // wrong-language, degenerating replies from turn two onward, and by the
-    // third or fourth turn the accumulated (never-freed) cache exceeded n_ctx
-    // and crashed. Clearing before every call makes each generate() the fresh
-    // single-shot decode it was written to be.
-    llama_memory_clear(llama_get_memory(session->ctx), true);
-
     jclass callbackClass = env->GetObjectClass(callback);
     jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
     if (onToken == nullptr) return -2;
@@ -281,6 +274,26 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
         }
     }
 
+    // The Kotlin side resends the whole conversation as prompt text every
+    // turn rather than an incremental continuation, but for a plain
+    // back-and-forth chat that resent text is just the previous prompt with
+    // new content appended — the shared prefix's KV state is still exactly
+    // what it was. Trimming the cache to the longest common prefix (instead
+    // of clearing it outright) and decoding only the diverged suffix reuses
+    // that state; llama_batch_get_one's automatic position tracking then
+    // continues correctly from the trim point on its own. When nothing
+    // matches (commonPrefixLen == 0) this is equivalent to the old
+    // unconditional clear; when the whole prompt already matches, it is a
+    // no-op. A prompt that reorders earlier content (attachments, recalled
+    // memory) simply gets a short or zero common prefix and falls back to
+    // redecoding it — never wrong, just not sped up.
+    size_t commonPrefixLen = 0;
+    const size_t maxCommon = std::min(session->cachedTokens.size(), (size_t) count);
+    while (commonPrefixLen < maxCommon && session->cachedTokens[commonPrefixLen] == tokens[commonPrefixLen]) {
+        commonPrefixLen++;
+    }
+    llama_memory_seq_rm(llama_get_memory(session->ctx), 0, (llama_pos) commonPrefixLen, -1);
+
     // Processed in BATCH_SIZE-token pieces, checking cancellation between
     // them — a single llama_decode() call over the whole prompt cannot be
     // interrupted mid-call, so a long prompt (a full conversation resent
@@ -292,10 +305,20 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     // context was freed while this call was still using it — a
     // use-after-free, and a very plausible cause of a crash that only shows
     // up after a timeout or a model switch, not on a plain single turn.
-    for (int32_t offset = 0; offset < count; offset += BATCH_SIZE) {
-        if (session->cancelled.load()) return 0;
+    for (int32_t offset = (int32_t) commonPrefixLen; offset < count; offset += BATCH_SIZE) {
+        if (session->cancelled.load()) {
+            // Only the prefix through `offset` actually made it into the KV
+            // cache — trusting the full intended prompt here would make the
+            // next call's common-prefix comparison believe tokens are cached
+            // that never got decoded.
+            session->cachedTokens.assign(tokens.begin(), tokens.begin() + offset);
+            return 0;
+        }
         const int32_t batchCount = std::min(BATCH_SIZE, count - offset);
         if (llama_decode(session->ctx, llama_batch_get_one(tokens.data() + offset, batchCount)) != 0) {
+            // Cache state after a failed decode is unknown; force a full
+            // redecode on the next call rather than risk trusting it.
+            session->cachedTokens.clear();
             return -5;
         }
     }
@@ -317,6 +340,11 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
 
     int32_t produced = 0;
     uint32_t used = (uint32_t) count;
+    // Only tokens that were themselves successfully decoded are actually
+    // resident in the KV cache — recorded separately from `produced` so a
+    // token that was sampled/emitted but then failed to decode (the break
+    // below) is correctly excluded from what the next call can trust as cached.
+    std::vector<llama_token> generatedTokens;
     // Bytes held back because they end mid-codepoint — see endsOnCompleteUtf8.
     std::string pendingUtf8;
     while (produced < maxTokens && used + 1 < contextSize) {
@@ -338,11 +366,18 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
         }
 
         if (llama_decode(session->ctx, llama_batch_get_one(&token, 1)) != 0) break;
+        generatedTokens.push_back(token);
         produced++;
         used++;
     }
 
     llama_sampler_free(sampler);
+    // Whatever prompt tokens were decoded plus whichever generated tokens
+    // were themselves decoded back in are what the KV cache actually holds
+    // now, regardless of which of the above paths (EOG, maxTokens, cancelled)
+    // stopped the loop.
+    session->cachedTokens.assign(tokens.begin(), tokens.begin() + count);
+    session->cachedTokens.insert(session->cachedTokens.end(), generatedTokens.begin(), generatedTokens.end());
     return produced;
 }
 

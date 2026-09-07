@@ -45,12 +45,23 @@ set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 # quantised matmul kernels (the dominant cost of inference) rely on. Setting it
 # explicitly is what makes on-device generation usable rather than a curiosity.
 #
-# Trade-off: a device older than ~2017 (ARMv8.0) would crash with SIGILL on this
-# build. Upstream's answer is GGML_CPU_ALL_VARIANTS with runtime dispatch, which
-# needs shared native libs and a loader call from Kotlin — worth doing once
-# there is a device that old to test against.
+# i8mm adds int8 matrix-multiply instructions ggml has dedicated kernels for
+# on top of the quantised (Q4/Q8) matmuls that dominate prompt processing —
+# on-device measurement showed llama_print_system_info() reporting DOTPROD=1
+# but no I8MM at all, meaning the build was never asking for it, not that the
+# hardware lacked it (confirmed present: Tensor G5 / Pixel 10).
+#
+# Trade-off: this narrows the hardware floor further than dotprod/fp16 alone
+# — i8mm is an ARMv8.6 feature, so a device from roughly 2018-2020 that has
+# dotprod/fp16 but not i8mm would still SIGILL on this build. Upstream's real
+# answer is GGML_CPU_ALL_VARIANTS with runtime dispatch (shared native libs +
+# a loader call from Kotlin) so one APK safely covers old and new hardware —
+# worth doing once there is a device in that gap to test against; for now
+# this project is developed and tested against one specific device that has
+# every one of these features, so the narrower floor is an accepted trade,
+# not an oversight.
 if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16+i8mm" CACHE STRING "" FORCE)
 endif()
 
 FetchContent_MakeAvailable(llamacpp)
