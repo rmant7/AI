@@ -499,17 +499,16 @@ class ChatActivity : AppCompatActivity() {
         const val MENU_SHARE_CHAT = 6
         const val MENU_CLEAR = 7
 
-        // Temporarily raised from 3 to 30 minutes: with the crash/timeout
-        // loop fixed, the real open question is how long a heavier local
-        // model genuinely takes on real hardware — gemma-3-1b-it-q4 (the
-        // smallest installable model) already needed ~66s end to end, most
-        // of it prompt processing (~30s to the first token). 3 minutes was
-        // cutting off exactly the data needed to know whether a bigger model
-        // is "slow but working" or "actually stuck" before any optimization
-        // work can be scoped sensibly. Bring this back down once that's
-        // known — 30 minutes with the send button disabled the whole time is
-        // not a real answer for production use, just a measurement window.
-        const val GENERATION_TIMEOUT_MS = 30 * 60 * 1_000L
+        // Was temporarily raised to 30 minutes to measure real on-device
+        // timing for heavier local models before picking a production value
+        // (see git history). That data is in: the smallest local model
+        // answers in under a minute, a ~5.5GB model gets a first token in
+        // under two minutes, and anything that doesn't fit in RAM fails on
+        // load — long before generation would even start — rather than
+        // hanging inside this timeout. 5 minutes gives real answers room
+        // without leaving the send button disabled for half an hour on an
+        // actual hang.
+        const val GENERATION_TIMEOUT_MS = 5 * 60 * 1_000L
 
         // Turns, not tokens: the context engine's own budget trims whatever
         // does not fit. This just bounds how much history gets rendered and
