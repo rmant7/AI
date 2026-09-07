@@ -181,8 +181,12 @@ class AppContainer private constructor(private val context: Context) {
     /** Rebuilt only when the settings that affect wiring have actually changed. */
     fun orchestrator(): Orchestrator {
         val enabled = enabledProviders()
-        val candidates = enabled.mapNotNull { provider ->
-            if (provider.id == CloudProviders.LOCAL.id) localCandidate() else cloudCandidate(provider)
+        // Each cloud provider can contribute several candidates now, not one —
+        // see cloudCandidates — so this is a flatMap, not mapNotNull. Order is
+        // still what makes the policy real: local first, then each enabled
+        // provider's own model list before the next provider's first model.
+        val candidates = enabled.flatMap { provider ->
+            if (provider.id == CloudProviders.LOCAL.id) listOfNotNull(localCandidate()) else cloudCandidates(provider)
         }
 
         val signature = (
@@ -267,28 +271,43 @@ class AppContainer private constructor(private val context: Context) {
         )
     }
 
-    /** A configured cloud provider as a fallback candidate, or null when it has no usable endpoint. */
-    private fun cloudCandidate(provider: CloudProvider): FallbackCandidate? {
+    /**
+     * A configured cloud provider as a run of fallback candidates — one per
+     * model — or empty when it has no usable endpoint.
+     *
+     * The provider's own configured model is tried first, then every other
+     * model [CloudProvider.freeModels] lists, all sharing one [OpenAiRuntime]
+     * (and so one key pool/rotator) for this provider. This is what turns an
+     * error specific to one model — "HTTP 503: This model is currently
+     * experiencing high demand", a 404 for a retired model name, and the
+     * like — into a switch to a sibling model on the same provider instead of
+     * jumping straight to a different provider (or failing outright, if this
+     * is the only one enabled). [FallbackTextRuntime] already moves on to the
+     * next candidate on any thrown exception or empty response — nothing
+     * about that needed to change to make this work; only how many
+     * candidates one provider contributes did.
+     */
+    private fun cloudCandidates(provider: CloudProvider): List<FallbackCandidate> {
         val endpoint = if (provider.editableUrl) settings.customEndpoint else provider.baseUrl
-        if (endpoint.isBlank()) return null
-        val model = servedModel(
-            settings.chatModelFor(provider.id),
-            RuntimeKind.REMOTE_OPENAI,
-            Capability.TEXT_GENERATION,
-            Capability.REASONING,
-        )
-        return FallbackCandidate(
-            label = provider.title,
-            runtime = OpenAiRuntime(
-                OpenAiConfig(
-                    baseUrl = endpoint,
-                    apiKey = settings.apiKeyFor(provider.id).ifBlank { null },
-                    keyRotator = apiKeyRotator(provider.id),
-                ),
+        if (endpoint.isBlank()) return emptyList()
+        val runtime = OpenAiRuntime(
+            OpenAiConfig(
+                baseUrl = endpoint,
+                apiKey = settings.apiKeyFor(provider.id).ifBlank { null },
+                keyRotator = apiKeyRotator(provider.id),
             ),
-            model = model,
-            binding = model.bindings.first(),
         )
+        val primaryModel = settings.chatModelFor(provider.id)
+        val modelNames = listOf(primaryModel) + provider.freeModels.filterNot { it == primaryModel }
+        return modelNames.map { modelName ->
+            val model = servedModel(modelName, RuntimeKind.REMOTE_OPENAI, Capability.TEXT_GENERATION, Capability.REASONING)
+            FallbackCandidate(
+                label = if (modelName == primaryModel) provider.title else "${provider.title} ($modelName)",
+                runtime = runtime,
+                model = model,
+                binding = model.bindings.first(),
+            )
+        }
     }
 
     private fun registry(candidates: List<FallbackCandidate>): ModelRegistry {
