@@ -35,13 +35,28 @@ object ArtifactResolver {
      */
     private val SPLIT_SUFFIX = Regex("""-\d{5}-of-\d{5}\.[a-z0-9]+$""", RegexOption.IGNORE_CASE)
 
+    /**
+     * LiteRT-LM repos on Hugging Face carry a plain, universal file
+     * alongside one or more chip-specific ahead-of-time-compiled ones named
+     * e.g. `gemma-4-E2B-it_Google_Tensor_G5.litertlm` — built for one exact
+     * NPU generation and, per real repo listings, not necessarily smaller
+     * than the universal file, so nothing about the existing ranking
+     * guarantees the universal one wins by luck. Excluded outright: this app
+     * has no per-chip-generation selection logic, so downloading a G5-only
+     * file on a device with a different (or no) matching NPU would be a
+     * multi-gigabyte download of a file that cannot run there.
+     */
+    private val CHIP_SPECIFIC = Regex("""_Google_Tensor_""", RegexOption.IGNORE_CASE)
+
     fun pickBest(
         candidates: List<RemoteArtifact>,
         extension: String = ".gguf",
         quantPriority: List<String> = DEFAULT_QUANT_PRIORITY,
     ): RemoteArtifact? {
         val usable = candidates.filter {
-            it.path.endsWith(extension, ignoreCase = true) && !SPLIT_SUFFIX.containsMatchIn(it.path)
+            it.path.endsWith(extension, ignoreCase = true) &&
+                !SPLIT_SUFFIX.containsMatchIn(it.path) &&
+                !CHIP_SPECIFIC.containsMatchIn(it.path)
         }
         if (usable.isEmpty()) return null
 

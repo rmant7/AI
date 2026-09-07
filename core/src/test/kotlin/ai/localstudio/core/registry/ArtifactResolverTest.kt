@@ -56,6 +56,29 @@ class ArtifactResolverTest {
     }
 
     @Test
+    fun `chip-specific LiteRT builds are excluded even when they would otherwise win`() {
+        val best = ArtifactResolver.pickBest(
+            listOf(
+                artifact("gemma-4-E2B-it_Google_Tensor_G5.litertlm", 3_100),
+                artifact("gemma-4-E2B-it.litertlm", 2_400),
+            ),
+            extension = ".litertlm",
+        )
+
+        assertEquals("gemma-4-E2B-it.litertlm", best?.path)
+    }
+
+    @Test
+    fun `every candidate being chip-specific leaves nothing to pick`() {
+        val best = ArtifactResolver.pickBest(
+            listOf(artifact("model_Google_Tensor_G5.litertlm", 3_100)),
+            extension = ".litertlm",
+        )
+
+        assertNull(best)
+    }
+
+    @Test
     fun `non-matching files are ignored`() {
         assertNull(
             ArtifactResolver.pickBest(

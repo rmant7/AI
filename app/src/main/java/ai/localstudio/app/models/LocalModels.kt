@@ -190,13 +190,26 @@ object LocalModels {
         // canRun() simply reports false and this app falls back to the
         // GGUF/llama.cpp entries above, the same as an ABI this device
         // doesn't support.
+        // This set mirrors Google's own model_allowlists (google-ai-edge/gallery,
+        // the official "AI Chat" sample app) rather than a hand-picked guess —
+        // same repos, same files, same sizes it ships to real users. Two
+        // entries from that list are deliberately left out: functiongemma
+        // "TinyGarden"/"MobileActions" are narrow function-calling demo
+        // fine-tunes for that sample app's own showcase features, not
+        // general chat models — including them here would be misleading in
+        // a chat app. Repos also carry chip-specific ahead-of-time files
+        // (e.g. `..._Google_Tensor_G5.litertlm`) alongside the universal one
+        // ArtifactResolver always excludes — this app has no per-chip-
+        // generation selection, so an NPU run uses the universal file
+        // through the Tensor SDK's own runtime dispatch, not one baked for
+        // one exact chip.
         LocalModelSeed(
             id = "gemma3-1b-it-litert",
             title = "Gemma 3 1B IT (Tensor SDK)",
             repoIds = listOf("litert-community/Gemma3-1B-IT"),
             paramsLabel = "1B · LiteRT-LM",
             note = "Тот же класс модели, что и обычная Gemma 3 1B, но через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU.",
-            approxSizeBytes = 800_000_000,
+            approxSizeBytes = 584_417_280,
             runtime = RuntimeKind.LITERT,
         ),
         LocalModelSeed(
@@ -204,8 +217,57 @@ object LocalModels {
             title = "Gemma 4 E2B IT (Tensor SDK)",
             repoIds = listOf("litert-community/gemma-4-E2B-it-litert-lm"),
             paramsLabel = "E2B · LiteRT-LM",
-            note = "Компактная Gemma 4 через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU.",
-            approxSizeBytes = 1_500_000_000,
+            note = "Компактная Gemma 4 через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU. Контекст до 32K, понимает изображения и аудио (в этом приложении используется только текст).",
+            approxSizeBytes = 2_583_085_056,
+            runtime = RuntimeKind.LITERT,
+        ),
+        LocalModelSeed(
+            id = "gemma-4-e4b-it-litert",
+            title = "Gemma 4 E4B IT (Tensor SDK)",
+            repoIds = listOf("litert-community/gemma-4-E4B-it-litert-lm"),
+            paramsLabel = "E4B · LiteRT-LM",
+            note = "Более крупная Gemma 4 через Google Tensor SDK. Контекст до 32K; рекомендуется от 12 ГБ RAM.",
+            approxSizeBytes = 3_654_467_584,
+            runtime = RuntimeKind.LITERT,
+        ),
+        LocalModelSeed(
+            id = "gemma-3n-e2b-it-litert",
+            title = "Gemma 3n E2B IT (Tensor SDK)",
+            repoIds = listOf("google/gemma-3n-E2B-it-litert-lm"),
+            paramsLabel = "E2B · LiteRT-LM",
+            note = "Официальная модель Google (не litert-community). Понимает изображения и аудио (здесь используется только текст).",
+            approxSizeBytes = 3_655_827_456,
+            contextTokens = 4096,
+            runtime = RuntimeKind.LITERT,
+        ),
+        LocalModelSeed(
+            id = "gemma-3n-e4b-it-litert",
+            title = "Gemma 3n E4B IT (Tensor SDK)",
+            repoIds = listOf("google/gemma-3n-E4B-it-litert-lm"),
+            paramsLabel = "E4B · LiteRT-LM",
+            note = "Официальная модель Google (не litert-community); рекомендуется от 12 ГБ RAM.",
+            approxSizeBytes = 4_919_541_760,
+            contextTokens = 4096,
+            runtime = RuntimeKind.LITERT,
+        ),
+        LocalModelSeed(
+            id = "qwen2.5-1.5b-instruct-litert",
+            title = "Qwen2.5 1.5B Instruct (Tensor SDK)",
+            repoIds = listOf("litert-community/Qwen2.5-1.5B-Instruct"),
+            paramsLabel = "1.5B · LiteRT-LM",
+            note = "Через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU.",
+            approxSizeBytes = 1_597_931_520,
+            capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
+            runtime = RuntimeKind.LITERT,
+        ),
+        LocalModelSeed(
+            id = "deepseek-r1-distill-qwen-1.5b-litert",
+            title = "DeepSeek R1 Distill Qwen 1.5B (Tensor SDK)",
+            repoIds = listOf("litert-community/DeepSeek-R1-Distill-Qwen-1.5B"),
+            paramsLabel = "1.5B · LiteRT-LM",
+            note = "Дистиллят рассуждающей DeepSeek R1 на базе Qwen; через Google Tensor SDK.",
+            approxSizeBytes = 1_833_451_520,
+            capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
             runtime = RuntimeKind.LITERT,
         ),
     )
