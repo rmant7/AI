@@ -2,12 +2,14 @@ package ai.localstudio.app
 
 import android.content.Intent
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
-import android.widget.Toast
+import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -29,10 +31,11 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var settings: Settings
     private lateinit var container: AppContainer
 
-    // Deferred to Save like every other field on this screen, but tracked
-    // in memory across spinner switches so enabling several providers in
-    // one visit (switch to Gemini, check it, switch to Mistral, check that
-    // too) accumulates correctly instead of only ever remembering one.
+    // Persisted the moment the checkbox changes (see the listener below), but
+    // also kept in memory across spinner switches so enabling several
+    // providers in one visit (switch to Gemini, check it, switch to Mistral,
+    // check that too) accumulates correctly instead of only ever remembering
+    // whichever provider is selected right now.
     private var pendingEnabled = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,18 +69,25 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         binding.compareModeCheck.isChecked = settings.compareMode
+        binding.compareModeCheck.setOnCheckedChangeListener { _, checked -> settings.compareMode = checked }
         binding.systemPromptInput.setText(settings.systemPrompt)
+        binding.systemPromptInput.persistOnChange { settings.systemPrompt = it }
         binding.ramInput.setText(settings.ramBudgetPercent.toString())
+        binding.ramInput.persistOnChange { value -> value.trim().toIntOrNull()?.let { settings.ramBudgetPercent = it } }
         binding.hfTokenInput.setText(settings.huggingFaceToken)
+        binding.hfTokenInput.persistOnChange { settings.huggingFaceToken = it }
+        binding.endpointInput.persistOnChange { value -> if (settings.provider.editableUrl) settings.customEndpoint = value }
+        binding.apiKeyInput.persistOnChange { value -> if (settings.provider.needsKey) settings.apiKey = value }
+        binding.chatModelInput.persistOnChange { settings.chatModel = it }
         binding.providerEnabledCheck.setOnCheckedChangeListener { _, checked ->
             val id = settings.providerId
             if (checked) pendingEnabled += id else pendingEnabled -= id
+            settings.enabledProviderIds = pendingEnabled
             renderEnabledSummary()
         }
         showProvider(settings.provider)
         renderEnabledSummary()
 
-        binding.saveButton.setOnClickListener { save() }
         binding.generationSettingsButton.setOnClickListener {
             startActivity(Intent(this, GenerationSettingsActivity::class.java))
         }
@@ -167,23 +177,13 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun save() {
-        val provider = settings.provider
-        if (provider.editableUrl) {
-            settings.customEndpoint = binding.endpointInput.text?.toString().orEmpty()
-        }
-        if (provider.needsKey) {
-            settings.apiKey = binding.apiKeyInput.text?.toString().orEmpty()
-        }
-        settings.chatModel = binding.chatModelInput.text?.toString().orEmpty()
-        settings.systemPrompt = binding.systemPromptInput.text?.toString().orEmpty()
-        binding.ramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.ramBudgetPercent = it }
-        settings.huggingFaceToken = binding.hfTokenInput.text?.toString().orEmpty()
-        settings.enabledProviderIds = pendingEnabled
-        settings.compareMode = binding.compareModeCheck.isChecked
-
-        Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
-        finish()
+    /** Every field on this screen persists as it's typed — nothing here waits for an explicit Save. */
+    private fun EditText.persistOnChange(set: (String) -> Unit) {
+        addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) = set(s?.toString().orEmpty())
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+        })
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
