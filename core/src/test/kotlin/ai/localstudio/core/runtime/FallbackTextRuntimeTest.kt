@@ -4,6 +4,7 @@ import ai.localstudio.core.binding
 import ai.localstudio.core.model
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
@@ -172,5 +173,29 @@ class FallbackTextRuntimeTest {
 
         assertEquals(1, seen.size)
         assertTrue(seen.single().message!!.contains("HTTP 503"))
+    }
+
+    @Test
+    fun `a cancelled candidate stops the chain instead of falling through to the next one`() = runBlocking {
+        var cloudWasTried = false
+        val runtime = FallbackTextRuntime(
+            listOf(
+                candidate("local") { flow { throw CancellationException("stopped by user") } },
+                candidate("cloud") {
+                    cloudWasTried = true
+                    succeeding("should never be reached")
+                },
+            ),
+        )
+
+        val handle = runtime.load(model("m"), binding()) as TextModelHandle
+        assertFailsWith<CancellationException> {
+            handle.generate(GenerationRequest(prompt = "hi")).toList()
+        }
+
+        assertTrue(
+            !cloudWasTried,
+            "cancelling generation must stop the chain, not silently move on to the next candidate",
+        )
     }
 }

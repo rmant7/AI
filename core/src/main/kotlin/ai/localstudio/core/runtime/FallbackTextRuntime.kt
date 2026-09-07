@@ -3,6 +3,7 @@ package ai.localstudio.core.runtime
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -67,6 +68,14 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
             val handle = try {
                 candidate.runtime.load(candidate.model, candidate.binding) as? TextModelHandle
                     ?: throw ModelLoadException("${candidate.label} did not load as a text model")
+            } catch (e: CancellationException) {
+                // A cancelled load (the user stopped generation, or the
+                // overall request timed out) is not this candidate failing —
+                // treating it as one used to make the chain silently move on
+                // to the *next* candidate instead of actually stopping,
+                // which from the outside looked exactly like Stop doing
+                // nothing while the app kept querying a different provider.
+                throw e
             } catch (e: Exception) {
                 candidate.onFailure?.invoke(e)
                 failures += "${candidate.label}: ${e.message ?: e.toString()}"
@@ -97,6 +106,11 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
                     return@flow
                 }
                 failures += "${candidate.label}: пустой ответ"
+            } catch (e: CancellationException) {
+                // Same reasoning as the load-side catch above: propagate
+                // instead of recording it as this candidate's failure and
+                // falling through to the next one.
+                throw e
             } catch (e: Exception) {
                 candidate.onFailure?.invoke(e)
                 failures += "${candidate.label}: ${e.message ?: e.toString()}"
