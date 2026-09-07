@@ -244,7 +244,12 @@ class ChatActivity : AppCompatActivity() {
 
     private fun updateStatus() {
         val memory = if (container.settings.memoryEnabled) "память вкл" else "память выкл"
-        binding.statusText.text = "${container.settings.chatModel} · ${container.runtimeLabel} · $memory"
+        // container.activeModelName, not settings.chatModel: that getter is
+        // scoped to whichever provider is selected in the Settings dropdown
+        // right now, independent of which providers are actually enabled —
+        // showing a Gemini model name while only local was enabled was that
+        // mismatch, not a sign the router itself was using Gemini.
+        binding.statusText.text = "${container.activeModelName} · ${container.runtimeLabel} · $memory"
     }
 
     private fun send() {

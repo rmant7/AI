@@ -12,6 +12,14 @@ data class FallbackCandidate(
     val runtime: ModelRuntime,
     val model: ModelDescriptor,
     val binding: RuntimeBinding,
+    /**
+     * Notified with the raw exception whenever this candidate fails to
+     * answer — load or generate, same as what feeds [failures] below. Lets
+     * the caller apply its own cooldown policy for a specific kind of
+     * failure (an HTTP 503 from a specific cloud model, say) without this
+     * class needing to know what that failure type even is.
+     */
+    val onFailure: ((Throwable) -> Unit)? = null,
 )
 
 /**
@@ -60,6 +68,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
                 candidate.runtime.load(candidate.model, candidate.binding) as? TextModelHandle
                     ?: throw ModelLoadException("${candidate.label} did not load as a text model")
             } catch (e: Exception) {
+                candidate.onFailure?.invoke(e)
                 failures += "${candidate.label}: ${e.message ?: e.toString()}"
                 continue
             }
@@ -89,6 +98,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
                 }
                 failures += "${candidate.label}: пустой ответ"
             } catch (e: Exception) {
+                candidate.onFailure?.invoke(e)
                 failures += "${candidate.label}: ${e.message ?: e.toString()}"
             } finally {
                 handle.close()

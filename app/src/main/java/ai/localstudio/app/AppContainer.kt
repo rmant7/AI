@@ -37,11 +37,13 @@ import ai.localstudio.app.models.LocalModels
 import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
+import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.openai.OpenAiConfig
+import ai.localstudio.openai.OpenAiException
 import ai.localstudio.openai.OpenAiRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +78,9 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". */
     val appLog = AppLog(context)
+
+    /** Which cloud models are sitting out an overload — see cloudCandidates(). */
+    val modelCooldowns = ModelCooldownStore(context)
 
     // InMemoryMemoryProvider, as the name says, does not survive the process
     // being killed — routine on Android the moment the app is backgrounded.
@@ -220,6 +225,22 @@ class AppContainer private constructor(private val context: Context) {
      */
     val soleAnswererLabel: String? get() = lastCandidates.singleOrNull()?.label
 
+    /**
+     * The model actually in play right now — the first configured
+     * candidate's own model id. Deliberately not [Settings.chatModel]: that
+     * getter is scoped to whichever provider happens to be selected in the
+     * Settings screen's dropdown at the moment, which is completely
+     * independent of which providers are actually enabled for routing — the
+     * status bar showing a Gemini model name while [runtimeLabel] (correctly)
+     * said "Локально на устройстве" was exactly that mismatch, not a routing
+     * bug: the router was already using local, only the label lied about it.
+     */
+    val activeModelName: String
+        get() {
+            orchestrator() // ensures lastCandidates reflects live settings even before any message is sent
+            return lastCandidates.firstOrNull()?.model?.id ?: CloudProviders.DEMO.defaultModel
+        }
+
     /** Rebuilt only when the settings that affect wiring have actually changed. */
     fun orchestrator(): Orchestrator {
         val enabled = enabledProviders()
@@ -317,7 +338,7 @@ class AppContainer private constructor(private val context: Context) {
         val selected = ModelSelector(localRegistry(), device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
         return FallbackCandidate(
             label = CloudProviders.LOCAL.title,
-            runtime = LlamaCppRuntime(contextTokens = settings.contextTokens),
+            runtime = LlamaCppRuntime(contextTokens = settings.contextTokens, log = appLog::record),
             model = selected.model,
             binding = selected.binding,
         )
@@ -338,6 +359,12 @@ class AppContainer private constructor(private val context: Context) {
      * next candidate on any thrown exception or empty response — nothing
      * about that needed to change to make this work; only how many
      * candidates one provider contributes did.
+     *
+     * A model an earlier turn already saw a 503 from is left out of the list
+     * entirely for [ModelCooldownStore.DEFAULT_COOLDOWN_MS] — without this, a
+     * model stuck overloaded for hours gets retried (and fails, slowly) on
+     * every single message, which is what turned "one model is down" into
+     * "every reply takes 20+ seconds".
      */
     private fun cloudCandidates(provider: CloudProvider): List<FallbackCandidate> {
         val endpoint = if (provider.editableUrl) settings.customEndpoint else provider.baseUrl
@@ -350,7 +377,8 @@ class AppContainer private constructor(private val context: Context) {
             ),
         )
         val primaryModel = settings.chatModelFor(provider.id)
-        val modelNames = listOf(primaryModel) + provider.freeModels.filterNot { it == primaryModel }
+        val modelNames = (listOf(primaryModel) + provider.freeModels.filterNot { it == primaryModel })
+            .filterNot { modelCooldowns.isOnCooldown(provider.id, it) }
         return modelNames.map { modelName ->
             val model = servedModel(modelName, RuntimeKind.REMOTE_OPENAI, Capability.TEXT_GENERATION, Capability.REASONING)
             FallbackCandidate(
@@ -358,6 +386,21 @@ class AppContainer private constructor(private val context: Context) {
                 runtime = runtime,
                 model = model,
                 binding = model.bindings.first(),
+                onFailure = { error ->
+                    if (error is OpenAiException && error.status == 503) {
+                        modelCooldowns.markOverloaded(provider.id, modelName)
+                        // Otherwise the next message reuses the cached
+                        // orchestrator — built before this model went on
+                        // cooldown — and hits the very same overloaded model
+                        // it was just supposed to stop trying.
+                        cachedOrchestrator = null
+                        appLog.record(
+                            "MODEL_COOLDOWN",
+                            "${provider.title} ($modelName): HTTP 503, skipping for " +
+                                "${ModelCooldownStore.DEFAULT_COOLDOWN_MS / 60_000} min",
+                        )
+                    }
+                },
             )
         }
     }

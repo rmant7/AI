@@ -58,12 +58,15 @@ object CloudProviders {
             baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
             defaultModel = "gemini-3.7-flash",
             keyHint = "Ключ: aistudio.google.com → Get API key. Бесплатный уровень — только Flash/Flash-Lite; Pro — платно.",
+            // gemini-2.0-flash-lite deliberately dropped: reported dead/
+            // retired, not just occasionally overloaded — the runtime
+            // cooldown below handles "overloaded right now", but a model
+            // that never comes back has no business being retried forever.
             freeModels = listOf(
                 "gemini-3.7-flash",
                 "gemini-3.5-flash",
                 "gemini-3.1-flash-lite",
                 "gemini-2.5-flash",
-                "gemini-2.0-flash-lite",
             ),
         ),
         CloudProvider(

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
@@ -26,6 +27,14 @@ import java.io.File
 class LlamaCppRuntime(
     private val contextTokens: Int = LlamaBridge.DEFAULT_CONTEXT_TOKENS,
     private val threads: Int = LlamaBridge.defaultThreads(),
+    /**
+     * Every stage worth timing gets a line here — load, first token, done or
+     * cancelled — because a hang with no crash and no exception (the native
+     * call is simply slow, or genuinely stuck) previously left nothing to
+     * look at afterward beyond "no response after 180s". Defaults to a no-op
+     * so tests and any other caller don't need a real [AppLog][ai.localstudio.app.log.AppLog].
+     */
+    private val log: (tag: String, message: String) -> Unit = { _, _ -> },
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
@@ -45,11 +54,16 @@ class LlamaCppRuntime(
         }
 
         val bridge = LlamaBridge()
+        val loadStart = System.currentTimeMillis()
+        log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads)")
         val handle = bridge.nativeLoad(file.absolutePath, contextTokens, threads)
+        val loadMs = System.currentTimeMillis() - loadStart
         if (handle == 0L) {
+            log("LOCAL_LOAD", "${file.name}: FAILED after ${loadMs}ms")
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
-        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle)
+        log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms")
+        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, log)
     }
 }
 
@@ -58,11 +72,23 @@ private class LlamaTextModel(
     override val ramBytes: Long,
     private val bridge: LlamaBridge,
     private val handle: Long,
+    private val log: (tag: String, message: String) -> Unit,
 ) : TextModelHandle {
 
     override fun generate(request: GenerationRequest): Flow<String> = callbackFlow {
+        val start = System.currentTimeMillis()
+        var tokenCount = 0
+        var firstTokenLogged = false
+        val completed = AtomicBoolean(false)
+        log("LOCAL_GENERATE", "$modelId: starting (prompt=${request.prompt.length} chars, maxTokens=${request.maxTokens})")
+
         val sink = object : LlamaBridge.TokenSink {
             override fun onToken(text: String) {
+                if (!firstTokenLogged) {
+                    firstTokenLogged = true
+                    log("LOCAL_GENERATE", "$modelId: first token after ${System.currentTimeMillis() - start}ms")
+                }
+                tokenCount++
                 trySend(text)
             }
         }
@@ -84,9 +110,13 @@ private class LlamaTextModel(
                 repeatPenalty = request.repeatPenalty.toFloat(),
                 callback = sink,
             )
+            completed.set(true)
+            val elapsedMs = System.currentTimeMillis() - start
             if (produced < 0) {
+                log("LOCAL_GENERATE", "$modelId: FAILED code=$produced after ${elapsedMs}ms, $tokenCount tokens")
                 close(IllegalStateException("Generation failed with code $produced"))
             } else {
+                log("LOCAL_GENERATE", "$modelId: done in ${elapsedMs}ms, $produced tokens")
                 close()
             }
         }
@@ -94,6 +124,12 @@ private class LlamaTextModel(
         awaitClose {
             // Native generation blocks in C++; cancelling the coroutine alone
             // would leave it running to completion on a background thread.
+            if (!completed.get()) {
+                log(
+                    "LOCAL_GENERATE",
+                    "$modelId: cancelled/timed out after ${System.currentTimeMillis() - start}ms, $tokenCount tokens so far",
+                )
+            }
             bridge.nativeCancel(handle)
             worker.cancel()
         }

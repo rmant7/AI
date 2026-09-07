@@ -32,11 +32,16 @@ private class FakeHandle(private val behavior: () -> Flow<String>) : TextModelHa
     }
 }
 
-private fun candidate(label: String, behavior: () -> Flow<String>) = FallbackCandidate(
+private fun candidate(
+    label: String,
+    onFailure: ((Throwable) -> Unit)? = null,
+    behavior: () -> Flow<String>,
+) = FallbackCandidate(
     label = label,
     runtime = FakeTextRuntime(behavior),
     model = model(label),
     binding = binding(),
+    onFailure = onFailure,
 )
 
 private fun failing(message: String): Flow<String> = flow { throw IllegalStateException(message) }
@@ -150,5 +155,22 @@ class FallbackTextRuntimeTest {
 
         assertTrue(text.startsWith("just an answer"))
         assertTrue(text.contains("Ответ от: local"))
+    }
+
+    @Test
+    fun `onFailure is invoked with the raw exception whenever a candidate fails`() = runBlocking {
+        val seen = mutableListOf<Throwable>()
+        val runtime = FallbackTextRuntime(
+            listOf(
+                candidate("local", onFailure = { seen += it }) { failing("HTTP 503: overloaded") },
+                candidate("cloud") { succeeding("cloud answered") },
+            ),
+        )
+
+        val handle = runtime.load(model("m"), binding()) as TextModelHandle
+        handle.generate(GenerationRequest(prompt = "hi")).toList()
+
+        assertEquals(1, seen.size)
+        assertTrue(seen.single().message!!.contains("HTTP 503"))
     }
 }
