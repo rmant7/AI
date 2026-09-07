@@ -378,8 +378,10 @@ class ChatActivity : AppCompatActivity() {
      * Settings.compareMode's parallel path: every enabled source gets its
      * own single-candidate Orchestrator (see AppContainer.compareCandidates)
      * and runs independently instead of being tried as a fallback chain —
-     * one answer completing does not stop or skip the others. All of them
-     * render into one placeholder bubble, filled in as each source finishes.
+     * one answer completing does not stop or skip the others. Each source
+     * gets its own bubble the moment it finishes, not one shared bubble all
+     * of them fill in — that made every source's text copy together as a
+     * single blob, with no way to grab just one answer.
      */
     private fun sendCompare(
         text: String,
@@ -387,14 +389,6 @@ class ChatActivity : AppCompatActivity() {
         attachedDocuments: List<String>,
         sources: List<Pair<String, ai.localstudio.core.engine.Orchestrator>>,
     ) {
-        val bubbleIndex = adapter.itemCount
-        val results = linkedMapOf<String, String>()
-        fun render() = sources.joinToString("\n\n---\n\n") { (label, _) ->
-            "**$label:**\n${results[label] ?: "…"}"
-        }
-        adapter.add(Message.assistant(body = render(), details = null))
-        binding.messages.scrollToPosition(adapter.itemCount - 1)
-
         generationJob = lifecycleScope.launch {
             try {
                 val jobs = sources.map { (label, orchestrator) ->
@@ -430,8 +424,7 @@ class ChatActivity : AppCompatActivity() {
                             "Ошибка: ${e.message ?: e.toString()}"
                         }
                         withContext(Dispatchers.Main) {
-                            results[label] = rendered
-                            adapter.update(bubbleIndex, Message.assistant(body = render(), details = null))
+                            adapter.add(Message.assistant(body = "**$label:**\n$rendered", details = null))
                             binding.messages.scrollToPosition(adapter.itemCount - 1)
                         }
                     }
