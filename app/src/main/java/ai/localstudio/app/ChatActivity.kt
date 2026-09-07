@@ -25,6 +25,8 @@ import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.engine.UserRequest
 import ai.localstudio.core.pipeline.ConversationTurn
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -294,6 +296,15 @@ class ChatActivity : AppCompatActivity() {
             "enabledProviders=${container.settings.enabledProviderIds} route=${container.runtimeLabel}",
         )
 
+        if (container.settings.compareMode) {
+            val sources = container.compareCandidates()
+            if (sources.size >= 2) {
+                container.appLog.record("SEND_COMPARE", "sources=${sources.map { it.first }}")
+                sendCompare(text, history, attachedDocuments, sources)
+                return
+            }
+        }
+
         generationJob = lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -361,6 +372,81 @@ class ChatActivity : AppCompatActivity() {
             binding.messages.scrollToPosition(adapter.itemCount - 1)
             persist()
         }
+    }
+
+    /**
+     * Settings.compareMode's parallel path: every enabled source gets its
+     * own single-candidate Orchestrator (see AppContainer.compareCandidates)
+     * and runs independently instead of being tried as a fallback chain —
+     * one answer completing does not stop or skip the others. All of them
+     * render into one placeholder bubble, filled in as each source finishes.
+     */
+    private fun sendCompare(
+        text: String,
+        history: List<ConversationTurn>,
+        attachedDocuments: List<String>,
+        sources: List<Pair<String, ai.localstudio.core.engine.Orchestrator>>,
+    ) {
+        val bubbleIndex = adapter.itemCount
+        val results = linkedMapOf<String, String>()
+        fun render() = sources.joinToString("\n\n---\n\n") { (label, _) ->
+            "**$label:**\n${results[label] ?: "…"}"
+        }
+        adapter.add(Message.assistant(body = render(), details = null))
+        binding.messages.scrollToPosition(adapter.itemCount - 1)
+
+        generationJob = lifecycleScope.launch {
+            try {
+                val jobs = sources.map { (label, orchestrator) ->
+                    async(Dispatchers.IO) {
+                        // Deliberately not a blanket runCatching: a per-source
+                        // timeout must render as this source's own error while
+                        // the others keep going, but a real cancellation (the
+                        // Stop button, or this whole turn's coroutine being
+                        // torn down) must propagate and actually stop this
+                        // source instead of being swallowed and rendered as
+                        // just another error — the exact bug just fixed in
+                        // FallbackTextRuntime for the sequential fallback path.
+                        val rendered = try {
+                            val answer = kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
+                                orchestrator.handle(
+                                    UserRequest(
+                                        conversationId = conversationId,
+                                        text = text,
+                                        memoryEnabled = container.settings.memoryEnabled,
+                                        history = history,
+                                        attachedDocuments = attachedDocuments,
+                                    ),
+                                )
+                            }
+                            answer.text.ifBlank { "(пустой ответ)" }
+                        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                            container.appLog.record("GENERATION_ERROR", "$label: timeout after ${GENERATION_TIMEOUT_MS}ms")
+                            "Ошибка: не ответила за ${GENERATION_TIMEOUT_MS / 1000} с"
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            container.appLog.record("GENERATION_ERROR", "$label: ${e.javaClass.simpleName}: ${e.message}")
+                            "Ошибка: ${e.message ?: e.toString()}"
+                        }
+                        withContext(Dispatchers.Main) {
+                            results[label] = rendered
+                            adapter.update(bubbleIndex, Message.assistant(body = render(), details = null))
+                            binding.messages.scrollToPosition(adapter.itemCount - 1)
+                        }
+                    }
+                }
+                jobs.awaitAll()
+            } finally {
+                isGenerating = false
+                generationJob = null
+                setBusy(false)
+                stoppedByUser = false
+                persist()
+            }
+        }
+        isGenerating = true
+        setBusy(true)
     }
 
     private fun ingestDocument(uri: Uri) {

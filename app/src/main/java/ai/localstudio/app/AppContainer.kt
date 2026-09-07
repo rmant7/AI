@@ -302,7 +302,17 @@ class AppContainer private constructor(private val context: Context) {
             else -> FallbackTextRuntime(candidates)
         }
         val isLocalOnly = candidates.singleOrNull()?.binding?.runtime == RuntimeKind.LLAMA_CPP
+        return buildOrchestrator(runtime, isLocalOnly, candidates).also {
+            cachedOrchestrator = it
+            cachedSignature = signature
+        }
+    }
 
+    private fun buildOrchestrator(
+        runtime: ModelRuntime,
+        isLocalOnly: Boolean,
+        registryCandidates: List<FallbackCandidate>,
+    ): Orchestrator {
         val manager = RuntimeManager(
             // Remote and stub models hold no local weights; the budget starts
             // mattering the moment an on-device runtime is added. Note this
@@ -314,7 +324,7 @@ class AppContainer private constructor(private val context: Context) {
             runtimes = mapOf(runtime.kind to runtime),
         )
         val executors = NodeExecutors(
-            selector = ModelSelector(registry(candidates), device),
+            selector = ModelSelector(registry(registryCandidates), device),
             runtimeManager = manager,
             contextEngine = ContextEngine(),
             memory = memory,
@@ -332,11 +342,29 @@ class AppContainer private constructor(private val context: Context) {
             defaultRepeatPenalty = settings.repeatPenalty,
             defaultMaxTokens = settings.maxResponseTokens,
         )
-        return Orchestrator(CapabilityRouter(), executors).also {
-            cachedOrchestrator = it
-            cachedSignature = signature
-        }
+        return Orchestrator(CapabilityRouter(), executors)
     }
+
+    /**
+     * One [Orchestrator] per enabled provider, each wired to exactly one
+     * candidate — for [Settings.compareMode]'s parallel fan-out, where every
+     * enabled source generates independently instead of being tried in
+     * fallback order. Only the primary model per cloud provider is used
+     * (not its whole free-tier rotation): compare mode already means N
+     * simultaneous requests, not N × rotation-size of them.
+     */
+    fun compareCandidates(): List<Pair<String, Orchestrator>> =
+        enabledProviders().mapNotNull { provider ->
+            val candidate = if (provider.id == CloudProviders.LOCAL.id) {
+                localCandidate()
+            } else {
+                cloudCandidates(provider).firstOrNull()
+            }
+            candidate?.let { c ->
+                val isLocalOnly = c.binding.runtime == RuntimeKind.LLAMA_CPP
+                c.label to buildOrchestrator(c.runtime, isLocalOnly, listOf(c))
+            }
+        }
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
     private fun enabledProviders(): List<CloudProvider> {

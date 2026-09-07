@@ -6,6 +6,9 @@
     <string name="send">Отправить</string>
     <string name="chat_stop">Остановить</string>
     <string name="chat_stopped">Остановлено пользователем.</string>
+    <string name="settings_compare_mode">Сравнивать ответы (параллельно)</string>
+    <string name="settings_compare_mode_hint">Если включено несколько источников — запрос отправляется сразу во все, ответы показываются по мере готовности. Обычно (выключено) — сначала локальная модель, облако только при её ошибке.</string>
+    <string name="chat_compare_waiting">Ожидание ответов…</string>
     <string name="menu_settings">Настройки</string>
     <string name="menu_models">Модели</string>
     <string name="menu_clear">Новый чат</string>

@@ -104,6 +104,17 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_MEMORY, true)
         set(value) = prefs.edit().putBoolean(KEY_MEMORY, value).apply()
 
+    /**
+     * Off by default: with 2+ providers enabled, the normal behaviour is
+     * still the fallback chain (local first, cloud only if local fails) —
+     * cheaper in battery and API quota. Turning this on sends the same
+     * message to every enabled provider at once and shows every answer,
+     * which always costs both, even when the first one would have been fine.
+     */
+    var compareMode: Boolean
+        get() = prefs.getBoolean(KEY_COMPARE_MODE, false)
+        set(value) = prefs.edit().putBoolean(KEY_COMPARE_MODE, value).apply()
+
     val hasEndpoint: Boolean get() = endpoint.isNotBlank()
 
     // Sampling: how the model picks its next token. Exposed because a fixed
@@ -184,6 +195,7 @@ class Settings(context: Context) {
         const val KEY_ASR_MODEL = "asrModel"
         const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_MEMORY = "memoryEnabled"
+        const val KEY_COMPARE_MODE = "compareMode"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_TEMPERATURE = "temperature"

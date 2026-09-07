@@ -70,6 +70,13 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         notifyItemInserted(messages.size - 1)
     }
 
+    /** Replaces one bubble in place — compare mode's answers fill in a single placeholder as each source finishes. */
+    fun update(index: Int, message: Message) {
+        if (index !in messages.indices) return
+        messages[index] = message
+        notifyItemChanged(index)
+    }
+
     fun clear() {
         val size = messages.size
         messages.clear()

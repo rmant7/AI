@@ -65,6 +65,7 @@ class SettingsActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
 
+        binding.compareModeCheck.isChecked = settings.compareMode
         binding.systemPromptInput.setText(settings.systemPrompt)
         binding.ramInput.setText(settings.ramBudgetPercent.toString())
         binding.hfTokenInput.setText(settings.huggingFaceToken)
@@ -179,6 +180,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.ramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.ramBudgetPercent = it }
         settings.huggingFaceToken = binding.hfTokenInput.text?.toString().orEmpty()
         settings.enabledProviderIds = pendingEnabled
+        settings.compareMode = binding.compareModeCheck.isChecked
 
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
         finish()
