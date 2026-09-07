@@ -83,18 +83,31 @@ class NodeExecutors(
         NodeValue.Speech(transcript)
     }
 
+    /**
+     * A dedicated vision/OCR model is optional infrastructure, not a
+     * requirement for an image to reach the model at all: no runtime in
+     * this app currently registers one, and a multimodal chat model (sent
+     * the image directly via [GenerationRequest.images] once it reaches
+     * [textGeneration]) can answer about an image without this stage doing
+     * anything first. Failing this node outright — as `select()` (throwing)
+     * would — turned "no OCR model installed" into "attaching an image
+     * breaks the turn entirely" instead of just skipping straight to the
+     * chat model with the image still attached.
+     */
     private fun vision(capability: Capability, source: FragmentSource) = NodeExecutor { node, inputs, _ ->
-        val image = inputs.filterIsInstance<NodeValue.Image>().firstOrNull()?.ref
+        val image = inputs.filterIsInstance<NodeValue.Image>().firstOrNull()
             ?: return@NodeExecutor NodeValue.Empty
-        val selected = selector.select(capability)
+        val selected = selector.selectOrNull(capability) ?: return@NodeExecutor image
         val result = runtimeManager.withModel(selected.model, selected.binding) { loaded ->
             val handle = loaded as? VisionModelHandle
                 ?: throw ModelLoadException("${selected.model.id} did not load as a vision model")
-            handle.analyze(image, node.params["prompt"])
+            handle.analyze(image.ref, node.params["prompt"])
         }
         val text = listOfNotNull(result.description, result.ocrText?.takeIf { it.isNotBlank() })
             .joinToString("\n\n")
-        NodeValue.Fragments(listOf(ContextFragment(source, text, relevance = result.confidence ?: 0.0)))
+        NodeValue.Bundle(
+            listOf(image, NodeValue.Fragments(listOf(ContextFragment(source, text, relevance = result.confidence ?: 0.0)))),
+        )
     }
 
     private fun memorySearch() = NodeExecutor { node, inputs, context ->
@@ -173,7 +186,13 @@ class NodeExecutors(
             )
         }
 
-        for (value in inputs) {
+        val images = mutableListOf<ImageRef>()
+        // vision()'s degrade-gracefully path (see its own comment) can hand
+        // this node a Bundle carrying both the raw image and whatever
+        // description/OCR text a vision model produced for it — flattened
+        // one level here rather than teaching every consumer of `inputs`
+        // about Bundle, since this is currently the only place that produces one.
+        for (value in inputs.flatMap { if (it is NodeValue.Bundle) it.values else listOf(it) }) {
             when (value) {
                 is NodeValue.Fragments -> fragments += value.fragments
                 is NodeValue.Speech -> fragments += ContextFragment(
@@ -183,6 +202,7 @@ class NodeExecutors(
                 )
 
                 is NodeValue.Text -> fragments += ContextFragment(FragmentSource.USER_MESSAGE, value.text)
+                is NodeValue.Image -> images += value.ref
                 else -> Unit
             }
         }
@@ -190,7 +210,7 @@ class NodeExecutors(
             ?.takeIf { message -> fragments.none { it.source == FragmentSource.USER_MESSAGE && it.text == message } }
             ?.let { fragments += ContextFragment(FragmentSource.USER_MESSAGE, it) }
 
-        NodeValue.Context(contextEngine.assemble(fragments, contextWindowTokens))
+        NodeValue.Context(contextEngine.assemble(fragments, contextWindowTokens, images))
     }
 
     private fun textGeneration() = NodeExecutor { node, inputs, _ ->
@@ -213,6 +233,7 @@ class NodeExecutors(
                     topP = node.params["top_p"]?.toDoubleOrNull() ?: defaultTopP,
                     topK = node.params["top_k"]?.toIntOrNull() ?: defaultTopK,
                     repeatPenalty = node.params["repeat_penalty"]?.toDoubleOrNull() ?: defaultRepeatPenalty,
+                    images = assembled.images,
                 ),
             ).toList().joinToString("")
         }

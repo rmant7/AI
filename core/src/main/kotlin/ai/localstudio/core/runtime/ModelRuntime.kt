@@ -66,6 +66,13 @@ data class GenerationRequest(
     /** >1.0 discourages repeats; 1.0 disables the penalty entirely. */
     val repeatPenalty: Double = 1.2,
     val stopSequences: List<String> = emptyList(),
+    /**
+     * Attached images, in the order they should be shown to the model — see
+     * [ai.localstudio.core.context.AssembledContext.images]. Empty for every
+     * runtime that doesn't understand vision, including every current local
+     * one: a runtime that ignores this field simply behaves as it always did.
+     */
+    val images: List<ImageRef> = emptyList(),
 )
 
 /**

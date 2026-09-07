@@ -1,5 +1,7 @@
 package ai.localstudio.core.context
 
+import ai.localstudio.core.model.ImageRef
+
 /** Where a piece of context came from. Determines default priority and how it is rendered. */
 enum class FragmentSource {
     SYSTEM,
@@ -30,6 +32,15 @@ data class AssembledContext(
     val dropped: List<DroppedFragment>,
     val usedTokens: Int,
     val budgetTokens: Int,
+    /**
+     * Attached images, carried alongside the text fragments rather than as
+     * one of them: an image has no token cost under this engine's budgeting
+     * (it never goes through [ContextEngine]'s truncation) and nothing to
+     * render as prompt text — it is handed to
+     * [ai.localstudio.core.runtime.GenerationRequest.images] as-is for a
+     * runtime that understands vision to embed directly.
+     */
+    val images: List<ImageRef> = emptyList(),
 ) {
     /** The prompt as the model sees it: labelled sections in priority order. */
     fun render(): String = fragments.joinToString("\n\n") { fragment ->
@@ -83,7 +94,7 @@ class ContextEngine(
         require(responseReserveRatio in 0.0..0.9) { "responseReserveRatio out of range" }
     }
 
-    fun assemble(fragments: List<ContextFragment>, contextWindowTokens: Int): AssembledContext {
+    fun assemble(fragments: List<ContextFragment>, contextWindowTokens: Int, images: List<ImageRef> = emptyList()): AssembledContext {
         val budget = ((1.0 - responseReserveRatio) * contextWindowTokens).toInt()
 
         val ordered = fragments.sortedWith(
@@ -110,6 +121,7 @@ class ContextEngine(
             dropped = dropped,
             usedTokens = used,
             budgetTokens = budget,
+            images = images,
         )
     }
 }

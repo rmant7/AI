@@ -3,9 +3,18 @@ package ai.localstudio.openai
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 
+/**
+ * `content` is a [JsonElement], not a plain string, because the OpenAI-
+ * compatible vision format needs an array of parts (`[{type:"text",...},
+ * {type:"image_url",...}]`) instead of a bare string the moment an image is
+ * attached — [JsonPrimitive] for the plain-text case, [JsonArray] for vision.
+ * A response is always read back as plain text in this app, and
+ * [JsonElement] deserializes either shape without extra work.
+ */
 @Serializable
-data class ChatMessage(val role: String, val content: String)
+data class ChatMessage(val role: String, val content: JsonElement)
 
 @Serializable
 data class ChatRequest(
