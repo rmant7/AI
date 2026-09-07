@@ -1,0 +1,43 @@
+{
+  // Mirrors .github/workflows/android.yml's "build" job environment: Java 21
+  // (temurin) + the Android SDK/NDK/CMake versions app/build.gradle.kts
+  // expects. Use this when Actions runners are unavailable or you just want
+  // to iterate on the Android build by hand with full internet access.
+  //
+  // What this does NOT try to reproduce: the emulator-based smoke-test job.
+  // GitHub Codespaces containers generally do not expose /dev/kvm (no nested
+  // virtualization), so the AVD launches, if at all, without hardware
+  // acceleration and can hang or time out. scripts/run-instrumented-tests.sh
+  // still exists for the rare Codespace machine type that does support it,
+  // and checks for /dev/kvm first with a clear warning instead of pretending
+  // it will work.
+  "name": "local-ai-studio-android",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+
+  "features": {
+    // Official feature — used instead of hand-installing a JDK because it
+    // exists and is maintained; there is no equally-official feature for the
+    // Android SDK itself, so that part is a plain script below.
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21",
+      "jdkDistro": "tem"
+    }
+  },
+
+  // Read by settings.gradle.kts to decide whether to include :app at all —
+  // without one of ANDROID_HOME / ANDROID_SDK_ROOT set (or a local.properties
+  // file), the Android module is silently excluded from the build, same as
+  // it is in this very sandbox.
+  "containerEnv": {
+    "ANDROID_HOME": "/opt/android-sdk",
+    "ANDROID_SDK_ROOT": "/opt/android-sdk"
+  },
+
+  "postCreateCommand": "bash .devcontainer/setup-android-sdk.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["vscjava.vscode-gradle", "redhat.vscode-yaml"]
+    }
+  }
+}
