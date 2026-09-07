@@ -8,9 +8,12 @@ import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.TextModelHandle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -59,7 +62,39 @@ class LlamaCppRuntime(
         val bridge = LlamaBridge()
         val loadStart = System.currentTimeMillis()
         log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads)")
-        val handle = bridge.nativeLoad(file.absolutePath, contextTokens, threads)
+
+        // nativeLoad() is a single blocking JNI call — llama_model_load_from_file()
+        // and llama_init_from_model() have no cancellation hook of their own,
+        // unlike generate()'s per-chunk checks. Called directly inside this
+        // suspend function, a Stop tap or a timeout during a slow load (a
+        // 12B model has taken over 10 minutes on this device) would have no
+        // effect until the call finally returned — a coroutine cancellation
+        // can only be observed at a suspension point, and there wasn't one.
+        // Running it on a detached worker (its own SupervisorJob, not a
+        // child of the caller) means load() itself still responds to
+        // cancellation immediately, while the worker keeps running to
+        // completion in the background and frees whatever it produced if
+        // nobody is waiting for it anymore, instead of leaking a model.
+        // Plain var, not @Volatile: CompletableDeferred's completion (awaited
+        // below, and observed via invokeOnCompletion in the cancelled path)
+        // already establishes happens-before, so both readers always see the
+        // write the worker made just before completing.
+        var producedHandle = 0L
+        val result = CompletableDeferred<Unit>()
+        val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            producedHandle = runCatching { bridge.nativeLoad(file.absolutePath, contextTokens, threads) }.getOrDefault(0L)
+            result.complete(Unit)
+        }
+        val handle = try {
+            result.await()
+            producedHandle
+        } catch (e: CancellationException) {
+            log("LOCAL_LOAD", "${file.name}: abandoned after ${System.currentTimeMillis() - loadStart}ms, still loading in the background")
+            worker.invokeOnCompletion {
+                if (producedHandle != 0L) bridge.nativeFree(producedHandle)
+            }
+            throw e
+        }
         val loadMs = System.currentTimeMillis() - loadStart
         if (handle == 0L) {
             log("LOCAL_LOAD", "${file.name}: FAILED after ${loadMs}ms")
