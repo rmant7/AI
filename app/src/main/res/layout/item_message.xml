@@ -39,6 +39,18 @@
                 android:paddingEnd="0dp"
                 android:textSize="11sp" />
 
+            <ImageButton
+                android:id="@+id/copyButton"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="-4dp"
+                android:layout_marginBottom="-4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/message_copy"
+                android:padding="5dp"
+                android:src="@drawable/ic_copy" />
+
         </LinearLayout>
 
         <TextView

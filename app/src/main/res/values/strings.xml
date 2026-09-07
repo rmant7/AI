@@ -8,6 +8,10 @@
     <string name="menu_models">Модели</string>
     <string name="menu_clear">Новый чат</string>
     <string name="menu_history">История чатов</string>
+    <string name="menu_share_chat">Поделиться чатом</string>
+    <string name="message_copy">Скопировать сообщение</string>
+    <string name="message_copied">Скопировано</string>
+    <string name="chat_share_empty">Чат пуст — нечем делиться</string>
     <string name="history_empty">Пока нет сохранённых чатов</string>
     <string name="history_delete">Удалить</string>
     <string name="memory_on">Память: вкл</string>

@@ -1,9 +1,15 @@
 package ai.localstudio.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.res.ColorStateList
+import android.os.Build
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import ai.localstudio.app.databinding.ItemMessageBinding
@@ -123,5 +129,17 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         binding.timeText.setTextColor(textColor)
         binding.bodyText.setTextColor(textColor)
         binding.detailsText.setTextColor(textColor)
+        binding.copyButton.imageTintList = ColorStateList.valueOf(textColor)
+        binding.copyButton.setOnClickListener { copyToClipboard(binding.root.context, message.body) }
+    }
+
+    private fun copyToClipboard(context: Context, text: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Ответ модели", text))
+        // Android 13+ (API 33) already shows its own system "Copied" toast for
+        // every clip — adding this one too would just duplicate it on top.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(context, R.string.message_copied, Toast.LENGTH_SHORT).show()
+        }
     }
 }

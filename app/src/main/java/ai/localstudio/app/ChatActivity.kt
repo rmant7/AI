@@ -96,7 +96,8 @@ class ChatActivity : AppCompatActivity() {
         menu.add(0, MENU_FILES, 2, R.string.menu_files)
         menu.add(0, MENU_SETTINGS, 3, R.string.menu_settings)
         menu.add(0, MENU_HISTORY, 4, R.string.menu_history)
-        menu.add(0, MENU_CLEAR, 5, R.string.menu_clear)
+        menu.add(0, MENU_SHARE_CHAT, 5, R.string.menu_share_chat)
+        menu.add(0, MENU_CLEAR, 6, R.string.menu_clear)
         return true
     }
 
@@ -139,7 +140,31 @@ class ChatActivity : AppCompatActivity() {
             true
         }
 
+        MENU_SHARE_CHAT -> {
+            shareChat()
+            true
+        }
+
         else -> super.onOptionsItemSelected(item)
+    }
+
+    /** Shares the whole visible conversation as plain text — one message per paragraph, in order. */
+    private fun shareChat() {
+        val messages = adapter.messages()
+        if (messages.isEmpty()) {
+            Toast.makeText(this, R.string.chat_share_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val transcript = messages.joinToString("\n\n") { message ->
+            val time = Message.formatTime(message.timestamp)
+            val header = if (time.isBlank()) message.role else "${message.role} ($time)"
+            "$header:\n${message.body}"
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, transcript)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.menu_share_chat)))
     }
 
     private fun showHistory() {
@@ -426,7 +451,8 @@ class ChatActivity : AppCompatActivity() {
         const val MENU_FILES = 3
         const val MENU_SETTINGS = 4
         const val MENU_HISTORY = 5
-        const val MENU_CLEAR = 6
+        const val MENU_SHARE_CHAT = 6
+        const val MENU_CLEAR = 7
 
         // Generous on purpose: a large local model on a slow phone can
         // legitimately take a while to produce a first token. This exists to
