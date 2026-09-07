@@ -337,7 +337,12 @@ class AppContainer private constructor(private val context: Context) {
     private fun localCandidate(): FallbackCandidate? {
         val selected = ModelSelector(localRegistry(), device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
         return FallbackCandidate(
-            label = CloudProviders.LOCAL.title,
+            // Names the specific installed model, not just "Локально на
+            // устройстве" — with several local models to choose from
+            // (or a mix of a tiny and a huge one, tried at different times),
+            // a generic label in the log and in the answer's own attribution
+            // line answered "was it local?" but not "which local model?".
+            label = "${CloudProviders.LOCAL.title}: ${selected.model.id}",
             runtime = LlamaCppRuntime(contextTokens = settings.contextTokens, log = appLog::record),
             model = selected.model,
             binding = selected.binding,

@@ -10,14 +10,17 @@ import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.TextModelHandle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
@@ -75,6 +78,14 @@ private class LlamaTextModel(
     private val log: (tag: String, message: String) -> Unit,
 ) : TextModelHandle {
 
+    // nativeCancel()/Job.cancel() only ask a blocking native call to stop at
+    // its next checkpoint — they cannot interrupt it, so "the Job was
+    // cancelled" does not mean "the native call already returned". close()
+    // waits on this before freeing the context (see close() below) so a
+    // model eviction can never free memory a still-running llama_decode()
+    // call is using out from under it.
+    private val activeWorker = AtomicReference<Job?>(null)
+
     override fun generate(request: GenerationRequest): Flow<String> = callbackFlow {
         val start = System.currentTimeMillis()
         var tokenCount = 0
@@ -120,6 +131,7 @@ private class LlamaTextModel(
                 close()
             }
         }
+        activeWorker.set(worker)
 
         awaitClose {
             // Native generation blocks in C++; cancelling the coroutine alone
@@ -142,6 +154,12 @@ private class LlamaTextModel(
     }
 
     override fun close() {
+        // Blocks (bounded now that prompt processing is chunked and checks
+        // cancellation between batches, see llama_jni.cpp) until any
+        // in-flight native call has genuinely returned — freeing the
+        // context while a background thread is still inside
+        // llama_decode() using it is a use-after-free, not a graceful stop.
+        runBlocking { activeWorker.get()?.join() }
         bridge.nativeFree(handle)
     }
 }

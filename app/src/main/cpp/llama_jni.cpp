@@ -25,6 +25,9 @@ namespace {
 /** How many recent tokens the repetition penalty looks back over. */
 constexpr int32_t PENALTY_LAST_N = 64;
 
+/** Matches contextParams.n_batch in nativeLoad — how much prompt gets decoded per llama_decode call. */
+constexpr int32_t BATCH_SIZE = 512;
+
 /**
  * Best-effort: ask the scheduler to favour this thread.
  *
@@ -179,7 +182,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     contextParams.n_ctx = (uint32_t) clampedContextTokens;
     // Larger batches process the prompt in fewer passes at the cost of memory
     // during that phase — a good trade on a device with RAM to spare.
-    contextParams.n_batch = 512;
+    contextParams.n_batch = BATCH_SIZE;
     contextParams.n_threads = threads;
     contextParams.n_threads_batch = threads;
 
@@ -278,8 +281,23 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
         }
     }
 
-    if (llama_decode(session->ctx, llama_batch_get_one(tokens.data(), count)) != 0) {
-        return -5;
+    // Processed in BATCH_SIZE-token pieces, checking cancellation between
+    // them — a single llama_decode() call over the whole prompt cannot be
+    // interrupted mid-call, so a long prompt (a full conversation resent
+    // every turn, easily thousands of tokens) previously meant a cancel
+    // request from Kotlin did nothing until that entire call returned,
+    // however long that took. That left this thread still inside
+    // llama_decode() well after the Kotlin side had given up and moved on;
+    // if the model was then evicted to make room for a different one, its
+    // context was freed while this call was still using it — a
+    // use-after-free, and a very plausible cause of a crash that only shows
+    // up after a timeout or a model switch, not on a plain single turn.
+    for (int32_t offset = 0; offset < count; offset += BATCH_SIZE) {
+        if (session->cancelled.load()) return 0;
+        const int32_t batchCount = std::min(BATCH_SIZE, count - offset);
+        if (llama_decode(session->ctx, llama_batch_get_one(tokens.data() + offset, batchCount)) != 0) {
+            return -5;
+        }
     }
 
     // Without a repetition penalty, a small quantized model that starts
