@@ -21,6 +21,13 @@ if ! command -v unzip >/dev/null 2>&1; then
   sudo apt-get install -y unzip
 fi
 
+# /opt is root-owned in the base image; everything below needs to write into
+# $SDK_ROOT (sdkmanager included, well after this script exits) without sudo,
+# so claim it once up front instead of failing mid-unzip on a permission
+# error from a plain mkdir.
+sudo mkdir -p "$SDK_ROOT"
+sudo chown -R "$(id -u):$(id -g)" "$SDK_ROOT"
+
 if [ ! -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
   echo "Installing Android cmdline-tools into $SDK_ROOT ..."
   tmp="$(mktemp -d)"
