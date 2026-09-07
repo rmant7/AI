@@ -14,9 +14,10 @@ import ai.localstudio.core.registry.RuntimeKind
  * first and the official repository last. The second reason is ordinary
  * availability: a repository can be renamed or restructured at any time.
  *
- * The list carries repositories, never file names: the concrete artifact is
- * resolved at download time (see [HuggingFaceResolver]), by [extension] —
- * `.gguf` for [RuntimeKind.LLAMA_CPP], `.litertlm` for [RuntimeKind.LITERT].
+ * The list carries repositories, never file names, for GGUF: the concrete
+ * artifact is resolved at download time (see [HuggingFaceResolver]), by
+ * [extension] — `.gguf` for [RuntimeKind.LLAMA_CPP], `.litertlm` for
+ * [RuntimeKind.LITERT]. LiteRT-LM repos are the exception — see [exactFileName].
  */
 data class LocalModelSeed(
     val id: String,
@@ -28,6 +29,19 @@ data class LocalModelSeed(
     val capabilities: Set<Capability> = setOf(Capability.TEXT_GENERATION, Capability.REASONING),
     val contextTokens: Int = 4096,
     val runtime: RuntimeKind = RuntimeKind.LLAMA_CPP,
+    /**
+     * The exact file to download, when known — required in practice for
+     * LiteRT-LM: a repo commonly holds several `.litertlm` files (the
+     * universal one plus chip-specific ahead-of-time builds, sometimes other
+     * variants besides), and picking the wrong one downloads a multi-
+     * gigabyte file that fails to load with an opaque native error
+     * ("TF_LITE_PREFILL_DECODE not found in the model") rather than
+     * anything that points back at "wrong file". Pinned to the exact name
+     * Google's own model_allowlists ships for each entry below rather than
+     * guessed from a naming heuristic. Falls back to the generic
+     * extension-based pick if the named file is ever renamed or missing.
+     */
+    val exactFileName: String? = null,
 ) {
     val extension: String get() = if (runtime == RuntimeKind.LITERT) ".litertlm" else ".gguf"
 }
@@ -211,6 +225,7 @@ object LocalModels {
             note = "Тот же класс модели, что и обычная Gemma 3 1B, но через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU.",
             approxSizeBytes = 584_417_280,
             runtime = RuntimeKind.LITERT,
+            exactFileName = "gemma3-1b-it-int4.litertlm",
         ),
         LocalModelSeed(
             id = "gemma-4-e2b-it-litert",
@@ -220,6 +235,7 @@ object LocalModels {
             note = "Компактная Gemma 4 через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU. Контекст до 32K, понимает изображения и аудио (в этом приложении используется только текст).",
             approxSizeBytes = 2_583_085_056,
             runtime = RuntimeKind.LITERT,
+            exactFileName = "gemma-4-E2B-it.litertlm",
         ),
         LocalModelSeed(
             id = "gemma-4-e4b-it-litert",
@@ -229,6 +245,7 @@ object LocalModels {
             note = "Более крупная Gemma 4 через Google Tensor SDK. Контекст до 32K; рекомендуется от 12 ГБ RAM.",
             approxSizeBytes = 3_654_467_584,
             runtime = RuntimeKind.LITERT,
+            exactFileName = "gemma-4-E4B-it.litertlm",
         ),
         LocalModelSeed(
             id = "gemma-3n-e2b-it-litert",
@@ -239,6 +256,7 @@ object LocalModels {
             approxSizeBytes = 3_655_827_456,
             contextTokens = 4096,
             runtime = RuntimeKind.LITERT,
+            exactFileName = "gemma-3n-E2B-it-int4.litertlm",
         ),
         LocalModelSeed(
             id = "gemma-3n-e4b-it-litert",
@@ -249,6 +267,7 @@ object LocalModels {
             approxSizeBytes = 4_919_541_760,
             contextTokens = 4096,
             runtime = RuntimeKind.LITERT,
+            exactFileName = "gemma-3n-E4B-it-int4.litertlm",
         ),
         LocalModelSeed(
             id = "qwen2.5-1.5b-instruct-litert",
@@ -256,6 +275,7 @@ object LocalModels {
             repoIds = listOf("litert-community/Qwen2.5-1.5B-Instruct"),
             paramsLabel = "1.5B · LiteRT-LM",
             note = "Через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU.",
+            exactFileName = "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm",
             approxSizeBytes = 1_597_931_520,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
             runtime = RuntimeKind.LITERT,
@@ -269,6 +289,7 @@ object LocalModels {
             approxSizeBytes = 1_833_451_520,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
             runtime = RuntimeKind.LITERT,
+            exactFileName = "DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm",
         ),
     )
 

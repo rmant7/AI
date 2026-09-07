@@ -36,11 +36,16 @@ object HuggingFaceResolver {
      * message lists what each source said, because "не удалось скачать" is not
      * something a user can act on.
      */
-    fun resolveAny(repoIds: List<String>, token: String? = null, extension: String = ".gguf"): Pair<String, ResolvedModelFile> {
+    fun resolveAny(
+        repoIds: List<String>,
+        token: String? = null,
+        extension: String = ".gguf",
+        exactFileName: String? = null,
+    ): Pair<String, ResolvedModelFile> {
         val failures = mutableListOf<String>()
         for (repoId in repoIds) {
             try {
-                return repoId to resolveWithRetry(repoId, token, extension)
+                return repoId to resolveWithRetry(repoId, token, extension, exactFileName)
             } catch (e: NoNetworkException) {
                 // Every repoId lives on the same host: a DNS failure on the
                 // first one will repeat identically for the rest. Trying them
@@ -62,11 +67,11 @@ object HuggingFaceResolver {
      * download body is, so without this a blip here fails the whole model
      * instead of a brief pause.
      */
-    private fun resolveWithRetry(repoId: String, token: String?, extension: String): ResolvedModelFile {
+    private fun resolveWithRetry(repoId: String, token: String?, extension: String, exactFileName: String?): ResolvedModelFile {
         var lastNetworkError: UnknownHostException? = null
         repeat(RESOLVE_RETRIES) { attempt ->
             try {
-                return resolve(repoId, token, extension)
+                return resolve(repoId, token, extension, exactFileName)
             } catch (e: UnknownHostException) {
                 lastNetworkError = e
                 if (attempt < RESOLVE_RETRIES - 1) Thread.sleep(RESOLVE_RETRY_DELAY_MS)
@@ -75,9 +80,16 @@ object HuggingFaceResolver {
         throw NoNetworkException(lastNetworkError?.message ?: "host unreachable")
     }
 
-    fun resolve(repoId: String, token: String? = null, extension: String = ".gguf"): ResolvedModelFile {
+    fun resolve(repoId: String, token: String? = null, extension: String = ".gguf", exactFileName: String? = null): ResolvedModelFile {
         val entries = fetchTree(repoId, token)
-        val best = ArtifactResolver.pickBest(entries, extension = extension)
+        // A repo commonly holds more than one file with the same extension
+        // (LiteRT-LM's chip-specific ahead-of-time builds alongside the
+        // universal one, sometimes other variants besides) — when the exact
+        // file is known, matching it by name is the only reliable way to get
+        // the same file a real, working setup uses instead of a heuristic
+        // guessing among files it cannot actually distinguish.
+        val exact = exactFileName?.let { name -> entries.firstOrNull { it.path.substringAfterLast('/') == name } }
+        val best = exact ?: ArtifactResolver.pickBest(entries, extension = extension)
             ?: throw IOException("нет подходящего файла $extension (возможно, модель разбита на части)")
         return ResolvedModelFile(
             fileName = best.path.substringAfterLast('/'),

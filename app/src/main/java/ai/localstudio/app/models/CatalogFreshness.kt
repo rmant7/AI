@@ -45,7 +45,7 @@ class CatalogFreshness(context: Context) {
 
         val statuses = mutableListOf<SeedStatus>()
         for (seed in seeds) {
-            val error = runCatching { HuggingFaceResolver.resolveAny(seed.repoIds, token, seed.extension) }.exceptionOrNull()
+            val error = runCatching { HuggingFaceResolver.resolveAny(seed.repoIds, token, seed.extension, seed.exactFileName) }.exceptionOrNull()
             if (error != null && error.message.orEmpty().contains(NO_NETWORK_MARKER)) {
                 // Offline, not broken: every remaining seed would fail the
                 // same way for the same reason, so leave the cache as it was
