@@ -277,6 +277,14 @@ class ChatActivity : AppCompatActivity() {
             .map { ConversationTurn(it.role, it.body) }
         val attachedDocuments = container.documents.list().map { it.name }
 
+        // Read right before the request, not after: this is what makes
+        // "какие провайдеры были разрешены" answerable for this exact turn
+        // rather than for whatever the orchestrator happened to build last.
+        container.appLog.record(
+            "SEND",
+            "enabledProviders=${container.settings.enabledProviderIds} route=${container.runtimeLabel}",
+        )
+
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -301,9 +309,19 @@ class ChatActivity : AppCompatActivity() {
             setBusy(false)
             result
                 .onSuccess { answer ->
+                    // FallbackTextRuntime already embeds "Ответ от: <label>"
+                    // whenever 2+ candidates are configured (any cloud
+                    // provider, via its own model rotation, counts as 2+).
+                    // The one case that bypasses it — exactly one candidate,
+                    // i.e. pure local-only — gets the same line added here
+                    // instead, so an answer is never shown with no
+                    // indication at all of which model actually produced it.
+                    val body = answer.text.ifBlank { "(пустой ответ)" }.let { answerText ->
+                        container.soleAnswererLabel?.let { label -> "$answerText\n\n---\nОтвет от: $label" } ?: answerText
+                    }
                     adapter.add(
                         Message.assistant(
-                            body = answer.text.ifBlank { "(пустой ответ)" },
+                            body = body,
                             details = buildString {
                                 append(answer.plan.capabilities.joinToString(", ") { it.id })
                                 answer.context?.let { append(" · контекст: ${it.fragments.size} фрагм.") }

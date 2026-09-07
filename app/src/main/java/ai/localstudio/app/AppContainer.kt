@@ -199,6 +199,27 @@ class AppContainer private constructor(private val context: Context) {
     private var cachedOrchestrator: Orchestrator? = null
     private var cachedSignature: String? = null
 
+    /**
+     * Labels of whatever [orchestrator] most recently wired up, refreshed on
+     * every call regardless of the cache — this is what lets Settings and
+     * the chat screen show what is actually configured *right now*, rather
+     * than what was configured the last time the orchestrator happened to be
+     * rebuilt.
+     */
+    private var lastCandidates: List<FallbackCandidate> = emptyList()
+
+    /**
+     * Non-null only when exactly one candidate is configured — a pure
+     * local-only setup, since every cloud provider contributes several
+     * candidates via [cloudCandidates]' model rotation. That single-candidate
+     * case bypasses [FallbackTextRuntime] entirely (see [orchestrator]) to
+     * keep RAM-budget tracking, so it never gets the "Ответ от: <label>"
+     * line [FallbackTextRuntime] embeds in the answer text — this is what
+     * [ChatActivity] uses to show the same attribution for that one
+     * remaining case.
+     */
+    val soleAnswererLabel: String? get() = lastCandidates.singleOrNull()?.label
+
     /** Rebuilt only when the settings that affect wiring have actually changed. */
     fun orchestrator(): Orchestrator {
         val enabled = enabledProviders()
@@ -209,6 +230,7 @@ class AppContainer private constructor(private val context: Context) {
         val candidates = enabled.flatMap { provider ->
             if (provider.id == CloudProviders.LOCAL.id) listOfNotNull(localCandidate()) else cloudCandidates(provider)
         }
+        lastCandidates = candidates
 
         val signature = (
             listOf(
@@ -229,6 +251,15 @@ class AppContainer private constructor(private val context: Context) {
                 candidates.map { it.model.id }
             ).joinToString("|")
         cachedOrchestrator?.takeIf { cachedSignature == signature }?.let { return it }
+
+        // Only on an actual rebuild, not every call — this is the answer to
+        // "is the provider I just unchecked really gone": if it still shows
+        // up here after being disabled, the bug is in enabledProviderIds
+        // persistence, not in routing.
+        appLog.record(
+            "ROUTER_REBUILD",
+            "enabled=${enabled.map { it.id }} candidates=${candidates.map { it.label }}",
+        )
 
         val runtime: ModelRuntime = when {
             candidates.isEmpty() -> StubRuntime()

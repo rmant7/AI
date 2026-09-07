@@ -46,7 +46,7 @@ private fun succeeding(vararg tokens: String): Flow<String> = flow { tokens.forE
 class FallbackTextRuntimeTest {
 
     @Test
-    fun `the first candidate that actually produces tokens wins`() = runBlocking {
+    fun `the first candidate that actually produces tokens wins, and is named in the answer`() = runBlocking {
         val runtime = FallbackTextRuntime(
             listOf(
                 candidate("local") { succeeding("ответ ", "локально") },
@@ -57,7 +57,11 @@ class FallbackTextRuntimeTest {
         val handle = runtime.load(model("m"), binding()) as TextModelHandle
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
-        assertEquals("ответ локально", text)
+        assertTrue(text.startsWith("ответ локально"))
+        assertTrue(text.contains("Ответ от: local"), "the answering candidate should be named even with no fallback: $text")
+        // No fallback happened, so there is nothing to warn about — only the
+        // plain attribution line, no "⚠" failure summary.
+        assertTrue(!text.contains("⚠"))
     }
 
     @Test
@@ -138,12 +142,13 @@ class FallbackTextRuntimeTest {
     }
 
     @Test
-    fun `no footer at all when the first candidate simply answers`() = runBlocking {
+    fun `even a single candidate gets attributed, not just a fallback`() = runBlocking {
         val runtime = FallbackTextRuntime(listOf(candidate("local") { succeeding("just an answer") }))
 
         val handle = runtime.load(model("m"), binding()) as TextModelHandle
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
-        assertEquals("just an answer", text)
+        assertTrue(text.startsWith("just an answer"))
+        assertTrue(text.contains("Ответ от: local"))
     }
 }
