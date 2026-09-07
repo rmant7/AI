@@ -23,7 +23,6 @@ if [ -z "$apk" ]; then
   exit 1
 fi
 
-sha="$(git rev-parse --short=7 HEAD)"
-out="local-ai-studio-local-${sha}.apk"
+out="localAI.apk"
 cp "$apk" "$out"
-echo "APK built: $out"
+echo "APK built: $out (from commit $(git rev-parse --short=7 HEAD))"

@@ -18,7 +18,8 @@ cd "$(dirname "$0")/.."
 
 : "${GH_TOKEN:?Set GH_TOKEN to a token with repo scope before running this script (the gh CLI reads it automatically).}"
 
-apk="$(find . -maxdepth 1 -name 'local-ai-studio-local-*.apk' | head -n1)"
+apk="./localAI.apk"
+[ -f "$apk" ] || apk=""
 if [ -z "$apk" ]; then
   echo "No local build found — run scripts/build.sh first." >&2
   exit 1
