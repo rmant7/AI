@@ -100,6 +100,8 @@
     <string name="dialog_ok">Понятно</string>
     <string name="settings_about">О сборке</string>
     <string name="settings_about_body">Версия: %1$s (код %2$d)\nКоммит: %3$s\nCI-сборка: %4$s\n\nСравните коммит с тем, что было отправлено в чате, чтобы убедиться, что это именно та сборка.</string>
+    <string name="settings_about_cpu">Проверено llama.cpp на этом устройстве:\n%1$s</string>
+    <string name="settings_about_cpu_unavailable">llama.cpp недоступен на этом устройстве (не та архитектура процессора).</string>
     <string name="dialog_cancel">Отмена</string>
     <string name="settings_ram">Бюджет памяти на модель, % от общей RAM</string>
     <string name="settings_ram_hint">60</string>

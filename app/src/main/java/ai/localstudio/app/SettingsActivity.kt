@@ -12,6 +12,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivitySettingsBinding
+import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.whisper.WhisperDownloadState
 import ai.localstudio.app.whisper.WhisperModels
 import kotlinx.coroutines.launch
@@ -205,16 +206,32 @@ class SettingsActivity : AppCompatActivity() {
 
     /** Exactly "is this the build I was just sent" — the git commit an APK was built from, not a version number nobody bumps. */
     private fun showAbout() {
-        val message = getString(
+        val base = getString(
             R.string.settings_about_body,
             BuildConfig.VERSION_NAME,
             BuildConfig.VERSION_CODE,
             BuildConfig.GIT_SHA,
             BuildConfig.CI_RUN,
         )
+        // llama_print_system_info() just formats compile-time flags — no
+        // model load involved — so this is cheap even including the native
+        // library's first System.loadLibrary() call, and worth having up
+        // front: whether dotprod/i8mm/fp16 were actually detected for this
+        // device's CPU is exactly what settles "is this slow because of the
+        // build, or because the hardware itself can't go faster".
+        val cpuInfo = if (LlamaBridge.isAvailable) {
+            runCatching { LlamaBridge().nativeSystemInfo() }.getOrNull()
+        } else {
+            null
+        }
+        val cpuLine = "\n\n" + if (cpuInfo.isNullOrBlank()) {
+            getString(R.string.settings_about_cpu_unavailable)
+        } else {
+            getString(R.string.settings_about_cpu, cpuInfo)
+        }
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_about)
-            .setMessage(message)
+            .setMessage(base + cpuLine)
             .setPositiveButton(R.string.dialog_ok, null)
             .show()
     }
