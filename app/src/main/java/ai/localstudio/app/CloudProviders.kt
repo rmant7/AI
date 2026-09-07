@@ -27,6 +27,15 @@ data class CloudProvider(
      * since this list will drift out of date before the code does.
      */
     val freeModels: List<String> = emptyList(),
+    /**
+     * Whether attaching an image is worth offering for this provider at all.
+     * Conservative on purpose: only providers actually confirmed to accept
+     * OpenAI-compatible vision content (`image_url` parts) are marked true —
+     * an editable model field means the user could always type in a model
+     * this doesn't hold for, so this is "don't block the common case," not a
+     * guarantee every model listed here understands images.
+     */
+    val visionCapable: Boolean = false,
 )
 
 object CloudProviders {
@@ -68,6 +77,7 @@ object CloudProviders {
                 "gemini-3.1-flash-lite",
                 "gemini-2.5-flash",
             ),
+            visionCapable = true,
         ),
         CloudProvider(
             id = "mistral",

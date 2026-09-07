@@ -3,6 +3,7 @@ package ai.localstudio.openai
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.keys.ApiKeyRotator
 import ai.localstudio.core.model.AudioRef
+import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.model.Transcript
 import ai.localstudio.core.model.TranscriptSegment
 import ai.localstudio.core.registry.ModelDescriptor
@@ -20,6 +21,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
@@ -106,6 +111,32 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
 
     private fun url(path: String) = "${config.normalizedBaseUrl}$path"
 
+    /**
+     * Plain text stays a bare string (what every server already expects);
+     * an attached image switches to the OpenAI vision content-parts array
+     * (`[{type:"text",...},{type:"image_url",...}]`) — a provider that
+     * doesn't support vision on the selected model rejects this the same
+     * way it would reject any other unsupported request, with its own
+     * error surfacing through [OpenAiException] rather than this runtime
+     * guessing per-model support itself.
+     */
+    private fun userContent(text: String, images: List<ImageRef>) =
+        if (images.isEmpty()) {
+            JsonPrimitive(text)
+        } else {
+            buildJsonArray {
+                add(buildJsonObject { put("type", "text"); put("text", text) })
+                images.forEach { image ->
+                    add(
+                        buildJsonObject {
+                            put("type", "image_url")
+                            put("image_url", buildJsonObject { put("url", image.uri) })
+                        },
+                    )
+                }
+            }
+        }
+
     private inner class RemoteTextModel(
         override val modelId: String,
         private val remoteName: String,
@@ -121,8 +152,8 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                 ChatRequest(
                     model = remoteName,
                     messages = buildList {
-                        request.systemPrompt?.let { add(ChatMessage("system", it)) }
-                        add(ChatMessage("user", request.prompt))
+                        request.systemPrompt?.let { add(ChatMessage("system", JsonPrimitive(it))) }
+                        add(ChatMessage("user", userContent(request.prompt, request.images)))
                     },
                     stream = true,
                     // maxTokens/temperature/topP are deliberately NOT forwarded

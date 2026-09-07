@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
@@ -23,7 +24,9 @@ import ai.localstudio.app.history.toStored
 import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.engine.UserRequest
+import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.pipeline.ConversationTurn
+import ai.localstudio.core.pipeline.NodeValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -52,8 +55,16 @@ class ChatActivity : AppCompatActivity() {
     // still be "the old text plus what's been said so far", not overwrite it.
     private var recordingPrefix = ""
 
+    // Staged for exactly one turn, then cleared — an attached image is a
+    // question about *this* photo, not something to keep resending on every
+    // later message the way a document's extracted text is kept in memory.
+    private var pendingImage: ImageRef? = null
+
     private val pickDocument = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { ingestDocument(it) }
+        uri?.let {
+            val mimeType = contentResolver.getType(it).orEmpty()
+            if (mimeType.startsWith("image/")) attachImage(it) else ingestDocument(it)
+        }
     }
 
     private val requestMicPermission =
@@ -74,6 +85,7 @@ class ChatActivity : AppCompatActivity() {
 
         binding.sendButton.setOnClickListener { if (isGenerating) stopGeneration() else send() }
         binding.attachButton.setOnClickListener { pickDocument.launch("*/*") }
+        binding.pendingImageClear.setOnClickListener { clearPendingImage() }
         binding.micButton.setOnClickListener { onMicClicked() }
 
         // The app being killed in the background is routine on Android, not
@@ -287,6 +299,11 @@ class ChatActivity : AppCompatActivity() {
             .takeLast(MAX_HISTORY_TURNS)
             .map { ConversationTurn(it.role, it.body) }
         val attachedDocuments = container.documents.list().map { it.name }
+        // Cleared immediately, same as the text field above: this turn owns
+        // whatever was staged, and a lingering thumbnail after sending would
+        // read as "still attached" for the next message too.
+        val attachment: NodeValue = pendingImage?.let { NodeValue.Image(it) } ?: NodeValue.Empty
+        clearPendingImage()
 
         // Read right before the request, not after: this is what makes
         // "какие провайдеры были разрешены" answerable for this exact turn
@@ -300,7 +317,7 @@ class ChatActivity : AppCompatActivity() {
             val sources = container.compareCandidates()
             if (sources.size >= 2) {
                 container.appLog.record("SEND_COMPARE", "sources=${sources.map { it.first }}")
-                sendCompare(text, history, attachedDocuments, sources)
+                sendCompare(text, history, attachedDocuments, attachment, sources)
                 return
             }
         }
@@ -317,6 +334,7 @@ class ChatActivity : AppCompatActivity() {
                             UserRequest(
                                 conversationId = conversationId,
                                 text = text,
+                                attachment = attachment,
                                 memoryEnabled = container.settings.memoryEnabled,
                                 history = history,
                                 attachedDocuments = attachedDocuments,
@@ -387,6 +405,7 @@ class ChatActivity : AppCompatActivity() {
         text: String,
         history: List<ConversationTurn>,
         attachedDocuments: List<String>,
+        attachment: NodeValue,
         sources: List<Pair<String, ai.localstudio.core.engine.Orchestrator>>,
     ) {
         generationJob = lifecycleScope.launch {
@@ -407,6 +426,7 @@ class ChatActivity : AppCompatActivity() {
                                     UserRequest(
                                         conversationId = conversationId,
                                         text = text,
+                                        attachment = attachment,
                                         memoryEnabled = container.settings.memoryEnabled,
                                         history = history,
                                         attachedDocuments = attachedDocuments,
@@ -468,6 +488,62 @@ class ChatActivity : AppCompatActivity() {
                     ).show()
                 }
         }
+    }
+
+    /**
+     * A GGUF/LiteRT-LM model never sees this — every local runtime ignores
+     * [ai.localstudio.core.runtime.GenerationRequest.images] entirely — so
+     * this is gated on at least one *enabled* provider actually accepting
+     * vision content, checked before doing any work rather than staging an
+     * image the eventual answer will silently ignore.
+     */
+    private fun attachImage(uri: Uri) {
+        val visionAvailable = container.settings.enabledProviderIds.any { CloudProviders.byId(it).visionCapable }
+        if (!visionAvailable) {
+            Toast.makeText(this, R.string.chat_attach_image_no_vision, Toast.LENGTH_LONG).show()
+            return
+        }
+        lifecycleScope.launch {
+            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { "изображение" }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw java.io.IOException("Не удалось открыть файл")
+                    if (bytes.size > MAX_IMAGE_BYTES) {
+                        throw java.io.IOException(
+                            getString(R.string.chat_attach_image_too_large, "%.1f МБ".format(Locale.US, bytes.size / 1_000_000.0)),
+                        )
+                    }
+                    // A content:// URI means nothing outside this process —
+                    // core/openai are plain JVM with no Context to resolve
+                    // it, so the image is embedded as a self-contained data
+                    // URI right here rather than threading Android-specific
+                    // access down through the runtime layer.
+                    val mimeType = contentResolver.getType(uri).takeIf { !it.isNullOrBlank() } ?: "image/jpeg"
+                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    ImageRef(uri = "data:$mimeType;base64,$base64")
+                }
+            }
+            result
+                .onSuccess { ref ->
+                    pendingImage = ref
+                    binding.pendingImageLabel.text = getString(R.string.chat_attach_image_pending, name)
+                    binding.pendingImageRow.visibility = android.view.View.VISIBLE
+                }
+                .onFailure { error ->
+                    container.appLog.record("ATTACH_ERROR", "${error.javaClass.simpleName}: ${error.message ?: error}")
+                    Toast.makeText(
+                        this@ChatActivity,
+                        getString(R.string.chat_attach_image_read_failed, error.message ?: error.toString()),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+        }
+    }
+
+    private fun clearPendingImage() {
+        pendingImage = null
+        binding.pendingImageRow.visibility = android.view.View.GONE
     }
 
     private fun onMicClicked() {
@@ -629,6 +705,13 @@ class ChatActivity : AppCompatActivity() {
         // does not fit. This just bounds how much history gets rendered and
         // handed over in the first place.
         const val MAX_HISTORY_TURNS = 12
+
+        // Base64 inflates this by ~1.33x on top; most vision-capable APIs
+        // reject requests well below what a modern phone camera produces
+        // uncompressed, so this exists to fail fast with a clear message
+        // instead of sending a multi-minute upload that the server rejects
+        // anyway.
+        const val MAX_IMAGE_BYTES = 20L * 1024 * 1024
 
         // Short enough to read as "live", long enough that Tiny is done
         // transcribing everything so far well before the next tick.

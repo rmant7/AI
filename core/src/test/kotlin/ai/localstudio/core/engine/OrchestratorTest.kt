@@ -120,6 +120,39 @@ class OrchestratorTest {
     }
 
     @Test
+    fun `an image reaches generation directly when no vision model is installed`() = runBlocking {
+        // No "vlm" entry here, unlike the shared `registry` — this is the
+        // common case (a multimodal chat model like Gemini answers about
+        // the image itself; no separate dedicated vision model exists).
+        val registryWithoutVision = ModelRegistry(
+            listOf(
+                RegistryEntry(
+                    model(
+                        "llm-general",
+                        capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING),
+                        bindings = listOf(binding(ramBytes = 2 * GB)),
+                        benchmarks = Benchmarks(general = 70.0),
+                    ),
+                    InstallState.INSTALLED,
+                ),
+            ),
+        )
+        val executors = NodeExecutors(
+            selector = ModelSelector(registryWithoutVision, device()),
+            runtimeManager = RuntimeManager(budgetBytes = 6 * GB, runtimes = mapOf(RuntimeKind.LLAMA_CPP to runtime)),
+            contextEngine = ContextEngine(),
+            systemPrompt = "Ты локальный ассистент.",
+        )
+
+        val answer = Orchestrator(CapabilityRouter(), executors).handle(
+            UserRequest(conversationId = "c1", text = "что на фото?", attachment = imageInput("file://a.png")),
+        )
+
+        assertTrue(answer.text.isNotEmpty())
+        assertEquals(listOf("file://a.png"), answer.context!!.images.map { it.uri })
+    }
+
+    @Test
     fun `the answer and the question are written to memory and found on the next turn`() = runBlocking {
         val orchestrator = orchestrator()
 

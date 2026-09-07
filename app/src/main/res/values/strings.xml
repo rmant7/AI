@@ -27,6 +27,11 @@
     <string name="chat_mic">Голос</string>
     <string name="chat_attach_added">Добавлено в память: %1$s (%2$d фрагм.)</string>
     <string name="chat_attach_failed">Не удалось прочитать файл: %1$s</string>
+    <string name="chat_attach_image_clear">Убрать картинку</string>
+    <string name="chat_attach_image_pending">Картинка: %1$s — будет отправлена со следующим сообщением</string>
+    <string name="chat_attach_image_too_large">Картинка слишком большая (%1$s), максимум 20 МБ</string>
+    <string name="chat_attach_image_no_vision">Ни одна из включённых моделей не понимает изображения. Включите Google Gemini в настройках, чтобы отправлять картинки.</string>
+    <string name="chat_attach_image_read_failed">Не удалось прочитать картинку: %1$s</string>
     <string name="chat_recording">Идёт запись… остановится сама после паузы, или нажмите ещё раз</string>
     <string name="chat_transcribing">Распознаю…</string>
     <string name="chat_mic_no_model">Модель распознавания речи не установлена. Откройте «Модели» → «Голос» и скачайте любую.</string>
