@@ -40,6 +40,10 @@ class ChatActivity : AppCompatActivity() {
     private var conversationId = "chat-" + System.currentTimeMillis()
     private val recorder = AudioRecorder()
     private var isGenerating = false
+    private var generationJob: kotlinx.coroutines.Job? = null
+    // Distinguishes "user tapped stop" from every other way generate() can
+    // fail, so cancelling shows a plain "stopped" line instead of an error.
+    private var stoppedByUser = false
     private var previewJob: kotlinx.coroutines.Job? = null
     // Whatever was already typed before the mic was tapped — live preview
     // updates the field repeatedly while recording, and each update must
@@ -66,7 +70,7 @@ class ChatActivity : AppCompatActivity() {
         binding.messages.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         binding.messages.adapter = adapter
 
-        binding.sendButton.setOnClickListener { send() }
+        binding.sendButton.setOnClickListener { if (isGenerating) stopGeneration() else send() }
         binding.attachButton.setOnClickListener { pickDocument.launch("*/*") }
         binding.micButton.setOnClickListener { onMicClicked() }
 
@@ -290,7 +294,7 @@ class ChatActivity : AppCompatActivity() {
             "enabledProviders=${container.settings.enabledProviderIds} route=${container.runtimeLabel}",
         )
 
-        lifecycleScope.launch {
+        generationJob = lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     // A hang anywhere below this — native, network, wherever
@@ -311,7 +315,15 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
             isGenerating = false
+            generationJob = null
             setBusy(false)
+            if (stoppedByUser) {
+                stoppedByUser = false
+                adapter.add(Message.error(body = getString(R.string.chat_stopped), details = null))
+                binding.messages.scrollToPosition(adapter.itemCount - 1)
+                persist()
+                return@launch
+            }
             result
                 .onSuccess { answer ->
                     // FallbackTextRuntime already embeds "Ответ от: <label>"
@@ -485,9 +497,33 @@ class ChatActivity : AppCompatActivity() {
         binding.input.setSelection(text.length)
     }
 
+    /**
+     * Cancelling the coroutine driving generate() is not a no-op gesture:
+     * FallbackTextRuntime/LlamaCppRuntime's callbackFlow already tears down
+     * on cancellation exactly the way the generation timeout does (native
+     * decode stops at the next chunk boundary, nativeCancel() is called from
+     * awaitClose) — so this reuses a path that was already made safe rather
+     * than adding a second cancellation mechanism. That is what actually lets
+     * the user load a different model or switch to cloud right away instead
+     * of waiting out a hang.
+     */
+    private fun stopGeneration() {
+        if (!isGenerating) return
+        stoppedByUser = true
+        generationJob?.cancel()
+    }
+
     private fun setBusy(busy: Boolean) {
         binding.progress.visibility = if (busy) android.view.View.VISIBLE else android.view.View.GONE
-        binding.sendButton.isEnabled = !busy
+        // The send button doubles as stop while a turn is in flight, rather
+        // than disabling — waiting out a stuck model used to be the only
+        // option, which is exactly what made switching to a lighter model or
+        // to cloud impossible without force-closing the app.
+        binding.sendButton.isEnabled = true
+        binding.sendButton.icon = androidx.core.content.ContextCompat.getDrawable(
+            this, if (busy) R.drawable.ic_stop else R.drawable.ic_send,
+        )
+        binding.sendButton.contentDescription = getString(if (busy) R.string.chat_stop else R.string.send)
     }
 
     private companion object {

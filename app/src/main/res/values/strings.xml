@@ -4,6 +4,8 @@
 
     <string name="chat_hint">Спросите что-нибудь…</string>
     <string name="send">Отправить</string>
+    <string name="chat_stop">Остановить</string>
+    <string name="chat_stopped">Остановлено пользователем.</string>
     <string name="menu_settings">Настройки</string>
     <string name="menu_models">Модели</string>
     <string name="menu_clear">Новый чат</string>
