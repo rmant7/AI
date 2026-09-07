@@ -56,6 +56,12 @@
             android:label="@string/settings_api_keys_manage"
             android:parentActivityName=".SettingsActivity" />
 
+        <activity
+            android:name=".LogActivity"
+            android:exported="false"
+            android:label="@string/settings_log"
+            android:parentActivityName=".SettingsActivity" />
+
         <service
             android:name=".models.ModelDownloadService"
             android:exported="false"

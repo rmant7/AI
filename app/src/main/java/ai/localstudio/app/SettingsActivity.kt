@@ -64,7 +64,6 @@ class SettingsActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
 
-        binding.asrModelInput.setText(settings.speechModel)
         binding.systemPromptInput.setText(settings.systemPrompt)
         binding.ramInput.setText(settings.ramBudgetPercent.toString())
         binding.hfTokenInput.setText(settings.huggingFaceToken)
@@ -175,7 +174,6 @@ class SettingsActivity : AppCompatActivity() {
             settings.apiKey = binding.apiKeyInput.text?.toString().orEmpty()
         }
         settings.chatModel = binding.chatModelInput.text?.toString().orEmpty()
-        settings.speechModel = binding.asrModelInput.text?.toString().orEmpty()
         settings.systemPrompt = binding.systemPromptInput.text?.toString().orEmpty()
         binding.ramInput.text?.toString()?.trim()?.toIntOrNull()?.let { settings.ramBudgetPercent = it }
         settings.huggingFaceToken = binding.hfTokenInput.text?.toString().orEmpty()
@@ -187,12 +185,18 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_ABOUT, 0, R.string.settings_about)
+        menu.add(0, MENU_LOG, 1, R.string.settings_log)
         return true
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         MENU_ABOUT -> {
             showAbout()
+            true
+        }
+
+        MENU_LOG -> {
+            startActivity(Intent(this, LogActivity::class.java))
             true
         }
 
@@ -222,5 +226,6 @@ class SettingsActivity : AppCompatActivity() {
 
     private companion object {
         const val MENU_ABOUT = 1
+        const val MENU_LOG = 2
     }
 }

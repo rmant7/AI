@@ -29,6 +29,7 @@ import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.keys.PrefsApiKeyStore
 import ai.localstudio.app.llama.LlamaBridge
+import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.llama.LlamaCppRuntime
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
@@ -73,6 +74,9 @@ class AppContainer private constructor(private val context: Context) {
     /** One rotator per provider, so cooldown state for Gemini and Mistral never mixes. */
     fun apiKeyRotator(providerId: String): ApiKeyRotator = ApiKeyRotator(apiKeyStore, providerId)
 
+    /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". */
+    val appLog = AppLog(context)
+
     // InMemoryMemoryProvider, as the name says, does not survive the process
     // being killed — routine on Android the moment the app is backgrounded.
     // [documents] does survive it (it's a file), so on every fresh start its
@@ -82,6 +86,23 @@ class AppContainer private constructor(private val context: Context) {
     private val documentMemoryIds = mutableMapOf<String, List<String>>()
 
     init {
+        // Checked once per process, before anything else has a chance to
+        // throw: this is the one place a *native* crash (a segfault in
+        // llama.cpp, say) becomes visible after the fact at all — the crash
+        // itself kills the process before any of our own code can write
+        // anything, but Android remembers why the previous instance died.
+        appLog.recordProcessExitIfNotable()
+
+        // Any exception that reaches here slipped past every runCatching in
+        // the app — logging it before Android's own crash handling takes
+        // over is what makes "Журнал ошибок" useful for those too, not just
+        // the errors already caught and shown as a chat bubble.
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching { appLog.record("UNCAUGHT", "[${thread.name}] ${throwable.stackTraceToString()}") }
+            previousHandler?.uncaughtException(thread, throwable)
+        }
+
         // Off the main thread: this reads a file and re-inserts every chunk of
         // every attached document, and it runs during the first
         // AppContainer.get() — which happens in Activity.onCreate. As

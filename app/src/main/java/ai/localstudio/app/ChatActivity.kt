@@ -76,6 +76,26 @@ class ChatActivity : AppCompatActivity() {
         history.list().firstOrNull()?.let { latest ->
             conversationId = latest.id
             latest.messages.forEach { adapter.add(it.toMessage()) }
+
+            // A conversation whose last saved message is the user's own,
+            // with nothing after it, means that turn's generation never
+            // finished being persisted — most likely the process died
+            // mid-turn (a native crash in llama.cpp cannot be caught the way
+            // a Kotlin exception can, so no error bubble was ever shown), or
+            // the app was reclaimed by Android while a reply was still being
+            // generated. Either way, silence here used to read as "my
+            // message vanished" — this turns it into a visible, explained
+            // one instead, and only fires once: persisting it below means
+            // the next launch sees a non-"Вы" last message and stays quiet.
+            val lastMessage = adapter.messages().lastOrNull()
+            if (lastMessage != null && lastMessage.role == "Вы") {
+                container.appLog.record(
+                    "INTERRUPTED_TURN",
+                    "Conversation $conversationId: last message has no reply after relaunch",
+                )
+                adapter.add(Message.error(body = getString(R.string.chat_interrupted), details = null))
+                persist()
+            }
         }
     }
 
@@ -300,6 +320,7 @@ class ChatActivity : AppCompatActivity() {
                     } else {
                         error.message ?: error.toString()
                     }
+                    container.appLog.record("GENERATION_ERROR", "${error.javaClass.simpleName}: $body")
                     adapter.add(Message.error(body = body, details = error.javaClass.simpleName))
                 }
             binding.messages.scrollToPosition(adapter.itemCount - 1)
@@ -325,6 +346,7 @@ class ChatActivity : AppCompatActivity() {
                     Toast.makeText(this@ChatActivity, getString(R.string.chat_attach_added, name, chunks.size), Toast.LENGTH_SHORT).show()
                 }
                 .onFailure { error ->
+                    container.appLog.record("ATTACH_ERROR", "${error.javaClass.simpleName}: ${error.message ?: error}")
                     Toast.makeText(
                         this@ChatActivity,
                         getString(R.string.chat_attach_failed, error.message ?: error.toString()),
