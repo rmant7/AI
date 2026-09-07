@@ -8,6 +8,7 @@ import ai.localstudio.core.context.ContextEngine
 import ai.localstudio.core.engine.ModelSelector
 import ai.localstudio.core.engine.NodeExecutors
 import ai.localstudio.core.engine.Orchestrator
+import ai.localstudio.core.engine.SelectedModel
 import ai.localstudio.core.memory.InMemoryMemoryProvider
 import ai.localstudio.core.memory.MemoryScope
 import ai.localstudio.core.pipeline.PipelineCodec
@@ -334,8 +335,28 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /** The best-fit installed local model as a fallback candidate, or null when nothing is installed. */
+    /**
+     * The model the user explicitly picked via "Использовать" in Models,
+     * if it's actually installed right now — [ModelSelector] otherwise.
+     *
+     * [ai.localstudio.app.ModelsActivity.switchToLocal] writes the chosen
+     * seed's id to `settings.chatModelFor(LOCAL.id)`, but nothing ever read
+     * it back: this function used to call [ModelSelector] unconditionally,
+     * which ranks every installed local model by device suitability and
+     * always returns whatever scores highest — completely ignoring which
+     * one the user just switched to. Switching to a heavier model in
+     * Models had no effect at all, which is exactly what was reported: the
+     * status bar (and the actual route) kept using the old, lighter model
+     * no matter what was selected, even across a restart, because nothing
+     * about that choice was ever persisted anywhere ModelSelector looks.
+     */
     private fun localCandidate(): FallbackCandidate? {
-        val selected = ModelSelector(localRegistry(), device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
+        val registry = localRegistry()
+        val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
+        val chosen = registry.find(chosenId)
+            ?.takeIf { it.state == InstallState.INSTALLED }
+            ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
+        val selected = chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
         return FallbackCandidate(
             // Names the specific installed model, not just "Локально на
             // устройстве" — with several local models to choose from
