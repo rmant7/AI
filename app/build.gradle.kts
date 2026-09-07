@@ -126,6 +126,12 @@ dependencies {
     // On-device speech-to-text (Whisper, TFLite).
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
 
+    // Google's LiteRT-LM, via the Google Tensor SDK — a second local
+    // inference path alongside llama.cpp, the only one able to run on a
+    // Pixel's TPU/NPU instead of the CPU. Prebuilt AAR: no CMake/NDK build
+    // of its own, unlike llama.cpp's FetchContent-based native build below.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
+
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

@@ -2,6 +2,7 @@ package ai.localstudio.app
 
 import android.content.Context
 import ai.localstudio.app.llama.LlamaBridge
+import ai.localstudio.app.litert.LiteRtBackend
 
 /**
  * User-visible configuration. Everything here is optional: with no endpoint the
@@ -115,6 +116,17 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_COMPARE_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_COMPARE_MODE, value).apply()
 
+    /**
+     * Which compute unit a Google Tensor SDK (LiteRT) local model is asked to
+     * run on. NPU is the whole point of that runtime — the TPU on a Pixel's
+     * Tensor chip — but LiteRtRuntime falls back to CPU on its own if NPU
+     * load fails, so this is a preference, not a guarantee.
+     */
+    var liteRtBackend: LiteRtBackend
+        get() = runCatching { LiteRtBackend.valueOf(prefs.getString(KEY_LITERT_BACKEND, null) ?: "") }
+            .getOrDefault(LiteRtBackend.NPU)
+        set(value) = prefs.edit().putString(KEY_LITERT_BACKEND, value.name).apply()
+
     val hasEndpoint: Boolean get() = endpoint.isNotBlank()
 
     // Sampling: how the model picks its next token. Exposed because a fixed
@@ -196,6 +208,7 @@ class Settings(context: Context) {
         const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_COMPARE_MODE = "compareMode"
+        const val KEY_LITERT_BACKEND = "liteRtBackend"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_TEMPERATURE = "temperature"

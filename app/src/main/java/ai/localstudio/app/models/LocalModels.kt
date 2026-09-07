@@ -1,6 +1,7 @@
 package ai.localstudio.app.models
 
 import ai.localstudio.core.capability.Capability
+import ai.localstudio.core.registry.RuntimeKind
 
 /**
  * A model this app knows how to fetch and run on the device.
@@ -13,8 +14,9 @@ import ai.localstudio.core.capability.Capability
  * first and the official repository last. The second reason is ordinary
  * availability: a repository can be renamed or restructured at any time.
  *
- * The list carries repositories, never file names: the concrete GGUF is
- * resolved at download time (see [HuggingFaceResolver]).
+ * The list carries repositories, never file names: the concrete artifact is
+ * resolved at download time (see [HuggingFaceResolver]), by [extension] —
+ * `.gguf` for [RuntimeKind.LLAMA_CPP], `.litertlm` for [RuntimeKind.LITERT].
  */
 data class LocalModelSeed(
     val id: String,
@@ -25,7 +27,10 @@ data class LocalModelSeed(
     val approxSizeBytes: Long,
     val capabilities: Set<Capability> = setOf(Capability.TEXT_GENERATION, Capability.REASONING),
     val contextTokens: Int = 4096,
-)
+    val runtime: RuntimeKind = RuntimeKind.LLAMA_CPP,
+) {
+    val extension: String get() = if (runtime == RuntimeKind.LITERT) ".litertlm" else ".gguf"
+}
 
 object LocalModels {
 
@@ -174,6 +179,34 @@ object LocalModels {
             paramsLabel = "8B · Q4",
             note = "Классика; хорошо держит длинный диалог.",
             approxSizeBytes = 4_900_000_000,
+        ),
+
+        // LiteRT-LM (Google Tensor SDK) entries. A different runtime, a
+        // different file format (.litertlm, resolved the same way as GGUF —
+        // see LocalModelSeed.extension), and — on a Pixel with the Tensor
+        // SDK's native libraries present — the only path in this app that
+        // can run on the TPU/NPU instead of the CPU (see
+        // ai.localstudio.app.litert.LiteRtRuntime). On any other device
+        // canRun() simply reports false and this app falls back to the
+        // GGUF/llama.cpp entries above, the same as an ABI this device
+        // doesn't support.
+        LocalModelSeed(
+            id = "gemma3-1b-it-litert",
+            title = "Gemma 3 1B IT (Tensor SDK)",
+            repoIds = listOf("litert-community/Gemma3-1B-IT"),
+            paramsLabel = "1B · LiteRT-LM",
+            note = "Тот же класс модели, что и обычная Gemma 3 1B, но через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU.",
+            approxSizeBytes = 800_000_000,
+            runtime = RuntimeKind.LITERT,
+        ),
+        LocalModelSeed(
+            id = "gemma-4-e2b-it-litert",
+            title = "Gemma 4 E2B IT (Tensor SDK)",
+            repoIds = listOf("litert-community/gemma-4-E2B-it-litert-lm"),
+            paramsLabel = "E2B · LiteRT-LM",
+            note = "Компактная Gemma 4 через Google Tensor SDK — может считаться на TPU/NPU Pixel вместо CPU.",
+            approxSizeBytes = 1_500_000_000,
+            runtime = RuntimeKind.LITERT,
         ),
     )
 

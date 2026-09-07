@@ -53,7 +53,7 @@ class ModelDownloads(
         jobs[seed.id] = scope.launch {
             publish(seed, DownloadState.Resolving(seed.repoIds.first()))
             try {
-                val (source, resolved) = HuggingFaceResolver.resolveAny(seed.repoIds, tokenProvider())
+                val (source, resolved) = HuggingFaceResolver.resolveAny(seed.repoIds, tokenProvider(), seed.extension)
                 val free = store.freeSpaceBytes()
                 if (resolved.sizeBytes > 0 && resolved.sizeBytes + SLACK_BYTES > free) {
                     publish(seed, DownloadState.Failed("Не хватает места: нужно ${gb(resolved.sizeBytes)}, свободно ${gb(free)}"))

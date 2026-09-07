@@ -26,6 +26,15 @@ enum class RuntimeKind(val id: String) {
     @SerialName("whisper_cpp")
     WHISPER_CPP("whisper_cpp"),
 
+    /**
+     * Google's LiteRT-LM, via the Google Tensor SDK — the only runtime that
+     * can hand generation to a Pixel's TPU/NPU instead of the CPU. A
+     * `.litertlm` artifact, not a GGUF, with its own native library
+     * entirely separate from [LLAMA_CPP].
+     */
+    @SerialName("litert")
+    LITERT("litert"),
+
     @SerialName("sherpa_onnx")
     SHERPA_ONNX("sherpa_onnx"),
 

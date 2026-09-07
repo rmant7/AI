@@ -220,6 +220,13 @@ class ModelsActivity : AppCompatActivity() {
                         append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
                         if (!fitsBudget) append(" · превышает бюджет памяти")
                         if (knownStale) append(" · ").append(getString(R.string.model_catalog_stale))
+                        // The one visible marker distinguishing this from an
+                        // ordinary GGUF/llama.cpp entry — a different runtime,
+                        // a different file format, and the only path able to
+                        // use a Pixel's TPU/NPU instead of the CPU.
+                        if (seed.runtime == ai.localstudio.core.registry.RuntimeKind.LITERT) {
+                            append(" · ").append(getString(R.string.model_tensor_sdk_badge))
+                        }
                         append("\n").append(seed.note)
                     },
                     selected = selected,

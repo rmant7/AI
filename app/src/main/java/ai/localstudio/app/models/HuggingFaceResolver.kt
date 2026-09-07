@@ -36,11 +36,11 @@ object HuggingFaceResolver {
      * message lists what each source said, because "не удалось скачать" is not
      * something a user can act on.
      */
-    fun resolveAny(repoIds: List<String>, token: String? = null): Pair<String, ResolvedModelFile> {
+    fun resolveAny(repoIds: List<String>, token: String? = null, extension: String = ".gguf"): Pair<String, ResolvedModelFile> {
         val failures = mutableListOf<String>()
         for (repoId in repoIds) {
             try {
-                return repoId to resolveWithRetry(repoId, token)
+                return repoId to resolveWithRetry(repoId, token, extension)
             } catch (e: NoNetworkException) {
                 // Every repoId lives on the same host: a DNS failure on the
                 // first one will repeat identically for the rest. Trying them
@@ -62,11 +62,11 @@ object HuggingFaceResolver {
      * download body is, so without this a blip here fails the whole model
      * instead of a brief pause.
      */
-    private fun resolveWithRetry(repoId: String, token: String?): ResolvedModelFile {
+    private fun resolveWithRetry(repoId: String, token: String?, extension: String): ResolvedModelFile {
         var lastNetworkError: UnknownHostException? = null
         repeat(RESOLVE_RETRIES) { attempt ->
             try {
-                return resolve(repoId, token)
+                return resolve(repoId, token, extension)
             } catch (e: UnknownHostException) {
                 lastNetworkError = e
                 if (attempt < RESOLVE_RETRIES - 1) Thread.sleep(RESOLVE_RETRY_DELAY_MS)
@@ -75,10 +75,10 @@ object HuggingFaceResolver {
         throw NoNetworkException(lastNetworkError?.message ?: "host unreachable")
     }
 
-    fun resolve(repoId: String, token: String? = null): ResolvedModelFile {
+    fun resolve(repoId: String, token: String? = null, extension: String = ".gguf"): ResolvedModelFile {
         val entries = fetchTree(repoId, token)
-        val best = ArtifactResolver.pickBest(entries)
-            ?: throw IOException("нет подходящего файла .gguf (возможно, модель разбита на части)")
+        val best = ArtifactResolver.pickBest(entries, extension = extension)
+            ?: throw IOException("нет подходящего файла $extension (возможно, модель разбита на части)")
         return ResolvedModelFile(
             fileName = best.path.substringAfterLast('/'),
             sizeBytes = best.sizeBytes,

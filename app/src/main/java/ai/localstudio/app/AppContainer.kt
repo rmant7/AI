@@ -32,6 +32,7 @@ import ai.localstudio.app.keys.PrefsApiKeyStore
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.llama.LlamaCppRuntime
+import ai.localstudio.app.litert.LiteRtRuntime
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
@@ -301,7 +302,7 @@ class AppContainer private constructor(private val context: Context) {
             // what makes "local first, cloud as the fallback" true.
             else -> FallbackTextRuntime(candidates)
         }
-        val isLocalOnly = candidates.singleOrNull()?.binding?.runtime == RuntimeKind.LLAMA_CPP
+        val isLocalOnly = candidates.singleOrNull()?.binding?.runtime.isLocalRuntime()
         return buildOrchestrator(runtime, isLocalOnly, candidates).also {
             cachedOrchestrator = it
             cachedSignature = signature
@@ -361,10 +362,12 @@ class AppContainer private constructor(private val context: Context) {
                 cloudCandidates(provider).firstOrNull()
             }
             candidate?.let { c ->
-                val isLocalOnly = c.binding.runtime == RuntimeKind.LLAMA_CPP
-                c.label to buildOrchestrator(c.runtime, isLocalOnly, listOf(c))
+                c.label to buildOrchestrator(c.runtime, c.binding.runtime.isLocalRuntime(), listOf(c))
             }
         }
+
+    /** Either on-device runtime — the ones a context-window budget must stay RAM-conscious for. */
+    private fun RuntimeKind?.isLocalRuntime(): Boolean = this == RuntimeKind.LLAMA_CPP || this == RuntimeKind.LITERT
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
     private fun enabledProviders(): List<CloudProvider> {
@@ -395,6 +398,12 @@ class AppContainer private constructor(private val context: Context) {
             ?.takeIf { it.state == InstallState.INSTALLED }
             ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
         val selected = chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
+        val runtime: ModelRuntime = when (selected.binding.runtime) {
+            // Google Tensor SDK path — a separate model format and native
+            // library from llama.cpp entirely, see LiteRtRuntime.
+            RuntimeKind.LITERT -> LiteRtRuntime(context, backend = settings.liteRtBackend, log = appLog::record)
+            else -> LlamaCppRuntime(contextTokens = effectiveContextTokens(), log = appLog::record)
+        }
         return FallbackCandidate(
             // Names the specific installed model, not just "Локально на
             // устройстве" — with several local models to choose from
@@ -402,7 +411,7 @@ class AppContainer private constructor(private val context: Context) {
             // a generic label in the log and in the answer's own attribution
             // line answered "was it local?" but not "which local model?".
             label = "${CloudProviders.LOCAL.title}: ${selected.model.id}",
-            runtime = LlamaCppRuntime(contextTokens = effectiveContextTokens(), log = appLog::record),
+            runtime = runtime,
             model = selected.model,
             binding = selected.binding,
         )
@@ -538,7 +547,7 @@ class AppContainer private constructor(private val context: Context) {
                     capabilities = seed.capabilities,
                     bindings = listOf(
                         RuntimeBinding(
-                            runtime = RuntimeKind.LLAMA_CPP,
+                            runtime = seed.runtime,
                             artifact = file.absolutePath,
                             fileSizeBytes = file.length().coerceAtLeast(1),
                             // Left unmeasured on purpose: effectiveRequiredRamBytes
@@ -640,6 +649,7 @@ class AppContainer private constructor(private val context: Context) {
                     add(RuntimeKind.STUB)
                     add(RuntimeKind.FALLBACK_CHAIN)
                     if (LlamaBridge.isAvailable) add(RuntimeKind.LLAMA_CPP)
+                    if (LiteRtRuntime.isAvailable) add(RuntimeKind.LITERT)
                 },
                 hasGpuDelegate = false,
                 performanceIndex = 1.0,

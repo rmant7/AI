@@ -14,6 +14,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivitySettingsBinding
+import ai.localstudio.app.litert.LiteRtBackend
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.whisper.WhisperDownloadState
 import ai.localstudio.app.whisper.WhisperModels
@@ -70,6 +71,21 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.compareModeCheck.isChecked = settings.compareMode
         binding.compareModeCheck.setOnCheckedChangeListener { _, checked -> settings.compareMode = checked }
+        binding.liteRtBackendSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            LITERT_BACKEND_OPTIONS.map { it.second },
+        )
+        binding.liteRtBackendSpinner.setSelection(
+            LITERT_BACKEND_OPTIONS.indexOfFirst { it.first == settings.liteRtBackend }.coerceAtLeast(0),
+        )
+        binding.liteRtBackendSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                settings.liteRtBackend = LITERT_BACKEND_OPTIONS[position].first
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         binding.systemPromptInput.setText(settings.systemPrompt)
         binding.systemPromptInput.persistOnChange { settings.systemPrompt = it }
         binding.ramInput.setText(settings.ramBudgetPercent.toString())
@@ -246,5 +262,11 @@ class SettingsActivity : AppCompatActivity() {
     private companion object {
         const val MENU_ABOUT = 1
         const val MENU_LOG = 2
+
+        val LITERT_BACKEND_OPTIONS = listOf(
+            LiteRtBackend.NPU to "NPU (TPU Pixel)",
+            LiteRtBackend.GPU to "GPU",
+            LiteRtBackend.CPU to "CPU",
+        )
     }
 }

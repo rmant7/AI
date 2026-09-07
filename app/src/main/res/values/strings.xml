@@ -9,6 +9,9 @@
     <string name="settings_compare_mode">Сравнивать ответы (параллельно)</string>
     <string name="settings_compare_mode_hint">Если включено несколько источников — запрос отправляется сразу во все, ответы показываются по мере готовности. Обычно (выключено) — сначала локальная модель, облако только при её ошибке.</string>
     <string name="chat_compare_waiting">Ожидание ответов…</string>
+    <string name="settings_litert_backend">Google Tensor SDK: вычислитель</string>
+    <string name="settings_litert_backend_hint">Только для моделей с пометкой «Tensor SDK» в каталоге моделей. NPU — попытка считать на TPU Pixel; при неудаче автоматически откатывается на CPU.</string>
+    <string name="model_tensor_sdk_badge">Google Tensor SDK</string>
     <string name="menu_settings">Настройки</string>
     <string name="menu_models">Модели</string>
     <string name="menu_clear">Новый чат</string>

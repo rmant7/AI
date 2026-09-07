@@ -18,9 +18,9 @@ class ModelStore(private val context: Context) {
 
     fun directory(): File = File(context.filesDir, "models").apply { mkdirs() }
 
-    fun fileFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.gguf")
+    fun fileFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}${seed.extension}")
 
-    fun partFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.gguf.part")
+    fun partFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}${seed.extension}.part")
 
     /** A truncated download is not an installed model, hence the size floor. */
     fun isInstalled(seed: LocalModelSeed): Boolean =
