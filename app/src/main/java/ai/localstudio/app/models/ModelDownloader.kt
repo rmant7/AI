@@ -95,15 +95,26 @@ class ModelDownloader(
                 FileOutputStream(tempFile, append).use { output ->
                     val buffer = ByteArray(BUFFER_SIZE)
                     var written = alreadyHave
-                    var lastReport = 0L
+                    var lastReportBytes = 0L
+                    var lastReportAt = 0L
                     while (true) {
                         if (cancelled) throw IOException("Загрузка отменена")
                         val read = input.read(buffer)
                         if (read < 0) break
                         output.write(buffer, 0, read)
                         written += read
-                        if (written - lastReport >= REPORT_EVERY) {
-                            lastReport = written
+                        // On fast networks REPORT_EVERY (1MB) alone fires many
+                        // times a second; each one triggers a full model-list
+                        // re-render (notifyDataSetChanged rebinds every row),
+                        // which on a phone is enough sustained main-thread work
+                        // to make taps on *other* rows' buttons - download,
+                        // delete - miss their target while a transfer is
+                        // running. Gating on wall-clock time as well keeps
+                        // progress visibly live without saturating the UI thread.
+                        val now = System.currentTimeMillis()
+                        if (written - lastReportBytes >= REPORT_EVERY && now - lastReportAt >= REPORT_INTERVAL_MS) {
+                            lastReportBytes = written
+                            lastReportAt = now
                             listener.onProgress(DownloadProgress(written, total))
                         }
                     }
@@ -155,6 +166,7 @@ class ModelDownloader(
     private companion object {
         const val BUFFER_SIZE = 1 shl 16
         const val REPORT_EVERY = 1L * 1024 * 1024
+        const val REPORT_INTERVAL_MS = 200L
         const val CONNECT_TIMEOUT_MS = 30_000
         const val READ_TIMEOUT_MS = 120_000
         const val USER_AGENT = "LocalAiStudio/0.1 (Android)"

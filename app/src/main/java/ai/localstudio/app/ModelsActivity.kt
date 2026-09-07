@@ -13,6 +13,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import ai.localstudio.app.databinding.ActivityModelsBinding
@@ -382,8 +383,39 @@ class ModelsActivity : AppCompatActivity() {
         private var rows: List<Row> = emptyList()
 
         fun submit(next: List<Row>) {
+            // A download's progress ticks land here via render() many times a
+            // second (see ModelDownloader). notifyDataSetChanged() rebinds
+            // every row on each one, which is enough main-thread churn that a
+            // tap on a *different* row's download/delete button can miss its
+            // target while its own ViewHolder is being torn down underneath
+            // the finger. Diffing keeps only the row that actually changed
+            // (the one downloading) getting rebound.
+            val previous = rows
             rows = next
-            notifyDataSetChanged()
+            DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                override fun getOldListSize() = previous.size
+                override fun getNewListSize() = next.size
+                override fun areItemsTheSame(oldPos: Int, newPos: Int) = rowIdentity(previous[oldPos]) == rowIdentity(next[newPos])
+                override fun areContentsTheSame(oldPos: Int, newPos: Int) = rowContent(previous[oldPos]) == rowContent(next[newPos])
+            }).dispatchUpdatesTo(this)
+        }
+
+        private fun rowIdentity(row: Row): Any = when (row) {
+            is Row.Header -> "header:${row.title}"
+            is Row.Note -> "note:${row.text}"
+            Row.Custom -> "custom"
+            is Row.Model -> "model:${row.title}"
+        }
+
+        // Excludes onPrimary/onSecondary: those are freshly-allocated lambdas
+        // on every render() call, so comparing them would always report a
+        // change and defeat the diff entirely.
+        private fun rowContent(row: Row): Any = when (row) {
+            is Row.Model -> listOf(
+                row.title, row.subtitle, row.selected, row.status, row.progress,
+                row.indeterminate, row.primaryLabel, row.primaryEnabled, row.secondaryLabel,
+            )
+            else -> row
         }
 
         override fun getItemCount(): Int = rows.size
