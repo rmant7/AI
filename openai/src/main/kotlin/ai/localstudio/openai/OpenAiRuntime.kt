@@ -1,6 +1,7 @@
 package ai.localstudio.openai
 
 import ai.localstudio.core.capability.Capability
+import ai.localstudio.core.keys.ApiKeyRotator
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.model.Transcript
 import ai.localstudio.core.model.TranscriptSegment
@@ -27,6 +28,14 @@ data class OpenAiConfig(
     /** e.g. `http://localhost:11434/v1` for Ollama, `http://localhost:8080/v1` for llama-server. */
     val baseUrl: String,
     val apiKey: String? = null,
+    /**
+     * When set and non-empty, text generation draws its key from here instead
+     * of [apiKey] on every attempt, and rotates to the pool's next key on an
+     * HTTP 429 (rate limit / daily quota exceeded) rather than failing the
+     * turn outright. [apiKey] stays the fallback for providers with no pool
+     * configured, and for embeddings/transcription, which this does not cover.
+     */
+    val keyRotator: ApiKeyRotator? = null,
     val connectTimeoutMs: Int = 15_000,
     /**
      * Generous on purpose: a large model on modest hardware can take minutes to
@@ -134,13 +143,25 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
             // default. Retrying is only safe before any token has reached the
             // caller — once a partial answer has been shown, re-sending the
             // same prompt would duplicate it — so the flag below gates the
-            // retry to exactly that window.
+            // retry to exactly that window. The same flag also gates key
+            // rotation below: a 429 from a provider is always the very first
+            // thing that comes back (the whole response is buffered before
+            // streaming starts), so in practice it is always false there too.
             var emittedAny = false
-            var attempt = 0
+            var ioRetries = 0
+            val rotator = config.keyRotator?.takeIf { it.poolSize() > 0 }
             while (true) {
-                attempt++
+                // Re-read every attempt, not just once before the loop: a 429
+                // below moves the pool's active key on, and the next attempt
+                // must pick that up rather than retry the same exhausted key.
+                val keyEntry = rotator?.activeKey()
+                if (rotator != null && keyEntry == null) {
+                    throw ModelLoadException(
+                        rotator.exhaustionMessage() ?: "Нет доступных ключей API для этого провайдера",
+                    )
+                }
                 try {
-                    http.postJsonStreaming(url("/chat/completions"), body).use { response ->
+                    http.postJsonStreaming(url("/chat/completions"), body, keyEntry?.key ?: config.apiKey).use { response ->
                         val reader = response.reader()
                         while (true) {
                             if (cancelled.get()) return@use
@@ -157,8 +178,19 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                         }
                     }
                     break
+                } catch (e: OpenAiException) {
+                    // 429 is what both a per-minute rate limit and a daily
+                    // quota show up as on every provider this app targets —
+                    // rotate to the pool's next key and try again rather than
+                    // failing a turn that a second key would have answered.
+                    if (rotator != null && keyEntry != null && e.status == 429 && !emittedAny) {
+                        rotator.markExhausted(keyEntry.id)
+                        continue
+                    }
+                    throw e
                 } catch (e: java.io.IOException) {
-                    if (emittedAny || cancelled.get() || attempt > STREAM_RETRY_LIMIT) throw e
+                    if (emittedAny || cancelled.get() || ioRetries >= STREAM_RETRY_LIMIT) throw e
+                    ioRetries++
                 }
             }
         }.flowOn(Dispatchers.IO)

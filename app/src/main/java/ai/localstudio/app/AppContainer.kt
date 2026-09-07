@@ -19,6 +19,7 @@ import ai.localstudio.core.registry.ModelRegistry
 import ai.localstudio.core.registry.RegistryEntry
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
+import ai.localstudio.core.keys.ApiKeyRotator
 import ai.localstudio.core.router.CapabilityRouter
 import ai.localstudio.core.runtime.FallbackCandidate
 import ai.localstudio.core.runtime.FallbackTextRuntime
@@ -26,6 +27,7 @@ import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
 import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
+import ai.localstudio.app.keys.PrefsApiKeyStore
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.llama.LlamaCppRuntime
 import ai.localstudio.app.models.CatalogFreshness
@@ -64,6 +66,12 @@ class AppContainer private constructor(private val context: Context) {
     val documents = DocumentStore(context)
 
     val catalogFreshness = CatalogFreshness(context)
+
+    /** Per-provider pools of API keys — add/delete/validate in ApiKeysActivity. */
+    val apiKeyStore = PrefsApiKeyStore(context, settings)
+
+    /** One rotator per provider, so cooldown state for Gemini and Mistral never mixes. */
+    fun apiKeyRotator(providerId: String): ApiKeyRotator = ApiKeyRotator(apiKeyStore, providerId)
 
     // InMemoryMemoryProvider, as the name says, does not survive the process
     // being killed — routine on Android the moment the app is backgrounded.
@@ -272,7 +280,11 @@ class AppContainer private constructor(private val context: Context) {
         return FallbackCandidate(
             label = provider.title,
             runtime = OpenAiRuntime(
-                OpenAiConfig(baseUrl = endpoint, apiKey = settings.apiKeyFor(provider.id).ifBlank { null }),
+                OpenAiConfig(
+                    baseUrl = endpoint,
+                    apiKey = settings.apiKeyFor(provider.id).ifBlank { null },
+                    keyRotator = apiKeyRotator(provider.id),
+                ),
             ),
             model = model,
             binding = model.bindings.first(),

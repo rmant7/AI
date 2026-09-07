@@ -17,7 +17,12 @@ class FakeOpenAiServer : Closeable {
 
     val requests = mutableListOf<RecordedRequest>()
 
-    data class RecordedRequest(val path: String, val contentType: String?, val body: ByteArray) {
+    data class RecordedRequest(
+        val path: String,
+        val contentType: String?,
+        val authorization: String?,
+        val body: ByteArray,
+    ) {
         val text: String get() = String(body, StandardCharsets.UTF_8)
     }
 
@@ -27,6 +32,18 @@ class FakeOpenAiServer : Closeable {
     var chatChunkDelayMs: Long = 0
     var chatStatus: Int = 200
     var chatErrorBody: String = """{"error":{"message":"model not found","type":"invalid_request_error"}}"""
+
+    /**
+     * Overrides [chatStatus] for a specific `Authorization: Bearer <key>` value
+     * — for testing key-pool rotation, where the same endpoint must behave
+     * differently depending on which key in the pool made the request.
+     */
+    var chatStatusForKey: Map<String, Int> = emptyMap()
+    var quotaErrorBody: String = """{"error":{"message":"Resource has been exhausted (e.g. check quota).","type":"rate_limit_exceeded"}}"""
+
+    var modelsStatus: Int = 200
+    var modelsStatusForKey: Map<String, Int> = emptyMap()
+
     var embeddings: List<List<Float>> = listOf(listOf(0.1f, 0.2f, 0.3f))
     var transcription: String = """
         {"text":" найди мне лучшие локальные модели","language":"ru",
@@ -38,8 +55,9 @@ class FakeOpenAiServer : Closeable {
     init {
         server.createContext("/v1/chat/completions") { exchange ->
             record(exchange)
-            if (chatStatus !in 200..299) {
-                respond(exchange, chatStatus, chatErrorBody)
+            val status = chatStatusForKey[bearerKeyOf(exchange)] ?: chatStatus
+            if (status !in 200..299) {
+                respond(exchange, status, if (status == 429) quotaErrorBody else chatErrorBody)
                 return@createContext
             }
             exchange.responseHeaders.add("Content-Type", "text/event-stream")
@@ -72,13 +90,31 @@ class FakeOpenAiServer : Closeable {
             respond(exchange, 200, transcription)
         }
 
+        server.createContext("/v1/models") { exchange ->
+            record(exchange)
+            val status = modelsStatusForKey[bearerKeyOf(exchange)] ?: modelsStatus
+            respond(
+                exchange,
+                status,
+                if (status in 200..299) {
+                    """{"data":[{"id":"stub-model"}]}"""
+                } else {
+                    """{"error":{"message":"invalid api key","type":"invalid_request_error"}}"""
+                },
+            )
+        }
+
         server.start()
     }
+
+    private fun bearerKeyOf(exchange: HttpExchange): String? =
+        exchange.requestHeaders.getFirst("Authorization")?.removePrefix("Bearer ")
 
     private fun record(exchange: HttpExchange) {
         requests += RecordedRequest(
             path = exchange.requestURI.path,
             contentType = exchange.requestHeaders.getFirst("Content-Type"),
+            authorization = exchange.requestHeaders.getFirst("Authorization"),
             body = exchange.requestBody.readBytes(),
         )
     }

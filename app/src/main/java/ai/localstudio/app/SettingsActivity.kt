@@ -85,6 +85,9 @@ class SettingsActivity : AppCompatActivity() {
         binding.whisperManageButton.setOnClickListener {
             startActivity(Intent(this, ModelsActivity::class.java))
         }
+        binding.apiKeysButton.setOnClickListener {
+            startActivity(ApiKeysActivity.intent(this, settings.providerId))
+        }
 
         lifecycleScope.launch { container.whisperDownloads.state.collect { renderWhisper() } }
         renderWhisper()
@@ -93,6 +96,11 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         renderWhisper()
+        // Refreshes the count after a visit to ApiKeysActivity — added,
+        // deleted, or exhausted keys there should be reflected the moment
+        // this screen is visible again, not only after re-selecting the
+        // provider from the spinner.
+        renderApiKeysSummary(settings.provider)
     }
 
     private fun renderWhisper() {
@@ -120,6 +128,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.endpointInput.setText(settings.customEndpoint.ifBlank { provider.baseUrl })
         binding.apiKeyInput.setText(settings.apiKey)
         binding.chatModelInput.setText(settings.chatModel)
+        renderApiKeysSummary(provider)
 
         binding.chatModelInput.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, provider.freeModels),
@@ -135,6 +144,17 @@ class SettingsActivity : AppCompatActivity() {
         // listener only reproduces the membership state already being set
         // here, so it's a harmless no-op rather than something to suppress.
         binding.providerEnabledCheck.isChecked = provider.id in pendingEnabled
+    }
+
+    private fun renderApiKeysSummary(provider: CloudProvider) {
+        if (!provider.needsKey) return
+        val pool = container.apiKeyRotator(provider.id).pool()
+        val onCooldown = pool.count { it.cooldownUntilEpochMs > System.currentTimeMillis() }
+        binding.apiKeysSummary.text = when {
+            pool.isEmpty() -> getString(R.string.api_keys_summary_none)
+            onCooldown == 0 -> getString(R.string.api_keys_summary_ready, pool.size)
+            else -> getString(R.string.api_keys_summary_partial, pool.size, onCooldown)
+        }
     }
 
     private fun renderEnabledSummary() {

@@ -100,6 +100,21 @@
                 android:autofillHints="no"
                 android:inputType="textPassword" />
 
+            <TextView
+                android:id="@+id/apiKeysSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"
+                android:textSize="12sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/apiKeysButton"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/settings_api_keys_manage" />
+
         </LinearLayout>
 
         <TextView

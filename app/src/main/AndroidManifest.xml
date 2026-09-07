@@ -50,6 +50,12 @@
             android:label="@string/menu_files"
             android:parentActivityName=".ChatActivity" />
 
+        <activity
+            android:name=".ApiKeysActivity"
+            android:exported="false"
+            android:label="@string/settings_api_keys_manage"
+            android:parentActivityName=".SettingsActivity" />
+
         <service
             android:name=".models.ModelDownloadService"
             android:exported="false"

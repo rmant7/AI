@@ -21,28 +21,42 @@ internal class HttpTransport(
     private val apiKey: String?,
 ) {
 
-    fun postJson(url: String, body: String): Response =
-        send(url, "application/json", body.toByteArray(StandardCharsets.UTF_8), streaming = false)
+    fun postJson(url: String, body: String, apiKeyOverride: String? = null): Response =
+        send(url, "POST", "application/json", body.toByteArray(StandardCharsets.UTF_8), streaming = false, apiKeyOverride)
 
     /**
      * Opens a streaming POST. The caller must close the returned response —
      * the connection stays open while the model emits tokens.
+     *
+     * [apiKeyOverride], when given, is sent instead of the key this transport
+     * was built with — for key-pool rotation, where the caller decides which
+     * key to try on each attempt rather than fixing one for the transport's
+     * whole lifetime.
      */
-    fun postJsonStreaming(url: String, body: String): Response =
-        send(url, "application/json", body.toByteArray(StandardCharsets.UTF_8), streaming = true)
+    fun postJsonStreaming(url: String, body: String, apiKeyOverride: String? = null): Response =
+        send(url, "POST", "application/json", body.toByteArray(StandardCharsets.UTF_8), streaming = true, apiKeyOverride)
 
     fun postBytes(url: String, contentType: String, body: ByteArray): Response =
-        send(url, contentType, body, streaming = false)
+        send(url, "POST", contentType, body, streaming = false)
 
-    private fun send(url: String, contentType: String, body: ByteArray, streaming: Boolean): Response {
+    /** A plain authenticated GET — used for key validation (`/models`), never streamed. */
+    fun get(url: String): Response = send(url, "GET", contentType = null, body = null, streaming = false)
+
+    private fun send(
+        url: String,
+        method: String,
+        contentType: String?,
+        body: ByteArray?,
+        streaming: Boolean,
+        apiKeyOverride: String? = null,
+    ): Response {
         val connection = (URI.create(url).toURL().openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
+            requestMethod = method
             connectTimeout = connectTimeoutMs
             readTimeout = readTimeoutMs
-            doOutput = true
             useCaches = false
             instanceFollowRedirects = true
-            setRequestProperty("Content-Type", contentType)
+            contentType?.let { setRequestProperty("Content-Type", it) }
             setRequestProperty("Accept", if (streaming) "text/event-stream" else "application/json")
             // A long-lived SSE connection is exactly the case Android's HTTP
             // stack's keep-alive pool gets wrong: it can hand back a socket the
@@ -52,13 +66,16 @@ internal class HttpTransport(
             // whole class of failure; a plain JSON call is short enough that
             // reuse is safe and worth keeping for it.
             if (streaming) setRequestProperty("Connection", "close")
-            apiKey?.let { setRequestProperty("Authorization", "Bearer $it") }
-            // Without this the whole request body is buffered in memory, which
-            // matters for audio uploads.
-            setFixedLengthStreamingMode(body.size)
+            (apiKeyOverride ?: apiKey)?.let { setRequestProperty("Authorization", "Bearer $it") }
+            if (body != null) {
+                doOutput = true
+                // Without this the whole request body is buffered in memory,
+                // which matters for audio uploads.
+                setFixedLengthStreamingMode(body.size)
+            }
         }
 
-        connection.outputStream.use { it.write(body) }
+        if (body != null) connection.outputStream.use { it.write(body) }
 
         val status = connection.responseCode
         return if (status in 200..299) {

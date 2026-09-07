@@ -47,6 +47,10 @@
     <string name="settings_asr_model">Модель для речи</string>
     <string name="settings_system_prompt">Системный промпт</string>
     <string name="settings_system_prompt_help">Необязательно. По умолчанию пусто — это осознанный выбор: небольшие модели плохо следуют абстрактным инструкциям вроде «отвечай на языке пользователя» и отвечают естественнее без них. Заполните поле, только если нужна конкретная роль или постоянное правило — оно будет действовать во всех чатах.</string>
+    <string name="settings_api_keys_manage">Управление ключами</string>
+    <string name="api_keys_summary_none">Ключей в пуле нет — используется поле выше</string>
+    <string name="api_keys_summary_ready">Ключей в пуле: %1$d</string>
+    <string name="api_keys_summary_partial">Ключей в пуле: %1$d, на паузе: %2$d</string>
     <string name="settings_save">Сохранить</string>
     <string name="settings_explainer">Выберите, кто генерирует ответ. Для облачных провайдеров нужен только API-ключ — никаких серверов поднимать не надо. Маршрутизация, сборка контекста и память от выбора не зависят.</string>
     <string name="settings_saved">Сохранено</string>
@@ -122,4 +126,17 @@
     <string name="settings_max_tokens">Максимальная длина ответа, токенов</string>
     <string name="settings_max_tokens_hint">1024</string>
     <string name="settings_max_tokens_help">Диапазон: 64–4096. По умолчанию 1024.\nПотолок длины одного ответа — модель останавливается либо здесь, либо раньше, если сама сочла ответ законченным. Не влияет на то, сколько модель помнит, только на то, сколько может сказать за раз.\nУменьшите, если ответы слишком длинные или генерация ощутимо медленная. Увеличьте для задач, которым нужен долгий связный текст — но чем больше лимит, тем больше шанс, что маленькая модель к концу собьётся или зациклится.</string>
+
+    <string name="api_keys_hint">Несколько ключей для одного провайдера образуют пул. Приложение всегда использует первый ключ, который сейчас не на паузе. Если провайдер отвечает «дневная квота исчерпана», этот ключ автоматически ставится на паузу на 24 часа и приложение переходит к следующему ключу в списке — вместо того чтобы просто показать ошибку.</string>
+    <string name="api_keys_empty">Ключей пока нет — добавьте хотя бы один ниже.</string>
+    <string name="api_keys_new_hint">Новый ключ</string>
+    <string name="api_keys_add">Добавить</string>
+    <string name="api_keys_validate">Проверить</string>
+    <string name="api_keys_cooldown">на паузе до %1$s</string>
+    <string name="api_keys_not_checked">Не проверялся</string>
+    <string name="api_keys_checking">Проверяю…</string>
+    <string name="api_keys_valid">✓ Ключ рабочий</string>
+    <string name="api_keys_invalid">✗ Ключ отклонён провайдером</string>
+    <string name="api_keys_rate_limited">Провайдер ограничил частоту запросов — ключ может быть рабочим</string>
+    <string name="api_keys_unknown">Не удалось проверить (сеть или провайдер ответили неожиданно)</string>
 </resources>

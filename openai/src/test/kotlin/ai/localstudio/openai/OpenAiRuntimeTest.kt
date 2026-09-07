@@ -1,6 +1,8 @@
 package ai.localstudio.openai
 
 import ai.localstudio.core.capability.Capability
+import ai.localstudio.core.keys.ApiKeyRotator
+import ai.localstudio.core.keys.InMemoryApiKeyStore
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
@@ -105,6 +107,54 @@ class OpenAiRuntimeTest {
 
         assertEquals(404, failure.status)
         assertContains(failure.message!!, "model not found")
+    }
+
+    @Test
+    fun `a rate-limited key rotates to the next one in the pool automatically`() = runBlocking {
+        val store = InMemoryApiKeyStore()
+        val rotator = ApiKeyRotator(store, "gemini")
+        val bad = rotator.add("bad-key")
+        rotator.add("good-key")
+        server.chatStatusForKey = mapOf(bad.key to 429)
+
+        val pooledRuntime = OpenAiRuntime(OpenAiConfig(baseUrl = server.baseUrl, keyRotator = rotator))
+        val model = descriptor("qwen3:8b", setOf(Capability.TEXT_GENERATION))
+        val handle = assertIs<TextModelHandle>(pooledRuntime.load(model, model.bindings.first()))
+
+        val chunks = handle.generate(GenerationRequest(prompt = "hi")).toList()
+
+        assertEquals(listOf("Привет", ", ", "мир"), chunks)
+        assertEquals(2, server.requests.size, "expected one failed attempt with the bad key, then one with the good key")
+        // The bad key is now on a 24h cooldown, not just skipped this once.
+        assertTrue(rotator.pool().first { it.id == bad.id }.cooldownUntilEpochMs > 0)
+    }
+
+    @Test
+    fun `every key exhausted surfaces one clear error instead of the raw 429`() = runBlocking {
+        val store = InMemoryApiKeyStore()
+        val rotator = ApiKeyRotator(store, "gemini")
+        rotator.add("only-key")
+        server.chatStatus = 429
+
+        val pooledRuntime = OpenAiRuntime(OpenAiConfig(baseUrl = server.baseUrl, keyRotator = rotator))
+        val model = descriptor("qwen3:8b", setOf(Capability.TEXT_GENERATION))
+        val handle = assertIs<TextModelHandle>(pooledRuntime.load(model, model.bindings.first()))
+
+        val error = assertFailsWith<ai.localstudio.core.runtime.ModelLoadException> {
+            handle.generate(GenerationRequest(prompt = "hi")).toList()
+        }
+        assertContains(error.message!!, "1")
+    }
+
+    @Test
+    fun `a provider with no pool configured falls back to the plain apiKey untouched`() = runBlocking {
+        // Regression guard: adding keyRotator to OpenAiConfig must not change
+        // behavior for every provider that has not opted into a pool yet.
+        val handle = assertIs<TextModelHandle>(textModel())
+
+        handle.generate(GenerationRequest(prompt = "hi")).toList()
+
+        assertEquals("Bearer test-key", server.requests.single().authorization)
     }
 
     @Test
