@@ -41,7 +41,6 @@ import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
-import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiException
@@ -187,17 +186,13 @@ class AppContainer private constructor(private val context: Context) {
      */
     val whisperPreviewEngine = WhisperEngine(whisperStore)
 
-    init {
-        // First launch, voice input should just work: without this, a user
-        // has to already know Models → Голос exists before the mic button
-        // does anything at all. Tiny is 75 MB — small enough to fetch
-        // without asking, and it doubles as the live-preview model.
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            if (whisperStore.installedSeed() == null) {
-                WhisperModels.byId(WhisperModels.TINY_ID)?.let { whisperDownloads.start(it) }
-            }
-        }
-    }
+    // The auto-download-Tiny-on-first-launch init block that used to live
+    // here is gone along with the mic button: Whisper's transcription
+    // quality wasn't good enough to justify a speech model competing for RAM
+    // with the local LLM it sits next to. Nothing in WhisperEngine loads a
+    // model until something actually calls transcribe(), so with the mic
+    // button hidden and no auto-download, Whisper now costs nothing at
+    // runtime unless it's re-enabled.
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
