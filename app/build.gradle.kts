@@ -2,8 +2,14 @@ plugins {
     // Both versions are declared here so AGP and the Kotlin Android plugin land
     // in the same classpath — the Kotlin plugin needs AGP's classes to apply.
     id("com.android.application") version "8.7.3"
-    id("org.jetbrains.kotlin.android") version "2.1.0"
-    kotlin("plugin.serialization") version "2.1.0"
+    // Bumped from 2.1.0 for this module only: the Google Tensor SDK AAR
+    // (litertlm-android) ships Kotlin metadata compiled with 2.4.0, which
+    // 2.1.0's compiler cannot even read ("Internal compiler error" trying to
+    // analyse the module) — core/openai don't depend on that AAR and stay on
+    // 2.1.0, since there is no reason to move their already-tested Kotlin
+    // version just because this module now needs a newer one.
+    id("org.jetbrains.kotlin.android") version "2.4.0"
+    kotlin("plugin.serialization") version "2.4.0"
 }
 
 repositories {
