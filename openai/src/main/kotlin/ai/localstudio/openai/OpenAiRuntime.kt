@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -56,9 +57,28 @@ class OpenAiException(val status: Int, val body: String) : Exception(
     "OpenAI-compatible endpoint returned HTTP $status: ${describe(body)}",
 ) {
     private companion object {
-        fun describe(body: String): String = runCatching {
+        /**
+         * The provider's own sentence, not its JSON.
+         *
+         * Two shapes, because Gemini answers with the second: `{"error":…}`
+         * as the spec describes it, and `[{"error":…}]` — an array — which
+         * is what a real 503 from Gemini looks like. Only the object form
+         * was handled, so every Gemini failure fell through to the raw-body
+         * branch and the whole JSON blob ended up quoted in the chat, inside
+         * an otherwise successful answer, as the note explaining which
+         * candidate had been skipped.
+         */
+        fun describe(body: String): String = (asObject(body) ?: asArray(body))
+            ?: body.take(300).ifBlank { "no response body" }
+
+        private fun asObject(body: String): String? = runCatching {
             openAiJson.decodeFromString(ApiErrorBody.serializer(), body).error?.message
-        }.getOrNull() ?: body.take(300).ifBlank { "no response body" }
+        }.getOrNull()
+
+        private fun asArray(body: String): String? = runCatching {
+            openAiJson.decodeFromString(ListSerializer(ApiErrorBody.serializer()), body)
+                .firstNotNullOfOrNull { it.error?.message }
+        }.getOrNull()
     }
 }
 

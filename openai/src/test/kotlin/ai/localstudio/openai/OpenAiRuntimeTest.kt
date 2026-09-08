@@ -110,6 +110,30 @@ class OpenAiRuntimeTest {
     }
 
     @Test
+    fun `a Gemini error body, which arrives as an array, still yields just the sentence`() {
+        // Verbatim from a real Gemini 503. The spec's shape is an object;
+        // this is an array of them, and only the object form used to parse —
+        // so the whole blob was quoted into the chat as the note explaining
+        // which candidate had been skipped, inside an otherwise fine answer.
+        val body = """
+            [{
+              "error": {
+                "code": 503,
+                "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+                "status": "UNAVAILABLE"
+              }
+            }
+            ]
+        """.trimIndent()
+
+        val message = OpenAiException(503, body).message!!
+
+        assertContains(message, "This model is currently experiencing high demand")
+        assertTrue("\"error\"" !in message, "the raw JSON must not survive into the message: $message")
+        assertTrue("UNAVAILABLE" !in message, "the raw JSON must not survive into the message: $message")
+    }
+
+    @Test
     fun `a rate-limited key rotates to the next one in the pool automatically`() = runBlocking {
         val store = InMemoryApiKeyStore()
         val rotator = ApiKeyRotator(store, "gemini")
