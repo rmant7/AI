@@ -24,6 +24,15 @@ class LlamaBridge {
      */
     external fun nativeChatTemplateInfo(handle: Long): String
 
+    /**
+     * Where the last turn's time went: prompt tokens, how many of them the
+     * KV cache reused from the previous turn, and the rate of each phase.
+     * "Slow" on its own has never been enough to act on — a large prompt at
+     * a normal rate and a small one at a collapsed rate look identical from
+     * Kotlin, and want opposite fixes.
+     */
+    external fun nativeLastTurnStats(handle: Long): String
+
     /** Returns a handle, or 0 when the model could not be loaded. */
     external fun nativeLoad(modelPath: String, contextTokens: Int, threads: Int): Long
 

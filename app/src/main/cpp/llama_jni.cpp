@@ -11,7 +11,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -54,7 +56,25 @@ struct Session {
     // tokens were themselves decoded back in. Compared against the next
     // call's prompt to reuse the shared prefix instead of redecoding it.
     std::vector<llama_token> cachedTokens;
+
+    // Last turn's timings, reported through nativeLastTurnStats. Prompt
+    // processing and token generation are separate costs with separate
+    // causes, and on-device they have differed by two orders of magnitude
+    // within one session — a single "how long did the answer take" number
+    // cannot tell a large prompt at a normal rate from a small one at a
+    // collapsed rate, nor show whether prefix reuse is doing anything.
+    int32_t promptTokens = 0;
+    int32_t reusedTokens = 0;
+    int32_t decodedTokens = 0;
+    int64_t prefillMs = 0;
+    int64_t decodeMs = 0;
 };
+
+int64_t nowMs() {
+    struct timespec ts {};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 std::string toStdString(JNIEnv *env, jstring value) {
     if (value == nullptr) return {};
@@ -110,12 +130,6 @@ std::string pieceOf(const llama_vocab *vocab, llama_token token) {
 }
 
 /**
- * Formats the turn with the template baked into the GGUF. Gemma, Qwen and
- * Llama each want a different layout, and feeding a raw prompt to an
- * instruction-tuned model produces confident nonsense — the model answers a
- * question it was never asked to answer in that form.
- */
-/**
  * The last-resort layout, for a GGUF that carries no usable chat template.
  *
  * Deliberately not a plain `system + "\n\n" + user` concatenation, which is
@@ -144,6 +158,12 @@ std::string genericInstructScaffold(const std::string &system, const std::string
 /** What [applyChatTemplate] actually did last, surfaced to Kotlin so it reaches the in-app log. */
 std::string g_lastTemplateInfo = "not attempted yet";
 
+/**
+ * Formats the turn with the template baked into the GGUF. Gemma, Qwen and
+ * Llama each want a different layout, and feeding a raw prompt to an
+ * instruction-tuned model produces confident nonsense — the model answers a
+ * question it was never asked to answer in that form.
+ */
 std::string applyChatTemplate(llama_model *model, const std::string &system, const std::string &user) {
     const char *tmpl = llama_model_chat_template(model, nullptr);
     if (tmpl == nullptr) {
@@ -199,6 +219,36 @@ extern "C" {
 JNIEXPORT jstring JNICALL
 Java_ai_localstudio_app_llama_LlamaBridge_nativeSystemInfo(JNIEnv *env, jobject) {
     return env->NewStringUTF(llama_print_system_info());
+}
+
+/**
+ * Where the last turn's time actually went.
+ *
+ * Prompt processing and token generation are separate costs. On a real
+ * device a 339-character prompt reached its first token in 4.6 seconds
+ * while a 3334-character one produced nothing in 462 — from the outside
+ * both are just "slow", and a rate collapse, a large prompt, and prefix
+ * reuse quietly not working are indistinguishable without these numbers.
+ * `reused` in particular is the direct answer to whether the KV-cache
+ * prefix match in nativeGenerate is doing anything across turns.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeLastTurnStats(JNIEnv *env, jobject, jlong handle) {
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr) return env->NewStringUTF("no session");
+
+    const int32_t prefilled = session->promptTokens - session->reusedTokens;
+    char buffer[320];
+    snprintf(
+        buffer, sizeof(buffer),
+        "prompt %d tok (%d reused from the last turn), prefill %d tok in %lldms (%.1f tok/s); "
+        "generated %d tok in %lldms (%.1f tok/s)",
+        session->promptTokens, session->reusedTokens,
+        prefilled, (long long) session->prefillMs,
+        session->prefillMs > 0 ? prefilled * 1000.0 / (double) session->prefillMs : 0.0,
+        session->decodedTokens, (long long) session->decodeMs,
+        session->decodeMs > 0 ? session->decodedTokens * 1000.0 / (double) session->decodeMs : 0.0);
+    return env->NewStringUTF(buffer);
 }
 
 /**
@@ -374,6 +424,14 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     // context was freed while this call was still using it — a
     // use-after-free, and a very plausible cause of a crash that only shows
     // up after a timeout or a model switch, not on a plain single turn.
+    // Measured, not guessed at. "First token after 141 seconds" says nothing
+    // about whether that was a large prompt processed at a normal rate, a
+    // small one processed at a collapsed rate, or prefix reuse silently not
+    // working — and those want completely different fixes. Recorded per turn
+    // and reported through nativeLastTurnStats.
+    const int64_t prefillStart = nowMs();
+    session->promptTokens = count;
+    session->reusedTokens = (int32_t) commonPrefixLen;
     for (int32_t offset = (int32_t) commonPrefixLen; offset < count; offset += BATCH_SIZE) {
         if (session->cancelled.load()) {
             // Only the prefix through `offset` actually made it into the KV
@@ -381,6 +439,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
             // next call's common-prefix comparison believe tokens are cached
             // that never got decoded.
             session->cachedTokens.assign(tokens.begin(), tokens.begin() + offset);
+            session->prefillMs = nowMs() - prefillStart;
             return 0;
         }
         const int32_t batchCount = std::min(BATCH_SIZE, count - offset);
@@ -388,9 +447,11 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
             // Cache state after a failed decode is unknown; force a full
             // redecode on the next call rather than risk trusting it.
             session->cachedTokens.clear();
+            session->prefillMs = nowMs() - prefillStart;
             return -5;
         }
     }
+    session->prefillMs = nowMs() - prefillStart;
 
     // Without a repetition penalty, a small quantized model that starts
     // echoing a phrase has nothing pushing it out of the loop — top-k/top-p
@@ -407,6 +468,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
+    const int64_t decodeStart = nowMs();
     int32_t produced = 0;
     uint32_t used = (uint32_t) count;
     // Only tokens that were themselves successfully decoded are actually
@@ -441,6 +503,8 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     }
 
     llama_sampler_free(sampler);
+    session->decodeMs = nowMs() - decodeStart;
+    session->decodedTokens = produced;
     // Whatever prompt tokens were decoded plus whichever generated tokens
     // were themselves decoded back in are what the KV cache actually holds
     // now, regardless of which of the above paths (EOG, maxTokens, cancelled)

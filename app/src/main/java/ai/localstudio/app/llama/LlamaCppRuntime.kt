@@ -198,6 +198,8 @@ private class LlamaTextModel(
                 close(IllegalStateException("Generation failed with code $produced"))
             } else {
                 log("LOCAL_GENERATE", "$modelId: done in ${elapsedMs}ms, $produced tokens")
+                runCatching { bridge.nativeLastTurnStats(handle) }
+                    .onSuccess { log("LOCAL_GENERATE", "$modelId: $it") }
                 close()
             }
         }
