@@ -122,7 +122,13 @@ class FallbackTextRuntimeTest {
     }
 
     @Test
-    fun `a partial answer before a mid-stream failure is discarded, not shown truncated`() = runBlocking {
+    fun `a failure after the first token is reported, not papered over by the next candidate`() = runBlocking {
+        // Tokens reach the caller as they are produced, so by the time a
+        // candidate fails mid-stream part of its answer is already on screen
+        // and cannot be taken back. Falling through here would append a
+        // second, unrelated answer to the first one's remains; the failure is
+        // surfaced instead. Falling back is still possible up to the moment
+        // the first token is emitted — see the test below.
         val runtime = FallbackTextRuntime(
             listOf(
                 candidate("local") {
@@ -137,14 +143,53 @@ class FallbackTextRuntimeTest {
         )
 
         val handle = runtime.load(model("m"), binding()) as TextModelHandle
+        val emitted = mutableListOf<String>()
+        val failure = assertFailsWith<IllegalStateException> {
+            handle.generate(GenerationRequest(prompt = "hi")).collect { emitted += it }
+        }
+
+        assertEquals("decode error", failure.message)
+        assertEquals(listOf("partial ", "words "), emitted)
+    }
+
+    @Test
+    fun `a candidate that fails before its first token still falls through`() = runBlocking {
+        val runtime = FallbackTextRuntime(
+            listOf(
+                candidate("local") { failing("decode error") },
+                candidate("cloud") { succeeding("full cloud answer") },
+            ),
+        )
+
+        val handle = runtime.load(model("m"), binding()) as TextModelHandle
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
         assertTrue(text.startsWith("full cloud answer"))
         assertTrue(text.contains("decode error"))
-        // The discarded partial tokens must not appear anywhere, including in
-        // the failure note — a truncated answer with a caption is still a
-        // truncated answer.
-        assertTrue(!text.contains("partial words"))
+    }
+
+    @Test
+    fun `a candidate is loaded once and reused across turns`() = runBlocking {
+        // The chain used to load and close every candidate inside each
+        // generate() call, so enabling any second provider meant reading a
+        // local model off disk again for every single message.
+        var loads = 0
+        val counting = object : ModelRuntime {
+            override val kind = ai.localstudio.core.registry.RuntimeKind.STUB
+            override fun canRun(model: ModelDescriptor, binding: RuntimeBinding) = true
+            override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel {
+                loads++
+                return FakeHandle { succeeding("ответ") }
+            }
+        }
+        val runtime = FallbackTextRuntime(
+            listOf(FallbackCandidate(label = "local", runtime = counting, model = model("m"), binding = binding())),
+        )
+
+        val handle = runtime.load(model("m"), binding()) as TextModelHandle
+        repeat(3) { handle.generate(GenerationRequest(prompt = "hi")).toList() }
+
+        assertEquals(1, loads)
     }
 
     @Test

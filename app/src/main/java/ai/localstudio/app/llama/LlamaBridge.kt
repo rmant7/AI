@@ -15,6 +15,15 @@ class LlamaBridge {
 
     external fun nativeSystemInfo(): String
 
+    /**
+     * Whether this model's own chat template was found and applied, or the
+     * generic fallback scaffold had to stand in for it. Worth a log line per
+     * load: without the model's turn markers an instruction-tuned model
+     * stops answering and starts continuing the prompt as prose, and that
+     * failure is otherwise indistinguishable from the model just being bad.
+     */
+    external fun nativeChatTemplateInfo(handle: Long): String
+
     /** Returns a handle, or 0 when the model could not be loaded. */
     external fun nativeLoad(modelPath: String, contextTokens: Int, threads: Int): Long
 

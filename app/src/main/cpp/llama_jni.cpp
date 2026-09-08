@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -114,10 +115,45 @@ std::string pieceOf(const llama_vocab *vocab, llama_token token) {
  * instruction-tuned model produces confident nonsense — the model answers a
  * question it was never asked to answer in that form.
  */
+/**
+ * The last-resort layout, for a GGUF that carries no usable chat template.
+ *
+ * Deliberately not a plain `system + "\n\n" + user` concatenation, which is
+ * what this used to be. With no turn markers of any kind, an
+ * instruction-tuned model is simply a text completer over whatever it was
+ * handed — and what it was handed is this app's labelled context document.
+ * Observed on a real device, twice: asked "Конкретные рецепты" it replied
+ * " для одного из этих вариантов..." — finishing the user's own sentence —
+ * and then reproduced `[SYSTEM]` and `[CONVERSATION]` sections of its own,
+ * inventing an `[ASSISTANT_MESSAGE]` label to write under. It was
+ * continuing the document, exactly as a completion model should, because
+ * nothing in the text said a turn had ended and its own had begun.
+ *
+ * The Alpaca-style headers below are heavily represented in instruction
+ * tuning data across model families, and the trailing "### Response:" is
+ * the part that matters: an explicit, unambiguous "your turn starts here"
+ * that a completion model has something to continue *from*.
+ */
+std::string genericInstructScaffold(const std::string &system, const std::string &user) {
+    std::string out;
+    if (!system.empty()) out += system + "\n\n";
+    out += "### Instruction:\n" + user + "\n\n### Response:\n";
+    return out;
+}
+
+/** What [applyChatTemplate] actually did last, surfaced to Kotlin so it reaches the in-app log. */
+std::string g_lastTemplateInfo = "not attempted yet";
+
 std::string applyChatTemplate(llama_model *model, const std::string &system, const std::string &user) {
     const char *tmpl = llama_model_chat_template(model, nullptr);
     if (tmpl == nullptr) {
-        return system.empty() ? user : system + "\n\n" + user;
+        // Not a warning to shrug at: without the model's own turn markers
+        // the answer quality drop is severe and looks like the model being
+        // bad rather than the prompt being malformed. Recorded so it shows
+        // up in the app's own log next to the load line, not just logcat.
+        g_lastTemplateInfo = "MISSING in GGUF — falling back to a generic instruct scaffold";
+        LOGE("no chat template in this GGUF; using the generic instruct scaffold");
+        return genericInstructScaffold(system, user);
     }
 
     std::vector<llama_chat_message> messages;
@@ -133,10 +169,26 @@ std::string applyChatTemplate(llama_model *model, const std::string &system, con
             tmpl, messages.data(), messages.size(), true, buffer.data(), (int32_t) buffer.size());
     }
     if (written <= 0) {
-        // Some templates reject a system message; retry with the user turn only.
-        if (!system.empty()) return applyChatTemplate(model, "", system + "\n\n" + user);
-        return user;
+        // Some templates reject a system message. Retry the user turn alone
+        // — but against the template still, not by giving up on it: the old
+        // code recursed into a path that returned the raw string when that
+        // second attempt also failed, silently losing the turn markers.
+        if (!system.empty()) {
+            const std::string merged = system + "\n\n" + user;
+            llama_chat_message userOnly[] = {{"user", merged.c_str()}};
+            buffer.assign(merged.size() + 2048, '\0');
+            written = llama_chat_apply_template(
+                tmpl, userOnly, 1, true, buffer.data(), (int32_t) buffer.size());
+            if (written > 0) {
+                g_lastTemplateInfo = "applied (system folded into the user turn)";
+                return std::string(buffer.data(), written);
+            }
+        }
+        g_lastTemplateInfo = "present but FAILED to apply — falling back to a generic instruct scaffold";
+        LOGE("chat template present but llama_chat_apply_template failed; using the generic scaffold");
+        return genericInstructScaffold(system, user);
     }
+    g_lastTemplateInfo = "applied";
     return std::string(buffer.data(), written);
 }
 
@@ -147,6 +199,23 @@ extern "C" {
 JNIEXPORT jstring JNICALL
 Java_ai_localstudio_app_llama_LlamaBridge_nativeSystemInfo(JNIEnv *env, jobject) {
     return env->NewStringUTF(llama_print_system_info());
+}
+
+/**
+ * Whether this model's own chat template was found and used for the last
+ * turn — the difference between the model answering a question and merely
+ * continuing this app's prompt as prose, which is invisible from Kotlin and
+ * was previously invisible in the log too.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeChatTemplateInfo(JNIEnv *env, jobject, jlong handle) {
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr || session->model == nullptr) return env->NewStringUTF("no model");
+    const char *tmpl = llama_model_chat_template(session->model, nullptr);
+    const std::string state = tmpl == nullptr
+        ? "absent from this GGUF"
+        : "present (" + std::to_string(strlen(tmpl)) + " chars)";
+    return env->NewStringUTF((state + "; last turn: " + g_lastTemplateInfo).c_str());
 }
 
 JNIEXPORT jlong JNICALL

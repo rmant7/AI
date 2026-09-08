@@ -39,18 +39,6 @@
                 android:paddingEnd="0dp"
                 android:textSize="11sp" />
 
-            <ImageButton
-                android:id="@+id/copyButton"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="-4dp"
-                android:layout_marginBottom="-4dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/message_copy"
-                android:padding="5dp"
-                android:src="@drawable/ic_copy" />
-
         </LinearLayout>
 
         <TextView
@@ -69,6 +57,25 @@
             android:textSize="11sp"
             android:alpha="0.7"
             android:visibility="gone" />
+
+        <!--
+            Below the text, not up in the header row with the role and time:
+            copying is something you reach for after reading an answer, and
+            every other chat app puts it at the end of the message for that
+            reason. End-aligned so it lands under the message's trailing edge
+            rather than floating in the middle of a short bubble.
+        -->
+        <ImageButton
+            android:id="@+id/copyButton"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_gravity="end"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="-4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/message_copy"
+            android:padding="5dp"
+            android:src="@drawable/ic_copy" />
 
     </LinearLayout>
 

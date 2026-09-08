@@ -122,6 +122,11 @@ class LlamaCppRuntime(
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
         log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms")
+        // Logged per load, not per turn: it is the same answer every time for
+        // a given model, and it is the first thing worth checking when a
+        // model answers something other than what it was asked.
+        runCatching { bridge.nativeChatTemplateInfo(handle) }
+            .onSuccess { log("LOCAL_LOAD", "${file.name}: chat template $it") }
         return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, log)
     }
 }

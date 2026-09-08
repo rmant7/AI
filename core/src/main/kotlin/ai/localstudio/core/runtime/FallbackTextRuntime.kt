@@ -62,12 +62,31 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
     @Volatile
     private var active: TextModelHandle? = null
 
+    /**
+     * Candidates loaded so far, by index, kept across turns.
+     *
+     * This used to load and then close every candidate inside a single
+     * generate() call, which meant a local model was read off disk again for
+     * every message the moment any second provider was enabled — six to
+     * twenty seconds per turn for a 4B GGUF on a real device. Worse, a fresh
+     * llama.cpp context starts with an empty KV cache, so the prefix reuse
+     * in llama_jni.cpp had nothing to match against and the entire prompt
+     * was re-prefilled every turn too. The single-candidate path never had
+     * this problem: it goes through RuntimeManager, which keeps the model
+     * resident. This map is the equivalent for the chain, and
+     * [close] — called by RuntimeManager when this chain itself is evicted —
+     * is what eventually frees them.
+     */
+    private val loaded = mutableMapOf<Int, TextModelHandle>()
+
     override fun generate(request: GenerationRequest): Flow<String> = flow {
         val failures = mutableListOf<String>()
         for ((index, candidate) in candidates.withIndex()) {
             val handle = try {
-                candidate.runtime.load(candidate.model, candidate.binding) as? TextModelHandle
-                    ?: throw ModelLoadException("${candidate.label} did not load as a text model")
+                loaded.getOrPut(index) {
+                    candidate.runtime.load(candidate.model, candidate.binding) as? TextModelHandle
+                        ?: throw ModelLoadException("${candidate.label} did not load as a text model")
+                }
             } catch (e: CancellationException) {
                 // A cancelled load (the user stopped generation, or the
                 // overall request timed out) is not this candidate failing —
@@ -83,16 +102,24 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
             }
 
             active = handle
+            var emittedAny = false
             try {
-                // Buffered, not emitted live: a candidate that produces
-                // several tokens and then throws must not leave a truncated
-                // partial answer on screen with no way to fall back cleanly
-                // — the whole point of this class is that a failure is
-                // invisible to whatever is waiting on the Flow.
-                val tokens = mutableListOf<String>()
-                handle.generate(request).collect { tokens += it }
-                if (tokens.isNotEmpty()) {
-                    tokens.forEach { emit(it) }
+                // Emitted live rather than buffered to the end. Buffering was
+                // how a candidate that produced several tokens and then threw
+                // could still be replaced silently by the next one — but it
+                // also meant nothing at all reached the screen until the whole
+                // answer was finished, which for a slow local model is minutes
+                // of a blank bubble. That cost is paid on every turn; the
+                // failure it guarded against is rare, and is still handled:
+                // falling through to the next candidate stays possible right
+                // up until the first token is emitted, and after that point a
+                // failure is reported rather than silently papered over with a
+                // second candidate's answer appended to the first one's.
+                handle.generate(request).collect {
+                    emittedAny = true
+                    emit(it)
+                }
+                if (emittedAny) {
                     // Always attached, not just on fallback: with no
                     // attribution at all a plain answer just reads as "the
                     // model" with no way to tell which provider or which of
@@ -114,8 +141,18 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
             } catch (e: Exception) {
                 candidate.onFailure?.invoke(e)
                 failures += "${candidate.label}: ${e.message ?: e.toString()}"
+                // A handle that threw mid-generation is not trusted for the
+                // next turn — dropped from the cache and closed here rather
+                // than reused, unlike the success path.
+                loaded.remove(index)?.let { broken -> runCatching { broken.close() } }
+                if (emittedAny) {
+                    // Part of this candidate's answer is already on screen.
+                    // Falling through to the next candidate would append a
+                    // second, unrelated answer to the first one's remains, so
+                    // this is reported instead of silently recovered from.
+                    throw e
+                }
             } finally {
-                handle.close()
                 active = null
             }
         }
@@ -138,6 +175,11 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
     }
 
     override fun close() {
-        active?.close()
+        // Every candidate this chain ever loaded, not just whichever one
+        // answered last: they are kept resident across turns now (see
+        // [loaded]), so this is the only place they are released.
+        loaded.values.forEach { runCatching { it.close() } }
+        loaded.clear()
+        active = null
     }
 }
