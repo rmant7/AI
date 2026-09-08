@@ -85,6 +85,14 @@ class ChatActivity : AppCompatActivity() {
 
         binding.messages.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         binding.messages.adapter = adapter
+        // RecyclerView's default ItemAnimator cross-fades a changed item —
+        // old view faded out, new view faded in — on every notifyItemChanged.
+        // For a bubble growing in place several times a second while
+        // streaming, that fade reads as the whole answer flickering/jittering
+        // instead of text smoothly appearing, which is the one thing this
+        // update is actually supposed to look like.
+        (binding.messages.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)
+            ?.supportsChangeAnimations = false
 
         binding.sendButton.setOnClickListener { if (isGenerating) stopGeneration() else send() }
         binding.attachButton.setOnClickListener { pickDocument.launch("*/*") }
