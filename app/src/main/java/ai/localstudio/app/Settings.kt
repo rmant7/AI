@@ -118,13 +118,23 @@ class Settings(context: Context) {
 
     /**
      * Which compute unit a Google Tensor SDK (LiteRT) local model is asked to
-     * run on. NPU is the whole point of that runtime — the TPU on a Pixel's
-     * Tensor chip — but LiteRtRuntime falls back to CPU on its own if NPU
-     * load fails, so this is a preference, not a guarantee.
+     * run on. NPU was the whole point of that runtime — the TPU on a Pixel's
+     * Tensor chip — but on-device testing found it fails to load every
+     * catalog entry tried so far (across two litertlm-android versions, two
+     * different models): the "universal" .litertlm this app downloads is a
+     * CPU/GPU build, and Google's real NPU-accelerated files are separate,
+     * chip-specific artifacts (e.g. `..._Google_Tensor_G5.litertlm`) this
+     * app deliberately doesn't download — see ArtifactResolver's chip-file
+     * exclusion. Worse, the failed NPU attempt plus its automatic CPU
+     * retry (LiteRtRuntime loads the same model twice) produced a real ANR
+     * on one test. Defaulting to CPU skips the attempt that has never once
+     * succeeded, rather than paying its cost — and the ANR risk that came
+     * with it — on every single local generation. NPU stays selectable for
+     * whenever chip-specific model files are added.
      */
     var liteRtBackend: LiteRtBackend
         get() = runCatching { LiteRtBackend.valueOf(prefs.getString(KEY_LITERT_BACKEND, null) ?: "") }
-            .getOrDefault(LiteRtBackend.NPU)
+            .getOrDefault(LiteRtBackend.CPU)
         set(value) = prefs.edit().putString(KEY_LITERT_BACKEND, value.name).apply()
 
     val hasEndpoint: Boolean get() = endpoint.isNotBlank()

@@ -34,7 +34,11 @@ enum class LiteRtBackend { CPU, GPU, NPU }
  */
 class LiteRtRuntime(
     private val context: Context,
-    private val backend: LiteRtBackend = LiteRtBackend.NPU,
+    // CPU, not NPU: see Settings.liteRtBackend's doc comment — NPU has
+    // failed to load every catalog entry tested so far and its failed
+    // attempt plus automatic CPU retry (loading the same model twice) has
+    // produced a real ANR.
+    private val backend: LiteRtBackend = LiteRtBackend.CPU,
     private val log: (tag: String, message: String) -> Unit = { _, _ -> },
 ) : ModelRuntime {
 

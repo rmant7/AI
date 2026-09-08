@@ -264,9 +264,12 @@ class SettingsActivity : AppCompatActivity() {
         const val MENU_LOG = 2
 
         val LITERT_BACKEND_OPTIONS = listOf(
-            LiteRtBackend.NPU to "NPU (TPU Pixel)",
+            LiteRtBackend.CPU to "CPU (рекомендуется)",
             LiteRtBackend.GPU to "GPU",
-            LiteRtBackend.CPU to "CPU",
+            // On-device testing found this fails to load every catalog
+            // entry so far — see Settings.liteRtBackend's doc comment.
+            // Left selectable in case that changes on a future SDK/model.
+            LiteRtBackend.NPU to "NPU (TPU Pixel, пока не работает)",
         )
     }
 }
