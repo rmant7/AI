@@ -58,12 +58,6 @@ jobs:
           echo "--- all split outputs ---"
           find app/build/outputs/apk/debug -name "*.apk" -exec ls -la {} \;
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: local-ai-studio-apk
-          path: ${{ steps.apk.outputs.path }}
-          if-no-files-found: error
-
       # The build's outcome, published where a plain `git fetch` can read it.
       # Useful beyond automation: the ci-status branch shows why a build failed
       # without opening the Actions logs.
