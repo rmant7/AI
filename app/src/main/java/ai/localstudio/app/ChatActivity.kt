@@ -289,7 +289,14 @@ class ChatActivity : AppCompatActivity() {
         // either" looks like from the outside.
         if (isGenerating) return
         val text = binding.input.text?.toString()?.trim().orEmpty()
-        if (text.isEmpty()) return
+        // An attached image or document is itself the message for anyone
+        // who just wants "look at this" answered — every other chat app
+        // sends a picture with no caption the same way. Requiring typed
+        // text on top of that turned attaching something into two steps
+        // where one should do, and the second one added nothing the
+        // attachment didn't already say.
+        val hasAttachment = pendingImage != null || container.documents.list().isNotEmpty()
+        if (text.isEmpty() && !hasAttachment) return
 
         binding.input.setText("")
         adapter.add(Message.user(text, imageDataUri = pendingImage?.uri))

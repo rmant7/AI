@@ -45,7 +45,17 @@ class InMemoryMemoryProvider(
 
     override suspend fun search(query: MemoryQuery): List<MemoryItem> {
         val terms = tokenize(query.text)
-        if (terms.isEmpty()) return emptyList()
+        // A caller that scopes by metadata is stating relevance explicitly
+        // — "exactly this attached document's chunks" — and needs no
+        // lexical overlap on top of that. Requiring one anyway is what made
+        // a plain "what does this file say" find nothing: a meta-question
+        // about a just-attached document shares no vocabulary with that
+        // document's actual content, by definition, no matter how relevant
+        // it obviously is. Without a metadata filter this is an ordinary
+        // free-text query, unchanged: an empty or entirely stop-word query
+        // still returns nothing, and every result still needs a shared term.
+        val requireOverlap = query.metadataFilter.isEmpty()
+        if (requireOverlap && terms.isEmpty()) return emptyList()
 
         val all = snapshot()
         val newest = all.maxOfOrNull { it.createdAt } ?: return emptyList()
@@ -57,7 +67,7 @@ class InMemoryMemoryProvider(
             .filter { item -> query.metadataFilter.all { (k, v) -> item.metadata[k] == v } }
             .mapNotNull { item ->
                 val overlap = overlap(terms, tokenize(item.text))
-                if (overlap == 0.0) return@mapNotNull null
+                if (requireOverlap && overlap == 0.0) return@mapNotNull null
                 // Recency applies only to time-bound memories: a preference
                 // stated a month ago is exactly as true as one stated today.
                 val recency = if (item.scope == MemoryScope.SEMANTIC) {
@@ -73,7 +83,14 @@ class InMemoryMemoryProvider(
 
     override suspend fun remember(text: String, scope: MemoryScope, metadata: Map<String, String>): String =
         synchronized(lock) {
-            val id = "mem-${++counter}"
+            // Zero-padded so id order is also lexical order: search()'s tie
+            // break (equal relevance, which every chunk of the same
+            // metadata-filtered document now has — see search()'s own
+            // comment) sorts by this string, and an unpadded counter puts
+            // "mem-10" before "mem-2" — a document past its 9th chunk would
+            // come back with its later paragraphs spliced in before earlier
+            // ones instead of in reading order.
+            val id = "mem-%010d".format(++counter)
             items[id] = MemoryItem(id, text.trim(), scope, clock(), metadata = metadata)
             id
         }
