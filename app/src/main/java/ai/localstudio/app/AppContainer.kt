@@ -264,6 +264,14 @@ class AppContainer private constructor(private val context: Context) {
                 enabled.map { it.id }.sorted().joinToString(","),
                 settings.customEndpoint,
                 settings.speechModel,
+                // Not read by any local runtime except LiteRtRuntime, but
+                // that runtime is constructed once per orchestrator (see
+                // buildOrchestrator) and captures this value at construction
+                // time — omitting it here meant switching CPU/GPU/NPU in
+                // Settings silently did nothing until some unrelated setting
+                // change happened to rebuild the orchestrator anyway. The
+                // already-resident engine kept answering on its old backend.
+                settings.liteRtBackend.name,
                 settings.temperature,
                 settings.topP,
                 settings.topK,
@@ -425,8 +433,16 @@ class AppContainer private constructor(private val context: Context) {
      * which used to read the static title directly and stayed wrong even
      * after the candidate's own label was fixed.
      */
-    private fun localRuntimeTitle(runtime: RuntimeKind): String =
-        if (runtime == RuntimeKind.LITERT) "Локально на устройстве (Google Tensor SDK)" else CloudProviders.LOCAL.title
+    private fun localRuntimeTitle(runtime: RuntimeKind): String = if (runtime == RuntimeKind.LITERT) {
+        // The user has no other way to tell CPU/GPU/NPU apart in the UI —
+        // and switching this setting used to silently not take effect on an
+        // already-resident model, so a visible label matters even more than
+        // usual here: it's the one place confirming which backend a given
+        // answer actually came from, not just which one Settings claims.
+        "Локально на устройстве (Google Tensor SDK, ${settings.liteRtBackend.name})"
+    } else {
+        CloudProviders.LOCAL.title
+    }
 
     /** Which runtime the currently chosen (or auto-selected) local model would actually use, if any is installed. */
     private fun activeLocalRuntimeTitle(): String {
