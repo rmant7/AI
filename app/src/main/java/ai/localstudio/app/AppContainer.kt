@@ -542,6 +542,17 @@ class AppContainer private constructor(private val context: Context) {
      */
     private fun localRegistry(): ModelRegistry = ModelRegistry(
         installedSeeds().map { seed ->
+            // Best-effort backfill for a model that was already installed
+            // before it declared a projector, or whose projector fetch
+            // failed the first time — see ModelDownloads.start()'s own
+            // comment on why this can't wait for the user to notice and
+            // re-download the whole model. Cheap to call on every registry
+            // build: start() no-ops while a fetch for this seed is already
+            // running, and stops matching this condition entirely once
+            // hasMmproj(seed) actually becomes true.
+            if (seed.mmprojFileName != null && !modelStore.hasMmproj(seed)) {
+                downloads.start(seed)
+            }
             val file: File = modelStore.fileFor(seed)
             RegistryEntry(
                 ModelDescriptor(

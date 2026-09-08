@@ -207,6 +207,23 @@ bool looksLikeGemmaTemplate(const char *tmpl) {
     return tmpl != nullptr && std::string(tmpl).find("<start_of_turn>") != std::string::npos;
 }
 
+/**
+ * A second, independent way to recognise a Gemma-family model, alongside
+ * [looksLikeGemmaTemplate] — this one via the GGUF's own declared
+ * architecture rather than sniffing the jinja source for a literal
+ * substring. "general.architecture" is standard GGUF metadata every valid
+ * conversion carries, so this holds regardless of how a given release
+ * happens to spell its turn markers inside the template text, or whether
+ * that text wraps them in template logic this string search wouldn't catch.
+ */
+bool isGemmaArchitecture(llama_model *model) {
+    char buf[64];
+    const int32_t len = llama_model_meta_val_str(model, "general.architecture", buf, sizeof(buf));
+    if (len <= 0) return false;
+    const std::string arch(buf, len);
+    return arch.rfind("gemma", 0) == 0; // covers gemma, gemma2, gemma3, gemma4, ...
+}
+
 /** What [applyChatTemplate] actually did last, surfaced to Kotlin so it reaches the in-app log. */
 std::string g_lastTemplateInfo = "not attempted yet";
 
@@ -256,7 +273,7 @@ std::string applyChatTemplate(llama_model *model, const std::string &system, con
                 return std::string(buffer.data(), written);
             }
         }
-        if (looksLikeGemmaTemplate(tmpl)) {
+        if (looksLikeGemmaTemplate(tmpl) || isGemmaArchitecture(model)) {
             g_lastTemplateInfo = "present but FAILED to apply — using Gemma's own turn markers directly";
             LOGE("chat template present but llama_chat_apply_template failed; applying Gemma's markers directly");
             return gemmaScaffold(system, user);

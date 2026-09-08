@@ -49,6 +49,29 @@ class ModelDownloads(
     fun start(seed: LocalModelSeed) {
         if (jobs[seed.id]?.isActive == true) return
 
+        // A model already installed before this seed declared a projector
+        // (or one downloaded while the projector's own fetch failed) has its
+        // main GGUF sitting right there — every seed's own download flow
+        // below assumes it's starting from nothing and re-resolves and
+        // re-fetches that multi-gigabyte file unconditionally. Backfilling
+        // just the missing projector, the same best-effort way a fresh
+        // install does (see downloadMmproj's own comment), is what actually
+        // turns vision on for a model someone already has instead of silent
+        // permanent text-only — nothing else ever revisits an installed
+        // model to check whether it's missing a file a later app update
+        // started expecting.
+        if (store.isInstalled(seed) && seed.mmprojFileName != null && !store.hasMmproj(seed)) {
+            onDownloadStarted()
+            val backfillDownloader = ModelDownloader()
+            downloaders[seed.id] = backfillDownloader
+            jobs[seed.id] = scope.launch {
+                downloadMmproj(seed, backfillDownloader)
+                publish(seed, DownloadState.Installed)
+                downloaders.remove(seed.id)
+            }
+            return
+        }
+
         onDownloadStarted()
         val downloader = ModelDownloader()
         downloaders[seed.id] = downloader
