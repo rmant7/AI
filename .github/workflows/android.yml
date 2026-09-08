@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           src=$(find app/build/outputs/apk/debug -name "*.apk" | head -n1)
-          out="localAI.apk"
+          out="localAI-${GITHUB_RUN_NUMBER}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
           ls -la "$out"
