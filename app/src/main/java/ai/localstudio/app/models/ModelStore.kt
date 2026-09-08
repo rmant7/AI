@@ -64,6 +64,25 @@ class ModelStore(private val context: Context) {
     fun hasMmproj(seed: LocalModelSeed): Boolean =
         seed.mmprojFileName != null && mmprojFileFor(seed).let { it.isFile && it.length() > 0 }
 
+    /**
+     * Files sitting in the models directory that don't belong to any seed
+     * this catalog currently knows about — a real, observed case: a model
+     * downloaded from a different branch under active development (a
+     * `.litertlm` file from a LiteRT-LM/Tensor SDK runtime this build
+     * doesn't even compile in) stays on disk exactly as-is across a plain
+     * branch/version switch, since nothing about switching branches touches
+     * app-private storage. Nothing in this app ever revisits this directory
+     * looking for files it doesn't recognize, so without this they would sit
+     * there, invisible and undeletable through the app, for as long as the
+     * app is installed.
+     */
+    fun orphanedFiles(knownSeeds: List<LocalModelSeed>): List<File> {
+        val known = knownSeeds.flatMap {
+            listOf(fileFor(it).name, partFor(it).name, mmprojFileFor(it).name, mmprojPartFor(it).name)
+        }.toSet()
+        return directory().listFiles()?.filter { it.isFile && it.name !in known }.orEmpty()
+    }
+
     fun freeSpaceBytes(): Long = directory().freeSpace
 
     private companion object {

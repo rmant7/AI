@@ -249,7 +249,55 @@ class ModelsActivity : AppCompatActivity() {
                 ),
             )
         }
+
+        // Files a past version's catalog knew about but this one doesn't —
+        // observed for real after switching branches during development
+        // (a different runtime's model format, .litertlm, left behind by a
+        // branch this build no longer includes at all). Switching branches
+        // or versions never touches app-private storage on its own, so
+        // without this such a file just sits there, invisible and
+        // undeletable through the app, for as long as it stays installed.
+        val orphans = container.modelStore.orphanedFiles(LocalModels.SEEDS + customSeeds)
+        if (orphans.isNotEmpty()) {
+            val totalBytes = orphans.sumOf { it.length() }
+            add(
+                Row.Model(
+                    title = getString(R.string.models_orphans_title),
+                    subtitle = getString(R.string.models_orphans_subtitle, orphans.size, size(totalBytes)),
+                    selected = false,
+                    status = null,
+                    progress = null,
+                    indeterminate = false,
+                    primaryLabel = getString(R.string.models_orphans_delete, size(totalBytes)),
+                    primaryEnabled = true,
+                    secondaryLabel = null,
+                    onPrimary = { confirmDeleteOrphans(orphans) },
+                    onSecondary = {},
+                ),
+            )
+        }
+
         add(Row.Custom)
+    }
+
+    /**
+     * Names every file before deleting anything — these are large, and a
+     * generic file dating from before this exact build's catalog is exactly
+     * the kind of thing worth a moment's confirmation, not a silent bulk
+     * delete on a mis-tap.
+     */
+    private fun confirmDeleteOrphans(orphans: List<java.io.File>) {
+        val totalBytes = orphans.sumOf { it.length() }
+        val listing = orphans.joinToString("\n") { "• ${it.name} (${size(it.length())})" }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.models_orphans_delete, size(totalBytes)))
+            .setMessage(listing)
+            .setPositiveButton(R.string.model_delete) { _, _ ->
+                orphans.forEach { it.delete() }
+                render()
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
     }
 
     private fun voiceRows(device: DeviceProfile): List<Row> = buildList {

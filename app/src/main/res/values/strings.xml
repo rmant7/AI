@@ -99,6 +99,9 @@
     <string name="models_custom_add">Добавить</string>
     <string name="models_custom_input_hint">owner/repo с GGUF-файлом</string>
     <string name="models_custom_bad_format">Нужен формат owner/repo</string>
+    <string name="models_orphans_title">Неизвестные файлы</string>
+    <string name="models_orphans_subtitle">Найдено файлов: %1$d, общий размер ~%2$s. Текущая версия приложения их не использует — вероятно, остались от другой версии или ветки разработки.</string>
+    <string name="models_orphans_delete">Удалить (%1$s)</string>
     <string name="models_voice_header">Модели распознавания речи — работают офлайн</string>
     <string name="models_switched_chat">Чат переключён на %1$s</string>
     <string name="models_switched_voice">Голосовой ввод переключён на %1$s</string>

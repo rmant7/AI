@@ -43,6 +43,20 @@ class ModelDownloads(
     private val jobs = mutableMapOf<String, Job>()
     private val downloaders = mutableMapOf<String, ModelDownloader>()
 
+    /**
+     * When a backfill attempt (see [start]'s own comment) may next retry for
+     * a given seed, keyed by seed id — set only after a *failed* attempt.
+     * Every message sent rebuilds the local registry, which calls [start]
+     * again for any seed still missing its projector; with no cooldown, a
+     * network that simply can't reach huggingface.co right now (observed on
+     * a real device: DNS resolution failing for that host specifically,
+     * while the rest of the internet worked) would retry — with its own
+     * internal multi-attempt retry inside [downloadMmproj] — on every single
+     * turn for as long as that lasted, for a host with no realistic chance
+     * of answering differently a few seconds later.
+     */
+    private val mmprojBackfillCooldownUntil = mutableMapOf<String, Long>()
+
     fun stateOf(seed: LocalModelSeed): DownloadState =
         states.value[seed.id] ?: if (store.isInstalled(seed)) DownloadState.Installed else DownloadState.Idle
 
@@ -61,11 +75,15 @@ class ModelDownloads(
         // model to check whether it's missing a file a later app update
         // started expecting.
         if (store.isInstalled(seed) && seed.mmprojFileName != null && !store.hasMmproj(seed)) {
+            if (System.currentTimeMillis() < (mmprojBackfillCooldownUntil[seed.id] ?: 0L)) return
             onDownloadStarted()
             val backfillDownloader = ModelDownloader()
             downloaders[seed.id] = backfillDownloader
             jobs[seed.id] = scope.launch {
                 downloadMmproj(seed, backfillDownloader)
+                if (!store.hasMmproj(seed)) {
+                    mmprojBackfillCooldownUntil[seed.id] = System.currentTimeMillis() + MMPROJ_BACKFILL_COOLDOWN_MS
+                }
                 publish(seed, DownloadState.Installed)
                 downloaders.remove(seed.id)
             }
@@ -180,5 +198,8 @@ class ModelDownloads(
     private companion object {
         /** Never fill the disk to the last byte for a model. */
         const val SLACK_BYTES = 500L * 1024 * 1024
+
+        /** How long a failed mmproj backfill attempt sits out before retrying — see [mmprojBackfillCooldownUntil]. */
+        const val MMPROJ_BACKFILL_COOLDOWN_MS = 30 * 60 * 1000L
     }
 }
