@@ -20,6 +20,11 @@
     <string name="chat_interrupted">Ответ не получен — генерация не завершилась (сбой приложения или его закрытие до ответа). Подробности могут быть в Настройки → Журнал ошибок. Попробуйте отправить сообщение ещё раз.</string>
     <string name="history_empty">Пока нет сохранённых чатов</string>
     <string name="history_delete">Удалить</string>
+    <string name="history_rename">Переименовать</string>
+    <string name="history_rename_hint">Название чата</string>
+    <string name="history_delete_confirm">Удалить «%1$s»? Сообщения этого чата будут стёрты.</string>
+    <string name="history_save">Сохранить</string>
+    <string name="history_subtitle">%1$d сообщ. · %2$s</string>
     <string name="memory_on">Память: вкл</string>
     <string name="memory_off">Память: выкл</string>
 

@@ -10,7 +10,6 @@ import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -35,8 +34,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 class ChatActivity : AppCompatActivity() {
@@ -67,6 +64,22 @@ class ChatActivity : AppCompatActivity() {
         uri?.let {
             val mimeType = contentResolver.getType(it).orEmpty()
             if (mimeType.startsWith("image/")) attachImage(it) else ingestDocument(it)
+        }
+    }
+
+    /**
+     * The history screen only reports what happened; loading and clearing
+     * stay here, where the conversation actually lives.
+     */
+    private val openHistory = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data ?: return@registerForActivityResult
+        data.getStringExtra(HistoryActivity.EXTRA_CONVERSATION_ID)?.let { id ->
+            history.load(id)?.let { openConversation(it) }
+        }
+        // A chat can be deleted while it is the one on screen. Left alone,
+        // the next message would recreate the file that was just deleted.
+        data.getStringExtra(HistoryActivity.EXTRA_DELETED_ID)?.let { deleted ->
+            if (deleted == conversationId) startNewConversation()
         }
     }
 
@@ -217,34 +230,12 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun showHistory() {
-        val conversations = history.list()
-        if (conversations.isEmpty()) {
-            android.widget.Toast.makeText(this, R.string.history_empty, android.widget.Toast.LENGTH_SHORT).show()
-            return
-        }
-        val format = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
-        val labels = conversations.map { "${it.title}\n${format.format(Date(it.updatedAt))}" }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle(R.string.menu_history)
-            .setItems(labels) { _, index -> openConversation(conversations[index]) }
-            .setNegativeButton(R.string.history_delete) { _, _ -> pickAndDelete(conversations) }
-            .show()
+        openHistory.launch(HistoryActivity.intent(this))
     }
 
-    private fun pickAndDelete(conversations: List<Conversation>) {
-        val format = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
-        val labels = conversations.map { "${it.title}\n${format.format(Date(it.updatedAt))}" }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle(R.string.history_delete)
-            .setItems(labels) { _, index ->
-                val target = conversations[index]
-                history.delete(target.id)
-                if (target.id == conversationId) {
-                    adapter.clear()
-                    conversationId = "chat-" + System.currentTimeMillis()
-                }
-            }
-            .show()
+    private fun startNewConversation() {
+        adapter.clear()
+        conversationId = "chat-" + System.currentTimeMillis()
     }
 
     private fun openConversation(conversation: Conversation) {
@@ -264,6 +255,10 @@ class ChatActivity : AppCompatActivity() {
                 title = ChatHistoryStore.titleFor(stored),
                 updatedAt = System.currentTimeMillis(),
                 messages = stored,
+                // Carried over rather than dropped: this runs after every
+                // message, so building the record from scratch would quietly
+                // undo a rename on the very next thing the user said.
+                customTitle = history.load(conversationId)?.customTitle,
             ),
         )
     }

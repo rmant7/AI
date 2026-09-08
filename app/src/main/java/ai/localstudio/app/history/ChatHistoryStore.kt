@@ -19,10 +19,20 @@ data class StoredMessage(
 @Serializable
 data class Conversation(
     val id: String,
+    /** Derived from the first thing the user said — recomputed on every save. */
     val title: String,
     val updatedAt: Long,
     val messages: List<StoredMessage>,
-)
+    /**
+     * A name the user typed, which wins over [title] and survives every
+     * later message. Nullable with a default so conversations saved before
+     * renaming existed still decode.
+     */
+    val customTitle: String? = null,
+) {
+    /** What to show in the history list: the user's own name if there is one. */
+    val displayTitle: String get() = customTitle?.takeIf { it.isNotBlank() } ?: title
+}
 
 /**
  * Persists conversations to disk so closing the app — or the process simply
@@ -57,6 +67,27 @@ class ChatHistoryStore(context: Context) {
 
     fun delete(id: String) {
         file(id).delete()
+    }
+
+    /**
+     * Renames one conversation, leaving its messages alone.
+     *
+     * Read-modify-write rather than taking a whole [Conversation] from the
+     * caller: the history screen only ever holds the list it rendered, and
+     * writing that back would undo any message the chat screen persisted in
+     * between. A blank name clears the custom title and lets the derived one
+     * take over again.
+     */
+    fun rename(id: String, title: String) {
+        val existing = load(id) ?: return
+        runCatching {
+            file(id).writeText(
+                json.encodeToString(
+                    Conversation.serializer(),
+                    existing.copy(customTitle = title.trim().ifBlank { null }),
+                ),
+            )
+        }
     }
 
     private fun file(id: String) = File(dir, "$id.json")

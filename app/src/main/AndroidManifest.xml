@@ -51,6 +51,12 @@
             android:parentActivityName=".ChatActivity" />
 
         <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:label="@string/menu_history"
+            android:parentActivityName=".ChatActivity" />
+
+        <activity
             android:name=".ApiKeysActivity"
             android:exported="false"
             android:label="@string/settings_api_keys_manage"
