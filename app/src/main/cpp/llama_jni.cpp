@@ -18,6 +18,8 @@
 #include <vector>
 
 #include "llama.h"
+#include "mtmd.h"
+#include "mtmd-helper.h"
 
 #define LOG_TAG "llama_jni"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -51,6 +53,13 @@ struct Session {
     llama_context *ctx = nullptr;
     const llama_vocab *vocab = nullptr;
     std::atomic<bool> cancelled{false};
+
+    // Set by nativeLoadMmproj, once, after nativeLoad — null for every model
+    // without a downloaded projector file, which is every model until a
+    // catalog entry actually declares one. A model with no vision support at
+    // all (nullptr mmproj) behaves exactly as it always did; nothing here
+    // changes the plain-text path.
+    mtmd_context *mctx = nullptr;
     // Tokens actually resident in the KV cache after the last successful
     // call — the prompt tokens that were decoded plus whatever generated
     // tokens were themselves decoded back in. Compared against the next
@@ -212,6 +221,68 @@ std::string applyChatTemplate(llama_model *model, const std::string &system, con
     return std::string(buffer.data(), written);
 }
 
+struct DecodeLoopResult {
+    int32_t produced = 0;
+    std::vector<llama_token> generatedTokens;
+};
+
+/**
+ * The token-by-token sampling loop, shared by the plain-text and
+ * image-attached generation paths — everything after the prompt (or prompt
+ * + image) is already resident in the KV cache is identical between them.
+ * `used` is how many KV positions are already filled going in.
+ */
+DecodeLoopResult runDecodeLoop(
+    JNIEnv *env, Session *session, jobject callback, jmethodID onToken,
+    int32_t maxTokens, float temperature, float topP, int32_t topK, float repeatPenalty,
+    uint32_t used, uint32_t contextSize) {
+
+    // Without a repetition penalty, a small quantized model that starts
+    // echoing a phrase has nothing pushing it out of the loop — top-k/top-p
+    // still rate the repeated token highly, so it keeps winning. That
+    // matches degenerating/repeating output seen on-device far better than
+    // any single-turn decoding bug does, and left unchecked it runs the
+    // decode loop out to maxTokens instead of stopping, which is what a long
+    // hang before "no response" looks like from the Kotlin side.
+    llama_sampler *sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+        llama_vocab_n_tokens(session->vocab), PENALTY_LAST_N, repeatPenalty, 0.0f, 0.0f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(topK));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+    DecodeLoopResult result;
+    // Bytes held back because they end mid-codepoint — see endsOnCompleteUtf8.
+    std::string pendingUtf8;
+    while (result.produced < maxTokens && used + 1 < contextSize) {
+        if (session->cancelled.load()) break;
+
+        llama_token token = llama_sampler_sample(sampler, session->ctx, -1);
+        if (llama_vocab_is_eog(session->vocab, token)) break;
+
+        pendingUtf8 += pieceOf(session->vocab, token);
+        if (!pendingUtf8.empty() && endsOnCompleteUtf8(pendingUtf8)) {
+            jstring value = env->NewStringUTF(pendingUtf8.c_str());
+            env->CallVoidMethod(callback, onToken, value);
+            env->DeleteLocalRef(value);
+            pendingUtf8.clear();
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                break;
+            }
+        }
+
+        if (llama_decode(session->ctx, llama_batch_get_one(&token, 1)) != 0) break;
+        result.generatedTokens.push_back(token);
+        result.produced++;
+        used++;
+    }
+
+    llama_sampler_free(sampler);
+    return result;
+}
+
 } // namespace
 
 extern "C" {
@@ -329,6 +400,7 @@ JNIEXPORT void JNICALL
 Java_ai_localstudio_app_llama_LlamaBridge_nativeFree(JNIEnv *, jobject, jlong handle) {
     auto *session = reinterpret_cast<Session *>(handle);
     if (session == nullptr) return;
+    if (session->mctx != nullptr) mtmd_free(session->mctx);
     if (session->ctx != nullptr) llama_free(session->ctx);
     if (session->model != nullptr) llama_model_free(session->model);
     delete session;
@@ -453,65 +525,153 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     }
     session->prefillMs = nowMs() - prefillStart;
 
-    // Without a repetition penalty, a small quantized model that starts
-    // echoing a phrase has nothing pushing it out of the loop — top-k/top-p
-    // still rate the repeated token highly, so it keeps winning. That
-    // matches degenerating/repeating output seen on-device far better than
-    // any single-turn decoding bug does, and left unchecked it runs the
-    // decode loop out to maxTokens instead of stopping, which is what a long
-    // hang before "no response" looks like from the Kotlin side.
-    llama_sampler *sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
-        llama_vocab_n_tokens(session->vocab), PENALTY_LAST_N, repeatPenalty, 0.0f, 0.0f));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(topK));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1));
-    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
-    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
-
     const int64_t decodeStart = nowMs();
-    int32_t produced = 0;
-    uint32_t used = (uint32_t) count;
-    // Only tokens that were themselves successfully decoded are actually
-    // resident in the KV cache — recorded separately from `produced` so a
-    // token that was sampled/emitted but then failed to decode (the break
-    // below) is correctly excluded from what the next call can trust as cached.
-    std::vector<llama_token> generatedTokens;
-    // Bytes held back because they end mid-codepoint — see endsOnCompleteUtf8.
-    std::string pendingUtf8;
-    while (produced < maxTokens && used + 1 < contextSize) {
-        if (session->cancelled.load()) break;
-
-        llama_token token = llama_sampler_sample(sampler, session->ctx, -1);
-        if (llama_vocab_is_eog(session->vocab, token)) break;
-
-        pendingUtf8 += pieceOf(session->vocab, token);
-        if (!pendingUtf8.empty() && endsOnCompleteUtf8(pendingUtf8)) {
-            jstring value = env->NewStringUTF(pendingUtf8.c_str());
-            env->CallVoidMethod(callback, onToken, value);
-            env->DeleteLocalRef(value);
-            pendingUtf8.clear();
-            if (env->ExceptionCheck()) {
-                env->ExceptionClear();
-                break;
-            }
-        }
-
-        if (llama_decode(session->ctx, llama_batch_get_one(&token, 1)) != 0) break;
-        generatedTokens.push_back(token);
-        produced++;
-        used++;
-    }
-
-    llama_sampler_free(sampler);
+    DecodeLoopResult result = runDecodeLoop(
+        env, session, callback, onToken, maxTokens, temperature, topP, topK, repeatPenalty,
+        (uint32_t) count, contextSize);
     session->decodeMs = nowMs() - decodeStart;
-    session->decodedTokens = produced;
+    session->decodedTokens = result.produced;
     // Whatever prompt tokens were decoded plus whichever generated tokens
     // were themselves decoded back in are what the KV cache actually holds
     // now, regardless of which of the above paths (EOG, maxTokens, cancelled)
     // stopped the loop.
     session->cachedTokens.assign(tokens.begin(), tokens.begin() + count);
-    session->cachedTokens.insert(session->cachedTokens.end(), generatedTokens.begin(), generatedTokens.end());
-    return produced;
+    session->cachedTokens.insert(session->cachedTokens.end(), result.generatedTokens.begin(), result.generatedTokens.end());
+    return result.produced;
+}
+
+/**
+ * Loads the projector companion file a vision-capable model ships alongside
+ * its main GGUF — llama.cpp keeps the vision encoder in a separate file
+ * (mmproj), not baked into the model weights, so this is a second call after
+ * nativeLoad, not part of it. Safe to skip: a model with no projector on
+ * disk simply never gets this called, and behaves exactly as it always did.
+ */
+JNIEXPORT jboolean JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadMmproj(
+    JNIEnv *env, jobject, jlong handle, jstring mmprojPath, jint threads) {
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr || session->model == nullptr) return JNI_FALSE;
+    if (session->mctx != nullptr) return JNI_TRUE; // already loaded for this session
+
+    const std::string path = toStdString(env, mmprojPath);
+    mtmd_context_params params = mtmd_context_params_default();
+    // Matches nativeLoad's n_gpu_layers = 0: this build is CPU-only, no
+    // per-vendor Android GPU backend to offload the vision encoder to either.
+    params.use_gpu = false;
+    params.n_threads = threads;
+
+    mtmd_context *mctx = mtmd_init_from_file(path.c_str(), session->model, params);
+    if (mctx == nullptr) {
+        LOGE("failed to load mmproj from %s", path.c_str());
+        return JNI_FALSE;
+    }
+    if (!mtmd_support_vision(mctx)) {
+        // A real file that loaded cleanly but isn't actually an image
+        // projector for this model — wrong file, not a broken one. Reported
+        // as a load failure either way: there is nothing useful to do with
+        // an mctx that cannot encode images.
+        LOGE("mmproj %s loaded but reports no vision support", path.c_str());
+        mtmd_free(mctx);
+        return JNI_FALSE;
+    }
+    session->mctx = mctx;
+    LOGI("mmproj loaded from %s", path.c_str());
+    return JNI_TRUE;
+}
+
+/**
+ * Same shape as nativeGenerate, for a turn with exactly one attached image.
+ * Deliberately a separate entry point rather than an optional-image branch
+ * inside nativeGenerate: the prompt-caching machinery there (commonPrefixLen
+ * against session->cachedTokens) operates on a plain llama_token vector,
+ * which an image chunk's embeddings are not representable as — mixing the
+ * two would mean either corrupting that cache or silently disabling it for
+ * every text-only turn too. This path always starts the KV cache clean.
+ *
+ * Takes the raw image bytes, not a file path: the Kotlin side already holds
+ * an attached image as a decoded byte array (ImageRef carries a `data:`
+ * URI, built that way so the cloud vision path — core/openai, plain JVM,
+ * no Android Context — never needs to resolve a content:// URI itself).
+ * Reusing that same representation here avoids a second, file-based
+ * encoding existing solely for this path.
+ */
+JNIEXPORT jint JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
+    JNIEnv *env, jobject, jlong handle, jstring systemPrompt, jstring userPrompt, jbyteArray imageBytes,
+    jint maxTokens, jfloat temperature, jfloat topP, jint topK, jfloat repeatPenalty,
+    jobject callback) {
+
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr) return -1;
+    if (session->mctx == nullptr) return -6; // no projector loaded for this model
+    session->cancelled.store(false);
+    raiseThreadPriority();
+
+    jclass callbackClass = env->GetObjectClass(callback);
+    jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
+    if (onToken == nullptr) return -2;
+
+    const jsize imageLen = env->GetArrayLength(imageBytes);
+    jbyte *imageData = env->GetByteArrayElements(imageBytes, nullptr);
+    mtmd_helper_bitmap_wrapper wrapper = mtmd_helper_bitmap_init_from_buf(
+        session->mctx, reinterpret_cast<const unsigned char *>(imageData), (size_t) imageLen, false);
+    env->ReleaseByteArrayElements(imageBytes, imageData, JNI_ABORT); // read-only access, nothing to write back
+    if (wrapper.bitmap == nullptr) {
+        LOGE("could not decode attached image (%d bytes)", (int) imageLen);
+        return -7;
+    }
+    if (wrapper.video_ctx != nullptr) mtmd_helper_video_free(wrapper.video_ctx); // not used for a still image
+    mtmd::bitmap bmp(wrapper.bitmap);
+
+    // The marker is where mtmd_tokenize splits the prompt into a text chunk,
+    // an image chunk, and another text chunk — placed before the question so
+    // the model reads the image, then what it was asked about it, matching
+    // how the same request would read for a vision-capable cloud model.
+    const std::string userWithMarker = std::string(mtmd_default_marker()) + "\n" + toStdString(env, userPrompt);
+    const std::string prompt = applyChatTemplate(session->model, toStdString(env, systemPrompt), userWithMarker);
+
+    mtmd_input_text text{prompt.c_str(), prompt.size(), true, true};
+    mtmd::input_chunks chunks(mtmd_input_chunks_init());
+    std::vector<const mtmd_bitmap *> bitmaps = {bmp.ptr.get()};
+    const int32_t tokenizeResult = mtmd_tokenize(session->mctx, chunks.ptr.get(), &text, bitmaps.data(), bitmaps.size());
+    if (tokenizeResult != 0) {
+        LOGE("mtmd_tokenize failed with code %d", tokenizeResult);
+        return -8;
+    }
+
+    // No prefix reuse — see this function's own doc comment. Also clears
+    // session->cachedTokens so a *later* plain-text turn does not try to
+    // match a prefix against tokens this turn never actually decoded via
+    // the plain path.
+    llama_memory_seq_rm(llama_get_memory(session->ctx), 0, 0, -1);
+    session->cachedTokens.clear();
+
+    const int64_t prefillStart = nowMs();
+    session->promptTokens = (int32_t) mtmd_helper_get_n_tokens(chunks.ptr.get());
+    session->reusedTokens = 0;
+    llama_pos newNPast = 0;
+    const int32_t evalResult = mtmd_helper_eval_chunks(
+        session->mctx, session->ctx, chunks.ptr.get(), /*n_past=*/0, /*seq_id=*/0,
+        BATCH_SIZE, /*logits_last=*/true, &newNPast);
+    session->prefillMs = nowMs() - prefillStart;
+    if (evalResult != 0) {
+        LOGE("mtmd_helper_eval_chunks failed with code %d", evalResult);
+        return -9;
+    }
+
+    const uint32_t contextSize = llama_n_ctx(session->ctx);
+    const int64_t decodeStart = nowMs();
+    DecodeLoopResult result = runDecodeLoop(
+        env, session, callback, onToken, maxTokens, temperature, topP, topK, repeatPenalty,
+        (uint32_t) newNPast, contextSize);
+    session->decodeMs = nowMs() - decodeStart;
+    session->decodedTokens = result.produced;
+    // cachedTokens stays empty: an image turn's prompt tokens are chunk
+    // embeddings, not the plain llama_token vector prefix reuse compares
+    // against, so there is nothing valid to record as a reusable prefix —
+    // the next turn (image or plain text) redecodes from scratch either way.
+    return result.produced;
 }
 
 } // extern "C"

@@ -33,6 +33,8 @@ class ModelDownloads(
      * Android services or notifications.
      */
     private val onDownloadStarted: () -> Unit = {},
+    /** Best-effort mmproj download failures go here rather than surfacing as the model's own DownloadState.Failed — see [downloadMmproj]. */
+    private val appLogForMmproj: ((String) -> Unit)? = null,
 ) {
 
     private val states = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
@@ -91,12 +93,45 @@ class ModelDownloads(
                     return@launch
                 }
 
+                if (seed.mmprojFileName != null) downloadMmproj(seed, downloader)
+
                 publish(seed, DownloadState.Installed)
             } catch (e: Exception) {
                 publish(seed, DownloadState.Failed(e.message ?: e.toString()))
             } finally {
                 downloaders.remove(seed.id)
             }
+        }
+    }
+
+    /**
+     * Best-effort: failure here does not fail [start] as a whole. The main
+     * GGUF is a model this app cannot run at all without; the projector is a
+     * bonus capability on top of an already-usable model, so a bad network
+     * blip, a renamed file, or a gated companion repo should leave the user
+     * with a working text-only model rather than no model — exactly the
+     * failure mode a hard [resolveAny]-style throw here would produce.
+     */
+    private suspend fun downloadMmproj(seed: LocalModelSeed, downloader: ModelDownloader) {
+        val fileName = seed.mmprojFileName ?: return
+        val resolved = HuggingFaceResolver.resolveExact(seed.repoIds, fileName, tokenProvider())
+        if (resolved == null) {
+            appLogForMmproj?.invoke("$fileName not found in any of ${seed.repoIds}")
+            return
+        }
+        val (source, file) = resolved
+        publish(seed, DownloadState.Running(DownloadProgress(store.mmprojFileFor(seed).length(), file.sizeBytes), source))
+        runCatching {
+            downloader.download(
+                url = file.downloadUrl,
+                destination = store.mmprojFileFor(seed),
+                tempFile = store.mmprojPartFor(seed),
+            ) { progress -> publish(seed, DownloadState.Running(progress, source)) }
+        }.onFailure {
+            // A corrupt or half-downloaded projector must not look installed —
+            // ModelStore.hasMmproj checks file presence, not validity beyond size.
+            store.mmprojFileFor(seed).delete()
+            appLogForMmproj?.invoke("mmproj download failed for ${seed.id}: ${it.message}")
         }
     }
 

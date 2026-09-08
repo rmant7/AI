@@ -33,7 +33,27 @@ class ModelStore(private val context: Context) {
     fun delete(seed: LocalModelSeed) {
         fileFor(seed).delete()
         partFor(seed).delete()
+        mmprojFileFor(seed).delete()
+        mmprojPartFor(seed).delete()
     }
+
+    /**
+     * A vision-capable model's projector, downloaded and named separately
+     * from its main GGUF — llama.cpp keeps the two apart, and this app
+     * mirrors that rather than trying to merge them into one file.
+     */
+    fun mmprojFileFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.mmproj.gguf")
+
+    fun mmprojPartFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.mmproj.gguf.part")
+
+    /**
+     * True once the projector is actually on disk, not just declared by the
+     * seed — a model whose main GGUF finished but whose (much smaller,
+     * best-effort) projector download failed is still usable, just
+     * text-only, and this is what [LlamaCppRuntime] checks to know which.
+     */
+    fun hasMmproj(seed: LocalModelSeed): Boolean =
+        seed.mmprojFileName != null && mmprojFileFor(seed).let { it.isFile && it.length() > 0 }
 
     fun freeSpaceBytes(): Long = directory().freeSpace
 

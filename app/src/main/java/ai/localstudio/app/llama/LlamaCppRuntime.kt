@@ -122,7 +122,19 @@ class LlamaCppRuntime(
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
         log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms")
-        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, log)
+
+        // Best-effort, and only if a projector was actually downloaded for
+        // this model (see ModelStore.hasMmproj) — a model with none behaves
+        // exactly as it always did, text-only.
+        val hasVision = binding.mmprojArtifact?.let { mmprojPath ->
+            nativeOpMutex.withLock {
+                runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
+            }.also { loaded ->
+                log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} from $mmprojPath")
+            }
+        } ?: false
+
+        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, log)
     }
 }
 
@@ -131,6 +143,8 @@ private class LlamaTextModel(
     override val ramBytes: Long,
     private val bridge: LlamaBridge,
     private val handle: Long,
+    /** Whether [LlamaBridge.nativeLoadMmproj] succeeded for this handle — see [generate]. */
+    private val hasVision: Boolean,
     private val log: (tag: String, message: String) -> Unit,
 ) : TextModelHandle {
 
@@ -150,7 +164,12 @@ private class LlamaTextModel(
         var tokenCount = 0
         var firstTokenLogged = false
         val completed = AtomicBoolean(false)
-        log("LOCAL_GENERATE", "$modelId: starting (prompt=${request.prompt.length} chars, maxTokens=${request.maxTokens})")
+        val image = request.images.firstOrNull().takeIf { hasVision }
+        log(
+            "LOCAL_GENERATE",
+            "$modelId: starting (prompt=${request.prompt.length} chars, maxTokens=${request.maxTokens}" +
+                (if (image != null) ", with image" else "") + ")",
+        )
 
         val sink = object : LlamaBridge.TokenSink {
             override fun onToken(text: String) {
@@ -179,17 +198,43 @@ private class LlamaTextModel(
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
             }
             val produced = nativeOpMutex.withLock {
-                bridge.nativeGenerate(
-                    handle = handle,
-                    systemPrompt = request.systemPrompt,
-                    userPrompt = request.prompt,
-                    maxTokens = request.maxTokens,
-                    temperature = request.temperature.toFloat(),
-                    topP = request.topP.toFloat(),
-                    topK = request.topK,
-                    repeatPenalty = request.repeatPenalty.toFloat(),
-                    callback = sink,
-                )
+                if (image != null) {
+                    // ImageRef.uri is always a "data:<mime>;base64,<payload>" string
+                    // here, never a content:// or file path — ChatActivity.attachImage()
+                    // builds it that way specifically because core/openai are plain JVM
+                    // modules with no Android Context to resolve a real URI against.
+                    val imageBytes = runCatching {
+                        android.util.Base64.decode(image.uri.substringAfter(",", ""), android.util.Base64.NO_WRAP)
+                    }.getOrNull()
+                    if (imageBytes == null || imageBytes.isEmpty()) {
+                        -1
+                    } else {
+                        bridge.nativeGenerateWithImage(
+                            handle = handle,
+                            systemPrompt = request.systemPrompt,
+                            userPrompt = request.prompt,
+                            imageBytes = imageBytes,
+                            maxTokens = request.maxTokens,
+                            temperature = request.temperature.toFloat(),
+                            topP = request.topP.toFloat(),
+                            topK = request.topK,
+                            repeatPenalty = request.repeatPenalty.toFloat(),
+                            callback = sink,
+                        )
+                    }
+                } else {
+                    bridge.nativeGenerate(
+                        handle = handle,
+                        systemPrompt = request.systemPrompt,
+                        userPrompt = request.prompt,
+                        maxTokens = request.maxTokens,
+                        temperature = request.temperature.toFloat(),
+                        topP = request.topP.toFloat(),
+                        topK = request.topK,
+                        repeatPenalty = request.repeatPenalty.toFloat(),
+                        callback = sink,
+                    )
+                }
             }
             completed.set(true)
             val elapsedMs = System.currentTimeMillis() - start

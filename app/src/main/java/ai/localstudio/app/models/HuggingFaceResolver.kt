@@ -86,6 +86,31 @@ object HuggingFaceResolver {
         )
     }
 
+    /**
+     * Looks for one exact file name across a list of repos — used for a
+     * vision projector (mmproj), which carries no quant tag [ArtifactResolver]
+     * could match on and would otherwise have to be guessed at.
+     *
+     * Returns null rather than throwing on a total miss: a projector is a
+     * bonus, not a requirement, so a missing or renamed one should leave the
+     * model itself installable and usable, just without vision — never fail
+     * the whole download the way [resolveAny] does for the main GGUF.
+     */
+    fun resolveExact(repoIds: List<String>, fileName: String, token: String? = null): Pair<String, ResolvedModelFile>? {
+        for (repoId in repoIds) {
+            val match = runCatching { fetchTree(repoId, token) }
+                .getOrNull()
+                ?.firstOrNull { it.path.substringAfterLast('/') == fileName }
+                ?: continue
+            return repoId to ResolvedModelFile(
+                fileName = fileName,
+                sizeBytes = match.sizeBytes,
+                downloadUrl = "https://huggingface.co/$repoId/resolve/main/${match.path}",
+            )
+        }
+        return null
+    }
+
     private fun fetchTree(repoId: String, token: String?): List<RemoteArtifact> {
         val connection = (URI.create("$API/$repoId/tree/main?recursive=false").toURL()
             .openConnection() as HttpURLConnection).apply {

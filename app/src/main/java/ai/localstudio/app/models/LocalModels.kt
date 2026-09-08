@@ -25,6 +25,18 @@ data class LocalModelSeed(
     val approxSizeBytes: Long,
     val capabilities: Set<Capability> = setOf(Capability.TEXT_GENERATION, Capability.REASONING),
     val contextTokens: Int = 4096,
+    /**
+     * The exact name of this model's vision-encoder companion file in the
+     * same repo(s), when it has one — llama.cpp keeps it separate from the
+     * main GGUF ("mmproj"), so this is a second download, not a variant of
+     * the first. Resolved by exact name, not [ArtifactResolver]'s quant
+     * heuristic: a repo's mmproj file doesn't carry a quant tag to match on,
+     * and guessing among a repo's other files risked grabbing the wrong one
+     * silently. Null means "this seed has no known projector" — the model
+     * still downloads and runs, just text-only, exactly as before this field
+     * existed.
+     */
+    val mmprojFileName: String? = null,
 )
 
 object LocalModels {
@@ -45,8 +57,16 @@ object LocalModels {
                 "unsloth/gemma-4-E4B-it-GGUF",
             ),
             paramsLabel = "E4B · Q4",
-            note = "Новейшая Gemma; сопоставима по размеру с Gemma 3 4B.",
+            note = "Новейшая Gemma; сопоставима по размеру с Gemma 3 4B. Понимает прикреплённые изображения.",
             approxSizeBytes = 2_600_000_000,
+            // Confirmed present in this exact repo (unsloth/gemma-4-E4B-it-GGUF/
+            // blob/main/mmproj-F16.gguf) rather than assumed from a naming
+            // convention — the same mistake that cost real debugging time
+            // elsewhere in this app's history (a wrongly-guessed exact file
+            // name for a different runtime). Picked as the pilot for on-device
+            // vision precisely because this model is already in the catalog
+            // and already confirmed working text-only.
+            mmprojFileName = "mmproj-F16.gguf",
         ),
         LocalModelSeed(
             id = "gemma-4-12b-it-q4",

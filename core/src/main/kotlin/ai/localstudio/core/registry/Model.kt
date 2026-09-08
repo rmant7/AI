@@ -77,6 +77,13 @@ data class RuntimeBinding(
     val requiresNpu: Boolean = false,
     val minAndroidApi: Int = 0,
     val referenceTokensPerSecond: Double? = null,
+    /**
+     * Path to a downloaded vision-encoder companion file (llama.cpp's
+     * "mmproj"), when this model has one installed. Null for every model
+     * without vision support and for one whose projector simply hasn't been
+     * downloaded — the runtime treats both the same way: text-only.
+     */
+    val mmprojArtifact: String? = null,
 ) {
     init {
         require(fileSizeBytes > 0) { "fileSizeBytes must be positive for $artifact" }

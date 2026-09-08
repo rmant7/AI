@@ -173,6 +173,7 @@ class AppContainer private constructor(private val context: Context) {
         modelStore,
         tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+        appLogForMmproj = { message -> appLog.record("MMPROJ_DOWNLOAD", message) },
     )
 
     val whisperStore = WhisperStore(context)
@@ -559,6 +560,8 @@ class AppContainer private constructor(private val context: Context) {
                             // Left unmeasured on purpose: effectiveRequiredRamBytes
                             // then errs high, which is the safe direction here.
                             requiredRamBytes = null,
+                            mmprojArtifact = modelStore.mmprojFileFor(seed).absolutePath
+                                .takeIf { modelStore.hasMmproj(seed) },
                         ),
                     ),
                 ),
