@@ -64,6 +64,22 @@ class ChatActivity : AppCompatActivity() {
     // later message the way a document's extracted text is kept in memory.
     private var pendingImage: ImageRef? = null
 
+    /**
+     * Documents attached during *this* open chat, not [AppContainer]'s whole
+     * shared library (container.documents.list(), which is genuinely global
+     * across every chat — see FilesActivity's own doc comment). That
+     * distinction used to not matter: attachedDocuments only ever produced a
+     * one-line "user attached these files" mention. It started mattering the
+     * moment a document's actual extracted content began being force-fetched
+     * every turn (see NodeExecutors.contextBuild) — the global list would
+     * have force-fed an unrelated PDF from a *different* chat, attached
+     * hours or days earlier, into every unrelated turn of this one, and did
+     * exactly that on a real device before this existed: asked about an
+     * attached photo, the local model brought up "no information in the
+     * provided PDF" — a file this conversation never even attached.
+     */
+    private val sessionDocumentNames = mutableListOf<String>()
+
     private val pickDocument = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
             val mimeType = contentResolver.getType(it).orEmpty()
@@ -196,8 +212,7 @@ class ChatActivity : AppCompatActivity() {
         }
 
         MENU_CLEAR -> {
-            adapter.clear()
-            conversationId = "chat-" + System.currentTimeMillis()
+            startNewConversation()
             true
         }
 
@@ -240,6 +255,8 @@ class ChatActivity : AppCompatActivity() {
     private fun startNewConversation() {
         adapter.clear()
         conversationId = "chat-" + System.currentTimeMillis()
+        sessionDocumentNames.clear()
+        updateStatus()
     }
 
     private fun openConversation(conversation: Conversation) {
@@ -247,6 +264,13 @@ class ChatActivity : AppCompatActivity() {
         adapter.clear()
         conversation.messages.forEach { adapter.add(it.toMessage()) }
         binding.messages.scrollToPosition((adapter.itemCount - 1).coerceAtLeast(0))
+        // Which documents were attached during this conversation isn't
+        // persisted (see sessionDocumentNames' own comment) — reopening it
+        // starts with none "active", falling back to ordinary lexical
+        // memory search for anything attached here previously rather than
+        // force-including it again.
+        sessionDocumentNames.clear()
+        updateStatus()
     }
 
     private fun persist() {
@@ -277,7 +301,14 @@ class ChatActivity : AppCompatActivity() {
         // right now, independent of which providers are actually enabled —
         // showing a Gemini model name while only local was enabled was that
         // mismatch, not a sign the router itself was using Gemini.
-        binding.statusText.text = "${container.activeModelName} · ${container.runtimeLabel} · $memory"
+        val files = if (sessionDocumentNames.isEmpty()) {
+            ""
+        } else {
+            " · " + resources.getQuantityString(
+                R.plurals.chat_status_files, sessionDocumentNames.size, sessionDocumentNames.size,
+            )
+        }
+        binding.statusText.text = "${container.activeModelName} · ${container.runtimeLabel} · $memory$files"
     }
 
     private fun send() {
@@ -295,7 +326,7 @@ class ChatActivity : AppCompatActivity() {
         // text on top of that turned attaching something into two steps
         // where one should do, and the second one added nothing the
         // attachment didn't already say.
-        val hasAttachment = pendingImage != null || container.documents.list().isNotEmpty()
+        val hasAttachment = pendingImage != null || sessionDocumentNames.isNotEmpty()
         if (text.isEmpty() && !hasAttachment) return
 
         binding.input.setText("")
@@ -315,7 +346,7 @@ class ChatActivity : AppCompatActivity() {
             .filterNot { it.isError }
             .takeLast(MAX_HISTORY_TURNS)
             .map { ConversationTurn(it.role, it.body) }
-        val attachedDocuments = container.documents.list().map { it.name }
+        val attachedDocuments = sessionDocumentNames.toList()
         // Cleared immediately, same as the text field above: this turn owns
         // whatever was staged, and a lingering thumbnail after sending would
         // read as "still attached" for the next message too.
@@ -571,6 +602,7 @@ class ChatActivity : AppCompatActivity() {
                 .onSuccess { chunks ->
                     container.rememberDocument(name, chunks)
                     container.settings.memoryEnabled = true
+                    if (name !in sessionDocumentNames) sessionDocumentNames += name
                     invalidateOptionsMenu()
                     updateStatus()
                     Toast.makeText(this@ChatActivity, getString(R.string.chat_attach_added, name, chunks.size), Toast.LENGTH_SHORT).show()

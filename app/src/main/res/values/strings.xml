@@ -2,6 +2,20 @@
 <resources>
     <string name="app_name">Local AI Studio</string>
 
+    <!--
+        How many documents are attached to *this* chat — see
+        ChatActivity.sessionDocumentNames. Answers "which files, in which
+        chat": before this there was no on-screen sign a document was in
+        play at all, cloud-shared across every conversation with no way to
+        tell whether the current one saw it.
+    -->
+    <plurals name="chat_status_files">
+        <item quantity="one">%d файл</item>
+        <item quantity="few">%d файла</item>
+        <item quantity="many">%d файлов</item>
+        <item quantity="other">%d файла</item>
+    </plurals>
+
     <string name="chat_hint">Спросите что-нибудь…</string>
     <string name="send">Отправить</string>
     <string name="chat_stop">Остановить</string>
