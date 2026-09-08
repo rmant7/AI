@@ -346,24 +346,39 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * One [Orchestrator] per enabled provider, each wired to exactly one
-     * candidate — for [Settings.compareMode]'s parallel fan-out, where every
-     * enabled source generates independently instead of being tried in
-     * fallback order. Only the primary model per cloud provider is used
-     * (not its whole free-tier rotation): compare mode already means N
-     * simultaneous requests, not N × rotation-size of them.
+     * One [Orchestrator] per enabled provider, for [Settings.compareMode]'s
+     * parallel fan-out: every enabled source generates independently rather
+     * than sources being tried in fallback order against each other.
+     *
+     * Each source still gets its provider's whole free-tier rotation as an
+     * internal chain. This used to take only the primary model, on the
+     * grounds that compare mode is already N simultaneous requests and
+     * should not become N × rotation-size of them — but a rotation is tried
+     * *sequentially, on failure*, so it never adds a single concurrent
+     * request. What the shortcut did instead was leave a source with nothing
+     * to fall through to: a Gemini 503 ("high demand") became the visible
+     * answer for that bubble, with no attempt at the next free model. Worse,
+     * [FallbackCandidate.onFailure] is only ever invoked by
+     * [FallbackTextRuntime], so with a lone candidate the 503 cooldown in
+     * [cloudCandidates] never fired either and the next message went
+     * straight back to the same overloaded model.
      */
     fun compareCandidates(): List<Pair<String, Orchestrator>> =
         enabledProviders().mapNotNull { provider ->
-            val candidate = if (provider.id == CloudProviders.LOCAL.id) {
-                localCandidate()
+            val candidates = if (provider.id == CloudProviders.LOCAL.id) {
+                listOfNotNull(localCandidate())
             } else {
-                cloudCandidates(provider).firstOrNull()
+                cloudCandidates(provider)
             }
-            candidate?.let { c ->
-                val isLocalOnly = c.binding.runtime == RuntimeKind.LLAMA_CPP
-                c.label to buildOrchestrator(c.runtime, isLocalOnly, listOf(c))
-            }
+            if (candidates.isEmpty()) return@mapNotNull null
+            val runtime: ModelRuntime = candidates.singleOrNull()?.runtime ?: FallbackTextRuntime(candidates)
+            // The specific model that answered is still named, by
+            // FallbackTextRuntime's own "Ответ от:" footer — this is just the
+            // bubble's heading, which should stay the provider for a chain
+            // rather than claim whichever model happens to lead the rotation.
+            val label = candidates.singleOrNull()?.label ?: provider.title
+            val isLocalOnly = candidates.all { it.binding.runtime.isLocalRuntime() }
+            label to buildOrchestrator(runtime, isLocalOnly, candidates)
         }
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
