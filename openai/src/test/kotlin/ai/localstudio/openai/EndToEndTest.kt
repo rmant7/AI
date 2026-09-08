@@ -112,7 +112,10 @@ class EndToEndTest {
         val sent = server.requests.single { it.path == "/v1/chat/completions" }.text
         assertContains(sent, "Чем capability отличается от модели?")
         assertContains(sent, "Ты локальный ассистент")
-        assertContains(sent, "[SYSTEM]")
+        // Exactly once, as a system-role message — it used to also be
+        // repeated inside the user turn as a "## Инструкции" section.
+        assertContains(sent, "\"role\":\"system\"")
+        assertEquals(1, Regex("Ты локальный ассистент").findAll(sent).count())
     }
 
     @Test
@@ -155,7 +158,7 @@ class EndToEndTest {
         assertTrue(NodeType.MEMORY_SEARCH in second.pipeline.nodes.map { it.type })
         val prompt = server.requests.last { it.path == "/v1/chat/completions" }.text
         assertContains(prompt, "capability registry")
-        assertContains(prompt, "EPISODIC_MEMORY")
+        assertContains(prompt, "## Из прошлых разговоров")
     }
 
     @Test

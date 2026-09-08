@@ -164,7 +164,15 @@ class NodeExecutors(
 
     private fun contextBuild() = NodeExecutor { _, inputs, context ->
         val fragments = mutableListOf<ContextFragment>()
-        systemPrompt?.let { fragments += ContextFragment(FragmentSource.SYSTEM, it) }
+        // Deliberately *not* also added as a SYSTEM fragment here. Every
+        // runtime already receives it as GenerationRequest.systemPrompt and
+        // puts it where that runtime's API wants it — a "system" role message
+        // for an OpenAI-compatible endpoint, the system slot of the model's
+        // own chat template for llama.cpp. Adding it to the context as well
+        // sent it twice in the same request, once properly and once as a
+        // heading inside the user turn, paying for those tokens on every
+        // turn and giving the model the same instructions in two places at
+        // two different levels of authority.
 
         // The ordinary "does the model remember what I just said" case — as
         // opposed to MEMORY_SEARCH, which only runs for an explicit recall

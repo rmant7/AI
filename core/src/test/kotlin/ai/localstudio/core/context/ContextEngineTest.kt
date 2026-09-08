@@ -51,10 +51,14 @@ class ContextEngineTest {
         ).render()
 
         assertTrue(
-            rendered.endsWith("[USER_MESSAGE]\nПодробнее"),
+            rendered.endsWith("\n\nПодробнее"),
             "the prompt must end on the question, not on background material — got:\n$rendered",
         )
-        assertTrue(rendered.startsWith("[SYSTEM]\n"), "instructions belong at the top — got:\n$rendered")
+        assertTrue(rendered.startsWith("## Инструкции\n"), "instructions belong at the top — got:\n$rendered")
+        assertTrue(
+            !rendered.contains("[USER_MESSAGE]") && !rendered.contains("[SYSTEM]"),
+            "bracketed section markers are what the model was mimicking — got:\n$rendered",
+        )
     }
 
     @Test
@@ -144,7 +148,9 @@ class ContextEngineTest {
             contextWindowTokens = 4096,
         ).render()
 
-        assertEquals("[SYSTEM]\nrules\n\n[VOICE]\nнайди модели", rendered)
+        // An explicit label still wins over the source's own heading; the
+        // system section keeps a heading, and both stay bracket-free.
+        assertEquals("## Инструкции\nrules\n\n## VOICE\nнайди модели", rendered)
     }
 
     @Test

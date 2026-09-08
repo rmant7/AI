@@ -122,11 +122,6 @@ class LlamaCppRuntime(
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
         log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms")
-        // Logged per load, not per turn: it is the same answer every time for
-        // a given model, and it is the first thing worth checking when a
-        // model answers something other than what it was asked.
-        runCatching { bridge.nativeChatTemplateInfo(handle) }
-            .onSuccess { log("LOCAL_LOAD", "${file.name}: chat template $it") }
         return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, log)
     }
 }
@@ -147,6 +142,9 @@ private class LlamaTextModel(
     // call is using out from under it.
     private val activeWorker = AtomicReference<Job?>(null)
 
+    /** So the chat-template line lands in the log once per model, not once per turn. */
+    private val templateLogged = AtomicBoolean(false)
+
     override fun generate(request: GenerationRequest): Flow<String> = callbackFlow {
         val start = System.currentTimeMillis()
         var tokenCount = 0
@@ -159,6 +157,15 @@ private class LlamaTextModel(
                 if (!firstTokenLogged) {
                     firstTokenLogged = true
                     log("LOCAL_GENERATE", "$modelId: first token after ${System.currentTimeMillis() - start}ms")
+                    // Once per model, and here rather than at load time:
+                    // asked before the first turn it can only report "not
+                    // attempted yet", which is precisely the part worth
+                    // knowing — whether this model's own turn markers were
+                    // really used, or a fallback scaffold stood in for them.
+                    if (templateLogged.compareAndSet(false, true)) {
+                        runCatching { bridge.nativeChatTemplateInfo(handle) }
+                            .onSuccess { log("LOCAL_GENERATE", "$modelId: chat template $it") }
+                    }
                 }
                 tokenCount++
                 trySend(text)

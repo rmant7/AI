@@ -61,7 +61,7 @@ class FakeTextModel(
 
     override fun generate(request: GenerationRequest): Flow<String> {
         onPrompt(request.prompt)
-        val sections = request.prompt.lines().count { it.startsWith("[") }
+        val sections = request.prompt.lines().count { it.startsWith("## ") }
         return flowOf("ответ ", "по ", "$sections ", "секциям")
     }
 

@@ -43,13 +43,26 @@ data class AssembledContext(
     val images: List<ImageRef> = emptyList(),
 ) {
     /**
-     * The prompt as the model sees it: labelled sections, ordered so the
-     * user's actual question is the last thing before the model's own turn
-     * begins — see [FragmentSource.renderOrder] for why that matters.
+     * The prompt as the model sees it.
+     *
+     * Two rules, both learned from a model answering something other than
+     * what it was asked. Ordered so the user's question is last, right
+     * before the model's own turn begins (see [FragmentSource.renderOrder]);
+     * and the question itself carries no heading at all, so the turn ends on
+     * a plain question rather than on another labelled section.
+     *
+     * That second rule is why the headings are prose rather than the
+     * `[SYSTEM]`-style brackets this used to emit. With brackets, a model
+     * whose own chat template was applied correctly — verified present, 18k
+     * characters of it — still treated the turn as a structured document to
+     * continue: it reproduced `[SYSTEM]` and `[CONVERSATION]` sections of
+     * its own and invented an `[ASSISTANT_MESSAGE]` label to write its
+     * answer under. Section markers that look like a template invite the
+     * model to keep filling the template in.
      */
     fun render(): String = fragments.joinToString("\n\n") { fragment ->
-        val label = fragment.label ?: fragment.source.name
-        "[$label]\n${fragment.text}"
+        val heading = fragment.label ?: fragment.source.heading()
+        if (heading == null) fragment.text else "## $heading\n${fragment.text}"
     }
 }
 
@@ -148,6 +161,28 @@ private fun FragmentSource.defaultPriority(): Int = when (this) {
     FragmentSource.SEMANTIC_MEMORY -> 50
     FragmentSource.KNOWLEDGE -> 40
     FragmentSource.EPISODIC_MEMORY -> 30
+}
+
+/**
+ * The heading this section is introduced by, or null for a section that is
+ * shown bare.
+ *
+ * The user's own question — typed or spoken — is the null case, and that is
+ * the point: it is rendered last (see [renderOrder]) with nothing wrapped
+ * around it, so the user's turn ends on the question itself. A heading there
+ * would put one more piece of document structure between the question and
+ * the model's turn, which is exactly what a model was observed continuing
+ * instead of answering.
+ */
+private fun FragmentSource.heading(): String? = when (this) {
+    FragmentSource.USER_MESSAGE, FragmentSource.TRANSCRIPT -> null
+    FragmentSource.SYSTEM -> "Инструкции"
+    FragmentSource.KNOWLEDGE -> "Прикреплённые материалы"
+    FragmentSource.SEMANTIC_MEMORY -> "Из прошлых разговоров"
+    FragmentSource.EPISODIC_MEMORY -> "Из прошлых разговоров"
+    FragmentSource.CONVERSATION -> "Ранее в этом разговоре"
+    FragmentSource.TOOL_RESULT -> "Результат инструмента"
+    FragmentSource.VISION -> "На изображении"
 }
 
 /**

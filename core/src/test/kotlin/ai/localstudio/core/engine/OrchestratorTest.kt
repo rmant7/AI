@@ -105,7 +105,11 @@ class OrchestratorTest {
 
         // FakeRuntime.generate emits four chunks — one callback per chunk,
         // each carrying everything accumulated so far, not just that chunk.
-        assertEquals(listOf("ответ ", "ответ по ", "ответ по 2 ", "ответ по 2 секциям"), seen)
+        // Zero headed sections is correct for a plain first question: the
+        // system prompt travels as GenerationRequest.systemPrompt rather
+        // than as a section, and nothing else has been recalled yet, so the
+        // prompt is the bare question.
+        assertEquals(listOf("ответ ", "ответ по ", "ответ по 0 ", "ответ по 0 секциям"), seen)
         assertEquals(seen.last(), answer.text)
     }
 

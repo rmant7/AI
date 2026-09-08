@@ -44,8 +44,8 @@ class StubRuntime : ModelRuntime {
 
         override fun generate(request: GenerationRequest): Flow<String> = flow {
             val sections = request.prompt.lines()
-                .filter { it.startsWith("[") && it.endsWith("]") }
-                .map { it.trim('[', ']') }
+                .filter { it.startsWith("## ") }
+                .map { it.removePrefix("## ") }
 
             emit("Демонстрационный режим: модель не подключена.\n\n")
             emit("Запрос прошёл всю систему. Секций в контексте: ${sections.size}")
