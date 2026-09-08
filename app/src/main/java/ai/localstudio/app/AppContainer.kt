@@ -32,6 +32,7 @@ import ai.localstudio.app.keys.PrefsApiKeyStore
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.llama.LlamaCppRuntime
+import ai.localstudio.app.litert.LiteRtBackend
 import ai.localstudio.app.litert.LiteRtRuntime
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
@@ -418,7 +419,7 @@ class AppContainer private constructor(private val context: Context) {
             // (or a mix of a tiny and a huge one, tried at different times),
             // a generic label in the log and in the answer's own attribution
             // line answered "was it local?" but not "which local model?".
-            label = "${localRuntimeTitle(selected.binding.runtime)}: ${selected.model.id}",
+            label = "${localRuntimeTitle(selected.binding.runtime, selected.binding.requiresNpu)}: ${selected.model.id}",
             runtime = runtime,
             model = selected.model,
             binding = selected.binding,
@@ -433,13 +434,17 @@ class AppContainer private constructor(private val context: Context) {
      * which used to read the static title directly and stayed wrong even
      * after the candidate's own label was fixed.
      */
-    private fun localRuntimeTitle(runtime: RuntimeKind): String = if (runtime == RuntimeKind.LITERT) {
+    private fun localRuntimeTitle(runtime: RuntimeKind, requiresNpu: Boolean = false): String = if (runtime == RuntimeKind.LITERT) {
         // The user has no other way to tell CPU/GPU/NPU apart in the UI —
         // and switching this setting used to silently not take effect on an
         // already-resident model, so a visible label matters even more than
         // usual here: it's the one place confirming which backend a given
         // answer actually came from, not just which one Settings claims.
-        "Локально на устройстве (Google Tensor SDK, ${settings.liteRtBackend.name})"
+        // A requiresNpu binding always runs on NPU regardless of that
+        // setting (see LiteRtRuntime.load) — the label says so instead of
+        // repeating whatever Settings.liteRtBackend happens to say.
+        val backendLabel = if (requiresNpu) LiteRtBackend.NPU.name else settings.liteRtBackend.name
+        "Локально на устройстве (Google Tensor SDK, $backendLabel)"
     } else {
         CloudProviders.LOCAL.title
     }
@@ -448,11 +453,11 @@ class AppContainer private constructor(private val context: Context) {
     private fun activeLocalRuntimeTitle(): String {
         val registry = localRegistry()
         val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
-        val runtime = registry.find(chosenId)
+        val binding = registry.find(chosenId)
             ?.takeIf { it.state == InstallState.INSTALLED }
-            ?.model?.bindings?.firstOrNull()?.runtime
-            ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION)?.binding?.runtime
-        return localRuntimeTitle(runtime ?: RuntimeKind.LLAMA_CPP)
+            ?.model?.bindings?.firstOrNull()
+            ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION)?.binding
+        return localRuntimeTitle(binding?.runtime ?: RuntimeKind.LLAMA_CPP, binding?.requiresNpu == true)
     }
 
     /**
@@ -591,6 +596,7 @@ class AppContainer private constructor(private val context: Context) {
                             // Left unmeasured on purpose: effectiveRequiredRamBytes
                             // then errs high, which is the safe direction here.
                             requiredRamBytes = null,
+                            requiresNpu = seed.requiresNpu,
                         ),
                     ),
                 ),
@@ -690,9 +696,25 @@ class AppContainer private constructor(private val context: Context) {
                     if (LiteRtRuntime.isAvailable) add(RuntimeKind.LITERT)
                 },
                 hasGpuDelegate = false,
+                hasNpu = isTensorG5(),
                 performanceIndex = 1.0,
                 ramBudgetFraction = ramBudgetFraction,
             )
+        }
+
+        /**
+         * Best-effort Tensor G5 detection for the one catalog entry that
+         * needs it (see LocalModels.SEEDS: gemma-4-e2b-it-litert-npu-g5).
+         * SOC_MODEL only exists from API 31, and Google has not published
+         * the exact string it returns on Pixel 10 — matched loosely rather
+         * than pinned to one guessed value, so a formatting difference fails
+         * safe (hasNpu stays false, nothing auto-recommends the NPU-only
+         * model) instead of being confidently wrong the way a hardcoded
+         * exact file name already burned this app once.
+         */
+        private fun isTensorG5(): Boolean {
+            if (Build.VERSION.SDK_INT < 31) return false
+            return runCatching { Build.SOC_MODEL }.getOrNull()?.contains("Tensor G5", ignoreCase = true) == true
         }
     }
 }

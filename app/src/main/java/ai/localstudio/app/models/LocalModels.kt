@@ -42,6 +42,17 @@ data class LocalModelSeed(
      * extension-based pick if the named file is ever renamed or missing.
      */
     val exactFileName: String? = null,
+    /**
+     * True only for a chip-specific ahead-of-time NPU build (the files
+     * [ArtifactResolver.CHIP_SPECIFIC] otherwise excludes) — [exactFileName]
+     * names it directly, which is what makes [HuggingFaceResolver] fetch it
+     * despite that exclusion. Propagated onto the installed [RuntimeBinding]
+     * so [SuitabilityScorer] never treats this as a fit for a device without
+     * the matching NPU, and so [LiteRtRuntime] knows never to fall back to
+     * CPU on it: a Tensor-G5-only file failing NPU means "wrong device", not
+     * "CPU can retry the same file."
+     */
+    val requiresNpu: Boolean = false,
 ) {
     val extension: String get() = if (runtime == RuntimeKind.LITERT) ".litertlm" else ".gguf"
 }
@@ -236,6 +247,31 @@ object LocalModels {
             approxSizeBytes = 2_583_085_056,
             runtime = RuntimeKind.LITERT,
             exactFileName = "gemma-4-E2B-it.litertlm",
+        ),
+        // The one real, confirmed exception to the CHIP_SPECIFIC exclusion
+        // above: litert-community actually publishes an ahead-of-time build
+        // compiled specifically for Tensor G5 (Pixel 10), separate from the
+        // universal file the entry above downloads. The universal file's
+        // NPU section is missing entirely — "TF_LITE_AUX not found in the
+        // model" is not a bug in this app, it is Backend.NPU being asked to
+        // run a file that was never compiled for it. This is a genuinely
+        // different artifact, so it is a separate catalog entry rather than
+        // a variant of the one above: fits within its own RAM/storage
+        // budget check, never silently swapped in for a device that can't
+        // use it, and never CPU-retried on failure (see LiteRtRuntime) since
+        // a Tensor-G5-only file failing NPU means "wrong device," not
+        // "CPU can run this same file instead."
+        LocalModelSeed(
+            id = "gemma-4-e2b-it-litert-npu-g5",
+            title = "Gemma 4 E2B IT (NPU, Tensor G5)",
+            repoIds = listOf("litert-community/gemma-4-E2B-it-litert-lm"),
+            paramsLabel = "E2B · NPU only",
+            note = "Собрана заранее под NPU/TPU Google Tensor G5 (Pixel 10) — на CPU или другом чипе не запустится. " +
+                "Используйте обычную «Gemma 4 E2B IT (Tensor SDK)» выше, если этот вариант не загрузится.",
+            approxSizeBytes = 3_110_000_000,
+            runtime = RuntimeKind.LITERT,
+            exactFileName = "gemma-4-E2B-it_Google_Tensor_G5.litertlm",
+            requiresNpu = true,
         ),
         LocalModelSeed(
             id = "gemma-4-e4b-it-litert",

@@ -53,11 +53,33 @@ class LiteRtRuntime(
         val file = File(binding.artifact)
         if (!file.isFile) throw ModelLoadException("Model file is missing: ${binding.artifact}")
 
+        // A binding that names a chip-specific ahead-of-time file (see
+        // LocalModelSeed.requiresNpu) has exactly one valid backend: it was
+        // never compiled with a CPU/GPU section, so honoring the app-wide
+        // Settings.liteRtBackend here — e.g. a user still on the CPU default
+        // from before picking this catalog entry — would just fail this
+        // exact same way CPU already fails universal files on NPU-only
+        // errors. Forcing NPU here is what makes the catalog entry mean what
+        // its name says, regardless of the unrelated global setting.
+        val effectiveBackend = if (binding.requiresNpu) LiteRtBackend.NPU else backend
         val start = System.currentTimeMillis()
-        log("LITERT_LOAD", "${file.name}: starting (backend=$backend)")
+        log("LITERT_LOAD", "${file.name}: starting (backend=$effectiveBackend)")
         val engine = try {
-            loadWith(file, backend)
+            loadWith(file, effectiveBackend)
         } catch (e: Exception) {
+            if (binding.requiresNpu) {
+                // No CPU retry, ever: this file has no CPU/GPU section to
+                // fall back to, so retrying would just repeat this same
+                // failure while doubling the RAM this multi-gigabyte model
+                // holds in the meantime — exactly the OOM shape already hit
+                // once on gemma-4-e4b-it. "NPU unavailable" is the honest
+                // answer, not a second load attempt that cannot succeed.
+                log("LITERT_LOAD", "${file.name}: NPU failed, no fallback for a chip-specific artifact: ${e.message}")
+                throw ModelLoadException(
+                    "NPU недоступен для ${file.name}: ${e.message}. Этот файл собран только под NPU Tensor G5 " +
+                        "и не может выполняться на CPU/GPU — выберите обычный (universal) вариант модели вместо него.",
+                )
+            }
             // NPU is the whole point of this runtime, but it is also the
             // narrowest path — Tensor G5 (Pixel 10) plus the matching native
             // dispatch library actually bundled for this ABI. Falling back
@@ -65,7 +87,7 @@ class LiteRtRuntime(
             // being simply unable to use this runtime at all, matching how
             // the rest of this app degrades (a model that doesn't fit RAM,
             // an ABI llama.cpp doesn't support) rather than refusing outright.
-            if (backend == LiteRtBackend.CPU) {
+            if (effectiveBackend == LiteRtBackend.CPU) {
                 log("LITERT_LOAD", "${file.name}: FAILED on CPU: ${e.message}")
                 throw ModelLoadException("LiteRT-LM could not load ${file.name}: ${e.message}")
             }
@@ -83,17 +105,17 @@ class LiteRtRuntime(
             if (availableBytes < requiredBytes) {
                 log(
                     "LITERT_LOAD",
-                    "${file.name}: $backend failed (${e.message}); skipping automatic CPU retry — " +
+                    "${file.name}: $effectiveBackend failed (${e.message}); skipping automatic CPU retry — " +
                         "only ${availableBytes / MB}MB free, need ~${requiredBytes / MB}MB",
                 )
                 throw ModelLoadException(
-                    "LiteRT-LM: $backend failed to load ${file.name} (${e.message}). Automatic CPU " +
+                    "LiteRT-LM: $effectiveBackend failed to load ${file.name} (${e.message}). Automatic CPU " +
                         "retry was skipped: only ~${availableBytes / MB}MB RAM is free right now and " +
                         "this model needs ~${requiredBytes / MB}MB — retrying could crash the app. " +
                         "Free up memory, or select CPU as the backend in Settings and try again.",
                 )
             }
-            log("LITERT_LOAD", "${file.name}: $backend failed (${e.message}), retrying on CPU")
+            log("LITERT_LOAD", "${file.name}: $effectiveBackend failed (${e.message}), retrying on CPU")
             try {
                 loadWith(file, LiteRtBackend.CPU)
             } catch (cpuFailure: Exception) {
