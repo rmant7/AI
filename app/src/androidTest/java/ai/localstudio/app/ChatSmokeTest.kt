@@ -63,14 +63,28 @@ class ChatSmokeTest {
         assertTrue("the answer carries no provenance", !answer?.details.isNullOrBlank())
     }
 
+    /**
+     * The assistant's bubble now appears the instant a turn starts (see
+     * ChatActivity.send's streaming placeholder) and fills in as chunks
+     * arrive, so `itemCount >= 2` is true almost immediately — long before
+     * there's an actual answer to assert on. `details` is only ever set on
+     * the final update (placeholder and streamed partials both pass `null`),
+     * so waiting on it is what actually means "the turn finished," the same
+     * thing `itemCount >= 2` used to mean back when the whole answer arrived
+     * in one shot.
+     */
     private fun awaitMessages(timeoutMs: Long): Int {
         val deadline = System.currentTimeMillis() + timeoutMs
         var count = 0
         while (System.currentTimeMillis() < deadline) {
+            var finished = false
             activityRule.scenario.onActivity { activity ->
-                count = activity.findViewById<RecyclerView>(R.id.messages).adapter?.itemCount ?: 0
+                val adapter = activity.findViewById<RecyclerView>(R.id.messages).adapter as? MessageAdapter
+                count = adapter?.itemCount ?: 0
+                val last = adapter?.messages()?.lastOrNull()
+                finished = count >= 2 && last != null && (last.isError || !last.details.isNullOrBlank())
             }
-            if (count >= 2) return count
+            if (finished) return count
             Thread.sleep(250)
         }
         return count

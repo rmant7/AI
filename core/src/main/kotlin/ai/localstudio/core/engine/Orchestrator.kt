@@ -54,7 +54,7 @@ class Orchestrator(
     private val executors: NodeExecutors,
     private val engine: PipelineEngine = PipelineEngine(executors.build()),
 ) {
-    suspend fun handle(request: UserRequest): Answer {
+    suspend fun handle(request: UserRequest, onPartialText: ((String) -> Unit)? = null): Answer {
         val signals = RequestSignals(
             text = request.text,
             hasAudio = request.attachment is NodeValue.Audio,
@@ -81,6 +81,7 @@ class Orchestrator(
                 userMessage = request.text,
                 history = request.history,
                 attachedDocuments = request.attachedDocuments,
+                onPartialText = onPartialText,
             ),
         )
 

@@ -96,6 +96,20 @@ class OrchestratorTest {
     }
 
     @Test
+    fun `onPartialText streams the growing answer instead of only the final text`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val answer = orchestrator().handle(
+            UserRequest(conversationId = "c1", text = "Объясни, как работает runtime manager"),
+            onPartialText = { seen += it },
+        )
+
+        // FakeRuntime.generate emits four chunks — one callback per chunk,
+        // each carrying everything accumulated so far, not just that chunk.
+        assertEquals(listOf("ответ ", "ответ по ", "ответ по 2 ", "ответ по 2 секциям"), seen)
+        assertEquals(seen.last(), answer.text)
+    }
+
+    @Test
     fun `voice input is transcribed and the transcript reaches the context`() = runBlocking {
         val answer = orchestrator().handle(
             UserRequest(conversationId = "c1", attachment = audioInput("file://note.wav")),

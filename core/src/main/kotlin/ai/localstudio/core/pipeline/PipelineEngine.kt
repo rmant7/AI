@@ -46,6 +46,16 @@ data class RunContext(
      */
     val attachedDocuments: List<String> = emptyList(),
     val params: Map<String, String> = emptyMap(),
+    /**
+     * Invoked with the full answer-so-far every time [NodeType.TEXT_GENERATION]
+     * receives another chunk from the model, so a caller can render output as
+     * it's produced instead of waiting for the whole turn to finish — every
+     * runtime already streams token by token underneath; this is what a
+     * caller taps into instead of that streaming being collapsed into one
+     * final string. Null (the default) costs nothing beyond the null check
+     * itself: no buffering, no observer to skip notifying.
+     */
+    val onPartialText: ((String) -> Unit)? = null,
 )
 
 data class NodeTrace(val nodeId: String, val type: NodeType, val durationMs: Long)

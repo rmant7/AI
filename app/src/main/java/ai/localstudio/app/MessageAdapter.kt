@@ -70,6 +70,15 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         notifyItemInserted(messages.size - 1)
     }
 
+    /** Replaces the message at [index] in place — how a streamed answer's bubble grows without becoming a new bubble each chunk. */
+    fun update(index: Int, message: Message) {
+        messages[index] = message
+        notifyItemChanged(index)
+    }
+
+    /** Index of the last message, for the placeholder bubble a streamed answer fills in — -1 when there is none yet. */
+    fun lastIndex(): Int = messages.size - 1
+
     fun clear() {
         val size = messages.size
         messages.clear()

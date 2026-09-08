@@ -30,6 +30,9 @@ import ai.localstudio.core.pipeline.NodeValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -323,6 +326,28 @@ class ChatActivity : AppCompatActivity() {
         }
 
         generationJob = lifecycleScope.launch {
+            // A placeholder bubble appears immediately, then grows in place
+            // as chunks arrive — every runtime already streams token by
+            // token underneath (see NodeExecutors.textGeneration), but until
+            // now nothing surfaced that here: the whole answer only ever
+            // appeared at once, at the very end, so a slow model looked
+            // indistinguishable from a hung one for however long it ran.
+            val startedAt = System.currentTimeMillis()
+            adapter.add(Message.assistant(body = "…", details = null).copy(timestamp = startedAt))
+            val placeholderIndex = adapter.lastIndex()
+            binding.messages.scrollToPosition(placeholderIndex)
+
+            val partial = MutableStateFlow<String?>(null)
+            // conflate(): a fast model can emit far more chunks per second
+            // than the UI thread can usefully render — this drops
+            // intermediate values under load instead of queueing them, so
+            // rendering never falls behind no matter how long generation runs.
+            val renderJob = launch {
+                partial.filterNotNull().conflate().collect { text ->
+                    adapter.update(placeholderIndex, Message.assistant(body = text, details = null).copy(timestamp = startedAt))
+                }
+            }
+
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     // A hang anywhere below this — native, network, wherever
@@ -339,16 +364,18 @@ class ChatActivity : AppCompatActivity() {
                                 history = history,
                                 attachedDocuments = attachedDocuments,
                             ),
+                            onPartialText = { partial.value = it },
                         )
                     }
                 }
             }
+            renderJob.cancel()
             isGenerating = false
             generationJob = null
             setBusy(false)
             if (stoppedByUser) {
                 stoppedByUser = false
-                adapter.add(Message.error(body = getString(R.string.chat_stopped), details = null))
+                adapter.update(placeholderIndex, Message.error(body = getString(R.string.chat_stopped), details = null))
                 binding.messages.scrollToPosition(adapter.itemCount - 1)
                 persist()
                 return@launch
@@ -365,7 +392,8 @@ class ChatActivity : AppCompatActivity() {
                     val body = answer.text.ifBlank { "(пустой ответ)" }.let { answerText ->
                         container.soleAnswererLabel?.let { label -> "$answerText\n\n---\nОтвет от: $label" } ?: answerText
                     }
-                    adapter.add(
+                    adapter.update(
+                        placeholderIndex,
                         Message.assistant(
                             body = body,
                             details = buildString {
@@ -385,7 +413,7 @@ class ChatActivity : AppCompatActivity() {
                         error.message ?: error.toString()
                     }
                     container.appLog.record("GENERATION_ERROR", "${error.javaClass.simpleName}: $body")
-                    adapter.add(Message.error(body = body, details = error.javaClass.simpleName))
+                    adapter.update(placeholderIndex, Message.error(body = body, details = error.javaClass.simpleName))
                 }
             binding.messages.scrollToPosition(adapter.itemCount - 1)
             persist()
@@ -410,8 +438,32 @@ class ChatActivity : AppCompatActivity() {
     ) {
         generationJob = lifecycleScope.launch {
             try {
-                val jobs = sources.map { (label, orchestrator) ->
+                // A placeholder per source, all added up front on Main before
+                // any async work starts (so no two sources ever race to
+                // mutate the adapter) — then each grows in place as its own
+                // chunks arrive, same reasoning as the single-source send():
+                // compare mode already means waiting on the slowest of
+                // several candidates, so an answer streaming in as it's
+                // produced matters even more here than in the ordinary path.
+                val startedAt = System.currentTimeMillis()
+                val placeholderIndexes = sources.map { (label, _) ->
+                    adapter.add(Message.assistant(body = "**$label:**\n…", details = null).copy(timestamp = startedAt))
+                    adapter.lastIndex()
+                }
+                binding.messages.scrollToPosition(adapter.itemCount - 1)
+
+                val jobs = sources.mapIndexed { index, (label, orchestrator) ->
+                    val placeholderIndex = placeholderIndexes[index]
                     async(Dispatchers.IO) {
+                        val partial = MutableStateFlow<String?>(null)
+                        val renderJob = launch(Dispatchers.Main) {
+                            partial.filterNotNull().conflate().collect { partialText ->
+                                adapter.update(
+                                    placeholderIndex,
+                                    Message.assistant(body = "**$label:**\n$partialText", details = null).copy(timestamp = startedAt),
+                                )
+                            }
+                        }
                         // Deliberately not a blanket runCatching: a per-source
                         // timeout must render as this source's own error while
                         // the others keep going, but a real cancellation (the
@@ -431,6 +483,7 @@ class ChatActivity : AppCompatActivity() {
                                         history = history,
                                         attachedDocuments = attachedDocuments,
                                     ),
+                                    onPartialText = { partial.value = it },
                                 )
                             }
                             answer.text.ifBlank { "(пустой ответ)" }
@@ -442,9 +495,16 @@ class ChatActivity : AppCompatActivity() {
                         } catch (e: Exception) {
                             container.appLog.record("GENERATION_ERROR", "$label: ${e.javaClass.simpleName}: ${e.message}")
                             "Ошибка: ${e.message ?: e.toString()}"
+                        } finally {
+                            // In a finally, not just after the try: the
+                            // CancellationException branch above rethrows
+                            // rather than falling through to the line after
+                            // this block, and that render collector must
+                            // still stop either way.
+                            renderJob.cancel()
                         }
                         withContext(Dispatchers.Main) {
-                            adapter.add(Message.assistant(body = "**$label:**\n$rendered", details = null))
+                            adapter.update(placeholderIndex, Message.assistant(body = "**$label:**\n$rendered", details = null).copy(timestamp = startedAt))
                             binding.messages.scrollToPosition(adapter.itemCount - 1)
                         }
                     }

@@ -21,7 +21,6 @@ import ai.localstudio.core.runtime.RuntimeManager
 import ai.localstudio.core.runtime.SpeechModelHandle
 import ai.localstudio.core.runtime.TextModelHandle
 import ai.localstudio.core.runtime.VisionModelHandle
-import kotlinx.coroutines.flow.toList
 
 /**
  * Wires the pipeline vocabulary to the actual services.
@@ -213,7 +212,7 @@ class NodeExecutors(
         NodeValue.Context(contextEngine.assemble(fragments, contextWindowTokens, images))
     }
 
-    private fun textGeneration() = NodeExecutor { node, inputs, _ ->
+    private fun textGeneration() = NodeExecutor { node, inputs, context ->
         val assembled = inputs.filterIsInstance<NodeValue.Context>().firstOrNull()?.context
             ?: throw IllegalStateException("text_generation received no assembled context")
 
@@ -224,6 +223,15 @@ class NodeExecutors(
         val text = runtimeManager.withModel(selected.model, selected.binding) { loaded ->
             val handle = loaded as? TextModelHandle
                 ?: throw ModelLoadException("${selected.model.id} did not load as a text model")
+            // Collected chunk by chunk, not .toList().joinToString(""): every
+            // runtime already streams token by token underneath (that's the
+            // whole point of Flow<String> here), but folding it into one
+            // string before returning threw that streaming away — the UI
+            // only ever saw the complete answer at the very end, with
+            // nothing to show for however long generation actually took.
+            // onPartialText is what lets ChatActivity render the same
+            // progressive output a runtime like llama.cpp already produces.
+            val buffer = StringBuilder()
             handle.generate(
                 GenerationRequest(
                     prompt = assembled.render(),
@@ -235,7 +243,11 @@ class NodeExecutors(
                     repeatPenalty = node.params["repeat_penalty"]?.toDoubleOrNull() ?: defaultRepeatPenalty,
                     images = assembled.images,
                 ),
-            ).toList().joinToString("")
+            ).collect { chunk ->
+                buffer.append(chunk)
+                context.onPartialText?.invoke(buffer.toString())
+            }
+            buffer.toString()
         }
         NodeValue.Text(text)
     }
