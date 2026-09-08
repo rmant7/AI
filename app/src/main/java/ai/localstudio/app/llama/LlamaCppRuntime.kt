@@ -48,11 +48,15 @@ private val nativeOpMutex = Mutex()
  * How much free RAM must be visible, relative to the projector *file's*
  * size, before [LlamaCppRuntime.load] will even attempt [LlamaBridge.nativeLoadMmproj].
  * The file is only the vision encoder's weights; encoding an actual image
- * needs activation buffers on top of that, roughly proportional to the same
- * size — 1.0 would size for the weights alone and still risk the exact OOM
- * this check exists to avoid.
+ * needs activation buffers on top of that — but for a single, already-
+ * downscaled image (see ChatActivity.attachImage's 1280px cap) at inference
+ * time, not training, that is nowhere near another full copy of the
+ * weights. 2.0 was a first, deliberately-cautious guess that turned out to
+ * block a real device with genuine headroom to spare (1633MB free against
+ * a ~990MB projector); 1.4 still leaves real margin above the bare weight
+ * size without being the reason vision never gets to run at all.
  */
-private const val MMPROJ_RAM_SAFETY_FACTOR = 2.0
+private const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 
 /**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
