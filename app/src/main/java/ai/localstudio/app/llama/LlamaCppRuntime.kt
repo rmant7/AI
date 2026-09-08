@@ -21,9 +21,28 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+
+/**
+ * Serializes every blocking native llama.cpp call across the whole app —
+ * every [LlamaCppRuntime.load] and every [LlamaTextModel.generate], any
+ * model, any instance. Both wrap a single-shot JNI call with no
+ * cancellation hook worth relying on for [load] (see its own doc comment):
+ * abandoning the coroutine that's waiting on one leaves the native call
+ * itself running to completion regardless, on its own thread, and nothing
+ * stopped a completely unrelated *new* load or generate from starting right
+ * alongside it — both then compete for the same CPU cores and RAM. Confirmed
+ * on a real device: an abandoned load of one model and a plain generate on
+ * a *different*, already-loaded model, running at the same time, both took
+ * several times longer than either alone should. This mutex is what makes
+ * "abandon and try something else" mean "queued after," not "in parallel
+ * with," whatever's still finishing in the background.
+ */
+private val nativeOpMutex = Mutex()
 
 /**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
@@ -82,7 +101,9 @@ class LlamaCppRuntime(
         var producedHandle = 0L
         val result = CompletableDeferred<Unit>()
         val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            producedHandle = runCatching { bridge.nativeLoad(file.absolutePath, contextTokens, threads) }.getOrDefault(0L)
+            nativeOpMutex.withLock {
+                producedHandle = runCatching { bridge.nativeLoad(file.absolutePath, contextTokens, threads) }.getOrDefault(0L)
+            }
             result.complete(Unit)
         }
         val handle = try {
@@ -145,17 +166,19 @@ private class LlamaTextModel(
             runCatching {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
             }
-            val produced = bridge.nativeGenerate(
-                handle = handle,
-                systemPrompt = request.systemPrompt,
-                userPrompt = request.prompt,
-                maxTokens = request.maxTokens,
-                temperature = request.temperature.toFloat(),
-                topP = request.topP.toFloat(),
-                topK = request.topK,
-                repeatPenalty = request.repeatPenalty.toFloat(),
-                callback = sink,
-            )
+            val produced = nativeOpMutex.withLock {
+                bridge.nativeGenerate(
+                    handle = handle,
+                    systemPrompt = request.systemPrompt,
+                    userPrompt = request.prompt,
+                    maxTokens = request.maxTokens,
+                    temperature = request.temperature.toFloat(),
+                    topP = request.topP.toFloat(),
+                    topK = request.topK,
+                    repeatPenalty = request.repeatPenalty.toFloat(),
+                    callback = sink,
+                )
+            }
             completed.set(true)
             val elapsedMs = System.currentTimeMillis() - start
             if (produced < 0) {
@@ -190,9 +213,11 @@ private class LlamaTextModel(
 
     override fun close() {
         // Blocks (bounded now that prompt processing is chunked and checks
-        // cancellation between batches, see llama_jni.cpp) until any
-        // in-flight native call has genuinely returned — freeing the
-        // context while a background thread is still inside
+        // cancellation between batches, see llama_jni.cpp — plus however
+        // long nativeOpMutex makes this worker wait its turn behind some
+        // other model's load or generate, if one happens to be running)
+        // until any in-flight native call has genuinely returned — freeing
+        // the context while a background thread is still inside
         // llama_decode() using it is a use-after-free, not a graceful stop.
         runBlocking { activeWorker.get()?.join() }
         bridge.nativeFree(handle)
