@@ -140,7 +140,17 @@ dependencies {
     // inference path alongside llama.cpp, the only one able to run on a
     // Pixel's TPU/NPU instead of the CPU. Prebuilt AAR: no CMake/NDK build
     // of its own, unlike llama.cpp's FetchContent-based native build below.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
+    //
+    // Pinned, not `latest.release`: on-device testing against whatever the
+    // newest release happened to be (0.17.0) failed loading every Gemma
+    // model with "Failed to create engine: NOT_FOUND ...
+    // TF_LITE_PREFILL_DECODE not found in the model" — on two different
+    // models, with the correct file confirmed, so not a download problem.
+    // Google's own production app (google-ai-edge/gallery) pins 0.11.0
+    // for this exact dependency — the version its own model downloads are
+    // actually validated against — rather than tracking latest, so this
+    // matches that instead of guessing at a newer one being more correct.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.11.0")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")
