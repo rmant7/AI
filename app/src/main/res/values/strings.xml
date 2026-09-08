@@ -16,6 +16,7 @@
     <string name="menu_share_chat">Поделиться чатом</string>
     <string name="message_copy">Скопировать сообщение</string>
     <string name="message_copied">Скопировано</string>
+    <string name="message_attached_image">Прикреплённое изображение</string>
     <string name="chat_share_empty">Чат пуст — нечем делиться</string>
     <string name="chat_interrupted">Ответ не получен — генерация не завершилась (сбой приложения или его закрытие до ответа). Подробности могут быть в Настройки → Журнал ошибок. Попробуйте отправить сообщение ещё раз.</string>
     <string name="history_empty">Пока нет сохранённых чатов</string>

@@ -3,6 +3,9 @@ package ai.localstudio.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
@@ -12,6 +15,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import ai.localstudio.app.attach.DocumentIngest
@@ -288,7 +292,7 @@ class ChatActivity : AppCompatActivity() {
         if (text.isEmpty()) return
 
         binding.input.setText("")
-        adapter.add(Message.user(text))
+        adapter.add(Message.user(text, imageDataUri = pendingImage?.uri))
         binding.messages.scrollToPosition(adapter.itemCount - 1)
         persist()
         isGenerating = true
@@ -592,21 +596,77 @@ class ChatActivity : AppCompatActivity() {
             val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { "изображение" }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    val originalBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw java.io.IOException("Не удалось открыть файл")
-                    if (bytes.size > MAX_IMAGE_BYTES) {
+                    if (originalBytes.size > MAX_IMAGE_BYTES) {
                         throw java.io.IOException(
-                            getString(R.string.chat_attach_image_too_large, "%.1f МБ".format(Locale.US, bytes.size / 1_000_000.0)),
+                            getString(R.string.chat_attach_image_too_large, "%.1f МБ".format(Locale.US, originalBytes.size / 1_000_000.0)),
                         )
                     }
+
+                    // BitmapFactory ignores the orientation tag entirely — it
+                    // decodes raw pixels as stored, not as the photo should be
+                    // viewed. A phone camera routinely saves landscape byte
+                    // order with a rotate-90 tag rather than pre-rotated
+                    // pixels, so skipping this would silently hand the model
+                    // (and the sent-message thumbnail) a sideways photo.
+                    val rotationDegrees = runCatching {
+                        ExifInterface(java.io.ByteArrayInputStream(originalBytes)).rotationDegrees
+                    }.getOrDefault(0)
+
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(originalBytes, 0, originalBytes.size, bounds)
+                    var sampleSize = 1
+                    while (bounds.outWidth / (sampleSize * 2) >= MAX_IMAGE_DIMENSION ||
+                        bounds.outHeight / (sampleSize * 2) >= MAX_IMAGE_DIMENSION
+                    ) {
+                        sampleSize *= 2
+                    }
+                    val decoded = BitmapFactory.decodeByteArray(
+                        originalBytes, 0, originalBytes.size,
+                        BitmapFactory.Options().apply { inSampleSize = sampleSize },
+                    ) ?: throw java.io.IOException("Не удалось распознать изображение")
+
+                    val oriented = if (rotationDegrees != 0) {
+                        val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                        Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+                            .also { if (it !== decoded) decoded.recycle() }
+                    } else decoded
+
+                    val longestSide = maxOf(oriented.width, oriented.height)
+                    val scaled = if (longestSide > MAX_IMAGE_DIMENSION) {
+                        val scale = MAX_IMAGE_DIMENSION.toFloat() / longestSide
+                        Bitmap.createScaledBitmap(
+                            oriented,
+                            (oriented.width * scale).toInt().coerceAtLeast(1),
+                            (oriented.height * scale).toInt().coerceAtLeast(1),
+                            true,
+                        ).also { if (it !== oriented) oriented.recycle() }
+                    } else oriented
+                    val width = scaled.width
+                    val height = scaled.height
+
+                    val jpegBytes = java.io.ByteArrayOutputStream().use { stream ->
+                        scaled.compress(Bitmap.CompressFormat.JPEG, IMAGE_JPEG_QUALITY, stream)
+                        stream.toByteArray()
+                    }
+                    scaled.recycle()
+
                     // A content:// URI means nothing outside this process —
                     // core/openai are plain JVM with no Context to resolve
                     // it, so the image is embedded as a self-contained data
                     // URI right here rather than threading Android-specific
-                    // access down through the runtime layer.
-                    val mimeType = contentResolver.getType(uri).takeIf { !it.isNullOrBlank() } ?: "image/jpeg"
-                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                    ImageRef(uri = "data:$mimeType;base64,$base64")
+                    // access down through the runtime layer. Downscaled
+                    // first: a local vision model's encode cost scales with
+                    // resolution — a raw phone-camera photo (several
+                    // megapixels, and some vision models tile a large image
+                    // into several crops before encoding) turned a single
+                    // image turn into a multi-minute, largely uncancellable
+                    // native call on a real device. The same downscale also
+                    // shrinks a cloud upload for no quality most vision APIs
+                    // would keep anyway — they downscale server-side too.
+                    val base64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+                    ImageRef(uri = "data:image/jpeg;base64,$base64", widthPx = width, heightPx = height)
                 }
             }
             result
@@ -804,6 +864,17 @@ class ChatActivity : AppCompatActivity() {
         // instead of sending a multi-minute upload that the server rejects
         // anyway.
         const val MAX_IMAGE_BYTES = 20L * 1024 * 1024
+
+        // Longest side after downscaling. Generous relative to what a vision
+        // model actually reads at — cloud APIs downscale to roughly this
+        // range server-side already, and llama.cpp's mtmd encoders (Gemma's
+        // included) operate on inputs well under this — while still far
+        // below a modern phone camera's native resolution, which is what
+        // was turning a single attached photo into a multi-minute vision
+        // encode on-device (see llama_jni.cpp's nativeGenerateWithImage).
+        const val MAX_IMAGE_DIMENSION = 1280
+
+        const val IMAGE_JPEG_QUALITY = 85
 
         // Short enough to read as "live", long enough that Tiny is done
         // transcribing everything so far well before the next tick.

@@ -650,15 +650,44 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
     const int64_t prefillStart = nowMs();
     session->promptTokens = (int32_t) mtmd_helper_get_n_tokens(chunks.ptr.get());
     session->reusedTokens = 0;
-    llama_pos newNPast = 0;
-    const int32_t evalResult = mtmd_helper_eval_chunks(
-        session->mctx, session->ctx, chunks.ptr.get(), /*n_past=*/0, /*seq_id=*/0,
-        BATCH_SIZE, /*logits_last=*/true, &newNPast);
+
+    // mtmd_helper_eval_chunks() runs every chunk — including the image
+    // encode itself, a single monolithic ggml graph compute with no
+    // checkpoint inside it — as one call with no way to interrupt it.
+    // Measured on a real device: an unquantized (F16) vision encoder
+    // running on CPU turned one image turn's encode phase into 44
+    // minutes, and nativeCancel() (and the 5-minute timeout above it on
+    // the Kotlin side) had no effect whatsoever, because session->cancelled
+    // was never even looked at until that single call finally returned.
+    // Evaluating one chunk at a time via mtmd_helper_eval_chunk_single()
+    // instead — the documented equivalent, per chunk — adds a checkpoint
+    // between chunks (typically text, image, text: 2-3 total) where a
+    // cancel or timeout actually takes hold, rather than nowhere at all.
+    // It cannot interrupt a single chunk's own compute — nothing this app
+    // calls into can — but it bounds the uncancellable window to one
+    // chunk's cost instead of the whole turn's.
+    llama_pos nPast = 0;
+    int32_t evalResult = 0;
+    const size_t chunkCount = mtmd_input_chunks_size(chunks.ptr.get());
+    for (size_t i = 0; i < chunkCount; i++) {
+        if (session->cancelled.load()) {
+            session->prefillMs = nowMs() - prefillStart;
+            return 0;
+        }
+        const mtmd_input_chunk *chunk = mtmd_input_chunks_get(chunks.ptr.get(), i);
+        llama_pos chunkNPast = 0;
+        evalResult = mtmd_helper_eval_chunk_single(
+            session->mctx, session->ctx, chunk, nPast, /*seq_id=*/0,
+            BATCH_SIZE, /*logits_last=*/(i + 1 == chunkCount), &chunkNPast);
+        if (evalResult != 0) break;
+        nPast = chunkNPast;
+    }
     session->prefillMs = nowMs() - prefillStart;
     if (evalResult != 0) {
-        LOGE("mtmd_helper_eval_chunks failed with code %d", evalResult);
+        LOGE("mtmd_helper_eval_chunk_single failed with code %d", evalResult);
         return -9;
     }
+    const llama_pos newNPast = nPast;
 
     const uint32_t contextSize = llama_n_ctx(session->ctx);
     const int64_t decodeStart = nowMs();

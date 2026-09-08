@@ -111,6 +111,11 @@ dependencies {
 
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    // Reads embedded orientation for an attached photo — BitmapFactory
+    // ignores it, so downscaling+recompressing without this would rotate
+    // sideways every image a phone camera saves as landscape bytes with a
+    // rotate tag rather than pre-rotated pixels.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")

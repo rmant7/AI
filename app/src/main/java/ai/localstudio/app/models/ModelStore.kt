@@ -26,7 +26,16 @@ class ModelStore(private val context: Context) {
     fun isInstalled(seed: LocalModelSeed): Boolean =
         fileFor(seed).let { it.isFile && it.length() > MIN_PLAUSIBLE_SIZE }
 
-    fun installedSize(seed: LocalModelSeed): Long = fileFor(seed).takeIf { it.isFile }?.length() ?: 0
+    /**
+     * Total disk footprint of this model — the main GGUF plus its projector
+     * when one is installed. Reporting only the main file's size here left
+     * the "Установлена · N ГБ" status understating actual usage by however
+     * big the mmproj file was, which is not a rounding error: this model's
+     * own projector is roughly a third of the main file's size on top.
+     */
+    fun installedSize(seed: LocalModelSeed): Long =
+        (fileFor(seed).takeIf { it.isFile }?.length() ?: 0) +
+            (mmprojFileFor(seed).takeIf { it.isFile }?.length() ?: 0)
 
     fun partialSize(seed: LocalModelSeed): Long = partFor(seed).takeIf { it.isFile }?.length() ?: 0
 

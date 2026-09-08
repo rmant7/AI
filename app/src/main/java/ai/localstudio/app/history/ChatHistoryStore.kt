@@ -14,6 +14,8 @@ data class StoredMessage(
     val isError: Boolean = false,
     /** Defaults to 0 so conversations saved before timestamps existed still decode; the UI hides a zero. */
     val timestamp: Long = 0L,
+    /** Null for every conversation saved before image attachments existed. */
+    val imageDataUri: String? = null,
 )
 
 @Serializable
@@ -99,5 +101,5 @@ class ChatHistoryStore(context: Context) {
     }
 }
 
-fun Message.toStored() = StoredMessage(role, body, details, isError, timestamp)
-fun StoredMessage.toMessage() = Message(role, body, details, isError, timestamp)
+fun Message.toStored() = StoredMessage(role, body, details, isError, timestamp, imageDataUri)
+fun StoredMessage.toMessage() = Message(role, body, details, isError, timestamp, imageDataUri)

@@ -4,7 +4,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Build
+import android.util.Base64
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -28,9 +31,11 @@ data class Message(
     val isError: Boolean = false,
     /** Wall-clock time the message appeared. 0 for conversations saved before this existed. */
     val timestamp: Long = System.currentTimeMillis(),
+    /** The same `data:<mime>;base64,...` URI sent to the model, when this turn attached an image — null for every message before this existed and every one without an attachment. */
+    val imageDataUri: String? = null,
 ) {
     companion object {
-        fun user(text: String) = Message("Вы", text)
+        fun user(text: String, imageDataUri: String? = null) = Message("Вы", text, imageDataUri = imageDataUri)
         fun assistant(body: String, details: String?) = Message("Модель", body, details)
         fun error(body: String, details: String?) = Message("Ошибка", body, details, isError = true)
 
@@ -115,6 +120,19 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         binding.detailsText.text = message.details.orEmpty()
         binding.detailsText.visibility = if (message.details.isNullOrBlank()) View.GONE else View.VISIBLE
 
+        // Decoded fresh on every bind rather than cached: images are rare
+        // (one per turn at most, already downscaled before ever reaching a
+        // Message — see ChatActivity.attachImage) and a bitmap cache here
+        // would outlive the handful of rows it was ever useful for.
+        val bitmap = message.imageDataUri?.let { decodeDataUri(it) }
+        if (bitmap != null) {
+            binding.messageImage.setImageBitmap(bitmap)
+            binding.messageImage.visibility = View.VISIBLE
+        } else {
+            binding.messageImage.setImageDrawable(null)
+            binding.messageImage.visibility = View.GONE
+        }
+
         val time = Message.formatTime(message.timestamp)
         binding.timeText.text = time
         binding.timeText.visibility = if (time.isBlank()) View.GONE else View.VISIBLE
@@ -141,6 +159,12 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
         binding.copyButton.imageTintList = ColorStateList.valueOf(textColor)
         binding.copyButton.setOnClickListener { copyToClipboard(binding.root.context, message.body) }
     }
+
+    private fun decodeDataUri(dataUri: String): Bitmap? = runCatching {
+        val base64 = dataUri.substringAfter(",", "")
+        val bytes = Base64.decode(base64, Base64.NO_WRAP)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }.getOrNull()
 
     private fun copyToClipboard(context: Context, text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

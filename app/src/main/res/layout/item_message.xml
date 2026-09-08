@@ -41,6 +41,27 @@
 
         </LinearLayout>
 
+        <!--
+            Above the text, matching how every ordinary chat app shows an
+            attachment: the picture the turn is about, then whatever was
+            typed alongside it. Hidden by default — most messages carry no
+            image at all, and re-showing a stale one from a recycled view
+            without this default is exactly how a bound-but-forgotten
+            ImageView leaks the previous row's picture onto this one.
+        -->
+        <ImageView
+            android:id="@+id/messageImage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="start"
+            android:layout_marginTop="6dp"
+            android:adjustViewBounds="true"
+            android:maxWidth="260dp"
+            android:maxHeight="260dp"
+            android:scaleType="fitCenter"
+            android:visibility="gone"
+            android:contentDescription="@string/message_attached_image" />
+
         <TextView
             android:id="@+id/bodyText"
             android:layout_width="wrap_content"

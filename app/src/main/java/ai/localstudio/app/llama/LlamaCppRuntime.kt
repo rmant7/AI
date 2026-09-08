@@ -45,6 +45,16 @@ import java.util.concurrent.atomic.AtomicReference
 private val nativeOpMutex = Mutex()
 
 /**
+ * How much free RAM must be visible, relative to the projector *file's*
+ * size, before [LlamaCppRuntime.load] will even attempt [LlamaBridge.nativeLoadMmproj].
+ * The file is only the vision encoder's weights; encoding an actual image
+ * needs activation buffers on top of that, roughly proportional to the same
+ * size — 1.0 would size for the weights alone and still risk the exact OOM
+ * this check exists to avoid.
+ */
+private const val MMPROJ_RAM_SAFETY_FACTOR = 2.0
+
+/**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
  * which is what lets the router, pipelines, context engine and memory stay
  * untouched: only the registration changes.
@@ -60,6 +70,22 @@ class LlamaCppRuntime(
      * so tests and any other caller don't need a real [AppLog][ai.localstudio.app.log.AppLog].
      */
     private val log: (tag: String, message: String) -> Unit = { _, _ -> },
+    /**
+     * Free RAM right now, read fresh whenever [load] needs it — never cached,
+     * since it changes constantly and the whole point is to catch the device
+     * being tighter *now* than [binding]'s own admission check assumed.
+     *
+     * That check ([ai.localstudio.core.runtime.RuntimeManager]'s budget
+     * comparison) is sized off the main GGUF alone, deliberately: folding a
+     * vision projector's cost into the *same* gate would risk rejecting a
+     * model outright — text and all — on a device where only the vision
+     * *add-on* doesn't fit, for a model that worked fine as text-only before
+     * mmproj existed. This is the separate, softer check that instead lets
+     * the base model load normally and only skips the projector, exactly
+     * like a projector that failed to download. Defaults to "assume plenty"
+     * so tests and any other caller don't need a real device.
+     */
+    private val availableRamBytes: () -> Long = { Long.MAX_VALUE },
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
@@ -125,12 +151,31 @@ class LlamaCppRuntime(
 
         // Best-effort, and only if a projector was actually downloaded for
         // this model (see ModelStore.hasMmproj) — a model with none behaves
-        // exactly as it always did, text-only.
+        // exactly as it always did, text-only. Also skipped outright when
+        // there isn't visibly enough free RAM left after the base model's
+        // own load to also hold a vision encoder — attempting it anyway was
+        // observed on a real device to reliably run the whole process out of
+        // memory a turn or two later (Android's OOM killer, not a catchable
+        // Kotlin exception), losing whatever the conversation was doing at
+        // the time. The margin is deliberately generous: the projector's
+        // *file* size is only its weights, and encoding an image needs
+        // activation buffers on top that scale with the same size.
         val hasVision = binding.mmprojArtifact?.let { mmprojPath ->
-            nativeOpMutex.withLock {
-                runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
-            }.also { loaded ->
-                log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} from $mmprojPath")
+            val mmprojBytes = File(mmprojPath).length()
+            val headroom = availableRamBytes()
+            if (mmprojBytes > 0 && headroom < mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR) {
+                log(
+                    "LOCAL_LOAD",
+                    "${file.name}: mmproj SKIPPED — only ${headroom / 1_000_000}MB free, " +
+                        "want ~${(mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR / 1_000_000).toLong()}MB for $mmprojPath",
+                )
+                false
+            } else {
+                nativeOpMutex.withLock {
+                    runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
+                }.also { loaded ->
+                    log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} from $mmprojPath")
+                }
             }
         } ?: false
 

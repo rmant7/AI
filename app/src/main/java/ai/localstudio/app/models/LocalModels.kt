@@ -37,6 +37,14 @@ data class LocalModelSeed(
      * existed.
      */
     val mmprojFileName: String? = null,
+    /**
+     * A rough size for [mmprojFileName], same spirit as [approxSizeBytes] for
+     * the main GGUF — shown alongside it so the size quoted before download
+     * matches what actually lands on disk. Left at 0 for every seed with no
+     * projector, and harmless to omit for one that has one: it only makes the
+     * upfront estimate optimistic, never wrong in the dangerous direction.
+     */
+    val mmprojApproxSizeBytes: Long = 0,
 )
 
 object LocalModels {
@@ -67,6 +75,7 @@ object LocalModels {
             // vision precisely because this model is already in the catalog
             // and already confirmed working text-only.
             mmprojFileName = "mmproj-F16.gguf",
+            mmprojApproxSizeBytes = 990_000_000,
         ),
         LocalModelSeed(
             id = "gemma-4-12b-it-q4",

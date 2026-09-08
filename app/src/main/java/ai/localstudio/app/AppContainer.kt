@@ -418,7 +418,11 @@ class AppContainer private constructor(private val context: Context) {
             // a generic label in the log and in the answer's own attribution
             // line answered "was it local?" but not "which local model?".
             label = "${CloudProviders.LOCAL.title}: ${selected.model.id}",
-            runtime = LlamaCppRuntime(contextTokens = effectiveContextTokens(), log = appLog::record),
+            runtime = LlamaCppRuntime(
+                contextTokens = effectiveContextTokens(),
+                log = appLog::record,
+                availableRamBytes = { currentAvailableRamBytes(context) },
+            ),
             model = selected.model,
             binding = selected.binding,
         )
@@ -641,6 +645,22 @@ class AppContainer private constructor(private val context: Context) {
             instance ?: synchronized(this) {
                 instance ?: AppContainer(context.applicationContext).also { instance = it }
             }
+
+        /**
+         * A fresh `availMem` read, deliberately not routed through [DeviceProfile]
+         * — that class exists to plan a model's admission ahead of loading it,
+         * off *total* RAM, on purpose (see its own doc comment on why free memory
+         * alone would punish exactly the devices that can run the most). This is
+         * a different question, asked at a different moment: how much is
+         * genuinely free right *now*, for a soft, best-effort decision (skip
+         * loading a vision projector — see [LlamaCppRuntime]) rather than a hard
+         * admission gate.
+         */
+        fun currentAvailableRamBytes(context: Context): Long {
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
+            return info.availMem
+        }
 
         fun profileOf(context: Context, ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION): DeviceProfile {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager

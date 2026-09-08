@@ -216,7 +216,12 @@ class ModelsActivity : AppCompatActivity() {
                     title = seed.title,
                     subtitle = buildString {
                         append(seed.paramsLabel)
-                        if (seed.approxSizeBytes > 0) append(" · ~${size(seed.approxSizeBytes)}")
+                        // Includes the projector's size for a vision-capable
+                        // seed — it downloads too, and quoting only the main
+                        // GGUF here left the actual install noticeably
+                        // bigger than what this line promised upfront.
+                        val totalApproxBytes = seed.approxSizeBytes + seed.mmprojApproxSizeBytes
+                        if (totalApproxBytes > 0) append(" · ~${size(totalApproxBytes)}")
                         append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
                         if (!fitsBudget) append(" · превышает бюджет памяти")
                         if (knownStale) append(" · ").append(getString(R.string.model_catalog_stale))
