@@ -398,27 +398,45 @@ class AppContainer private constructor(private val context: Context) {
             ?.takeIf { it.state == InstallState.INSTALLED }
             ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
         val selected = chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
-        val (runtime, localLabel) = when (selected.binding.runtime) {
+        val runtime: ModelRuntime = when (selected.binding.runtime) {
             // Google Tensor SDK path — a separate model format and native
             // library from llama.cpp entirely, see LiteRtRuntime.
-            RuntimeKind.LITERT ->
-                LiteRtRuntime(context, backend = settings.liteRtBackend, log = appLog::record) to "Локально на устройстве (Google Tensor SDK)"
-            else -> LlamaCppRuntime(contextTokens = effectiveContextTokens(), log = appLog::record) to CloudProviders.LOCAL.title
+            RuntimeKind.LITERT -> LiteRtRuntime(context, backend = settings.liteRtBackend, log = appLog::record)
+            else -> LlamaCppRuntime(contextTokens = effectiveContextTokens(), log = appLog::record)
         }
         return FallbackCandidate(
             // Names the specific installed model, not just "Локально на
             // устройстве" — with several local models to choose from
             // (or a mix of a tiny and a huge one, tried at different times),
             // a generic label in the log and in the answer's own attribution
-            // line answered "was it local?" but not "which local model?". The
-            // runtime-specific prefix (llama.cpp vs Tensor SDK) matters here
-            // too — CloudProviders.LOCAL.title hardcodes "(llama.cpp)", which
-            // was flatly wrong the moment a LiteRT model could be selected.
-            label = "$localLabel: ${selected.model.id}",
+            // line answered "was it local?" but not "which local model?".
+            label = "${localRuntimeTitle(selected.binding.runtime)}: ${selected.model.id}",
             runtime = runtime,
             model = selected.model,
             binding = selected.binding,
         )
+    }
+
+    /**
+     * CloudProviders.LOCAL.title hardcodes "(llama.cpp)" — wrong the moment
+     * a LiteRT model is what's actually selected. This is the one place
+     * that decides which title is true right now, shared by the candidate's
+     * own label (above) and [runtimeLabel] (the chat status bar / SEND log),
+     * which used to read the static title directly and stayed wrong even
+     * after the candidate's own label was fixed.
+     */
+    private fun localRuntimeTitle(runtime: RuntimeKind): String =
+        if (runtime == RuntimeKind.LITERT) "Локально на устройстве (Google Tensor SDK)" else CloudProviders.LOCAL.title
+
+    /** Which runtime the currently chosen (or auto-selected) local model would actually use, if any is installed. */
+    private fun activeLocalRuntimeTitle(): String {
+        val registry = localRegistry()
+        val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
+        val runtime = registry.find(chosenId)
+            ?.takeIf { it.state == InstallState.INSTALLED }
+            ?.model?.bindings?.firstOrNull()?.runtime
+            ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION)?.binding?.runtime
+        return localRuntimeTitle(runtime ?: RuntimeKind.LLAMA_CPP)
     }
 
     /**
@@ -590,7 +608,7 @@ class AppContainer private constructor(private val context: Context) {
 
     val runtimeLabel: String
         get() = enabledProviders().takeIf { it.isNotEmpty() }
-            ?.joinToString(" → ") { it.title }
+            ?.joinToString(" → ") { if (it.id == CloudProviders.LOCAL.id) activeLocalRuntimeTitle() else it.title }
             ?: CloudProviders.DEMO.title
 
     private fun servedModel(
