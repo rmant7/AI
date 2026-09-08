@@ -30,9 +30,9 @@ import ai.localstudio.core.pipeline.NodeValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -338,13 +338,24 @@ class ChatActivity : AppCompatActivity() {
             binding.messages.scrollToPosition(placeholderIndex)
 
             val partial = MutableStateFlow<String?>(null)
-            // conflate(): a fast model can emit far more chunks per second
-            // than the UI thread can usefully render — this drops
-            // intermediate values under load instead of queueing them, so
-            // rendering never falls behind no matter how long generation runs.
+            // Sampled on a timer, not one render per chunk: a model can
+            // produce several tokens per hundred milliseconds, and each
+            // render re-parses the whole accumulated answer as markdown
+            // (MessageAdapter.onBindViewHolder) — doing that on every single
+            // chunk competes on the same main-thread queue as the Stop
+            // button's own click, which is exactly the kind of contention
+            // that can make Stop feel unresponsive during a fast stream.
+            // Sampling bounds that load to a fixed rate regardless of how
+            // fast the model actually streams.
             val renderJob = launch {
-                partial.filterNotNull().conflate().collect { text ->
-                    adapter.update(placeholderIndex, Message.assistant(body = text, details = null).copy(timestamp = startedAt))
+                var lastRendered: String? = null
+                while (isActive) {
+                    val text = partial.value
+                    if (text != null && text != lastRendered) {
+                        adapter.update(placeholderIndex, Message.assistant(body = text, details = null).copy(timestamp = startedAt))
+                        lastRendered = text
+                    }
+                    delay(RENDER_INTERVAL_MS)
                 }
             }
 
@@ -456,12 +467,23 @@ class ChatActivity : AppCompatActivity() {
                     val placeholderIndex = placeholderIndexes[index]
                     async(Dispatchers.IO) {
                         val partial = MutableStateFlow<String?>(null)
+                        // Sampled on a timer, same reasoning as send()'s
+                        // renderJob: a per-chunk markdown re-render on the
+                        // main thread competes with the Stop button's click
+                        // for the same queue, and compare mode runs several
+                        // of these at once.
                         val renderJob = launch(Dispatchers.Main) {
-                            partial.filterNotNull().conflate().collect { partialText ->
-                                adapter.update(
-                                    placeholderIndex,
-                                    Message.assistant(body = "**$label:**\n$partialText", details = null).copy(timestamp = startedAt),
-                                )
+                            var lastRendered: String? = null
+                            while (isActive) {
+                                val text = partial.value
+                                if (text != null && text != lastRendered) {
+                                    adapter.update(
+                                        placeholderIndex,
+                                        Message.assistant(body = "**$label:**\n$text", details = null).copy(timestamp = startedAt),
+                                    )
+                                    lastRendered = text
+                                }
+                                delay(RENDER_INTERVAL_MS)
                             }
                         }
                         // Deliberately not a blanket runCatching: a per-source
@@ -760,6 +782,13 @@ class ChatActivity : AppCompatActivity() {
         // without leaving the send button disabled for half an hour on an
         // actual hang.
         const val GENERATION_TIMEOUT_MS = 5 * 60 * 1_000L
+
+        // How often a streaming answer's bubble is allowed to re-render —
+        // see the renderJob comments in send()/sendCompare(). Fast enough
+        // that streaming still reads as continuous, slow enough that it
+        // never competes for the main thread with something as latency-
+        // sensitive as the Stop button's own click.
+        const val RENDER_INTERVAL_MS = 150L
 
         // Turns, not tokens: the context engine's own budget trims whatever
         // does not fit. This just bounds how much history gets rendered and
