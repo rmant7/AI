@@ -42,7 +42,11 @@ data class AssembledContext(
      */
     val images: List<ImageRef> = emptyList(),
 ) {
-    /** The prompt as the model sees it: labelled sections in priority order. */
+    /**
+     * The prompt as the model sees it: labelled sections, ordered so the
+     * user's actual question is the last thing before the model's own turn
+     * begins — see [FragmentSource.renderOrder] for why that matters.
+     */
     fun render(): String = fragments.joinToString("\n\n") { fragment ->
         val label = fragment.label ?: fragment.source.name
         "[$label]\n${fragment.text}"
@@ -117,7 +121,14 @@ class ContextEngine(
         }
 
         return AssembledContext(
-            fragments = kept,
+            // Selected by priority above — which is the right question for
+            // "what survives a tight budget" and the wrong one for "what
+            // order does the model read this in". Sorting stably by
+            // renderOrder here separates the two: the same fragments are
+            // kept, but the user's question ends up last instead of second,
+            // and equal-source fragments keep the relevance order they were
+            // selected in.
+            fragments = kept.sortedBy { it.source.renderOrder() },
             dropped = dropped,
             usedTokens = used,
             budgetTokens = budget,
@@ -126,6 +137,7 @@ class ContextEngine(
     }
 }
 
+/** How much a fragment deserves to survive a tight budget. Nothing to do with what order it is read in — see [renderOrder]. */
 private fun FragmentSource.defaultPriority(): Int = when (this) {
     FragmentSource.SYSTEM -> 100
     FragmentSource.USER_MESSAGE -> 90
@@ -136,4 +148,38 @@ private fun FragmentSource.defaultPriority(): Int = when (this) {
     FragmentSource.SEMANTIC_MEMORY -> 50
     FragmentSource.KNOWLEDGE -> 40
     FragmentSource.EPISODIC_MEMORY -> 30
+}
+
+/**
+ * Where a section sits in the finished prompt, lowest first — deliberately
+ * *not* [defaultPriority], which answers a completely different question.
+ *
+ * A language model continues from wherever the prompt stops, so whatever
+ * ends up last is what it treats as the thing to respond to. Ordering the
+ * prompt by priority put the user's question second from the top and left
+ * recalled memory and attached documents at the bottom, which is exactly
+ * what a model then answered: a real chat about desserts, asked to
+ * elaborate, came back mid-sentence with "о черной дыре." followed by an
+ * invented `[MODEL_RESPONSE]` label — the model had continued the recalled
+ * memory fragment the prompt happened to end on, and mimicked the bracket
+ * labels it saw around it, rather than answering the question buried above.
+ *
+ * So: instructions first, then background material, then the dialogue so
+ * far, and the user's actual question last — right where the model's own
+ * turn begins.
+ */
+private fun FragmentSource.renderOrder(): Int = when (this) {
+    FragmentSource.SYSTEM -> 0
+    FragmentSource.KNOWLEDGE -> 10
+    FragmentSource.SEMANTIC_MEMORY -> 20
+    FragmentSource.EPISODIC_MEMORY -> 30
+    FragmentSource.CONVERSATION -> 40
+    FragmentSource.TOOL_RESULT -> 50
+    // Material for *this* turn, so it sits with the question rather than
+    // with the background above: what the attached image shows, then what
+    // was said out loud, then what was typed. With voice input the
+    // transcript is the question, which is why it lands this close to the end.
+    FragmentSource.VISION -> 60
+    FragmentSource.TRANSCRIPT -> 70
+    FragmentSource.USER_MESSAGE -> 80
 }

@@ -12,7 +12,7 @@ class ContextEngineTest {
         ContextFragment(source = source, text = text, relevance = relevance)
 
     @Test
-    fun `fragments are ordered by priority, not by insertion`() {
+    fun `instructions come first and the question comes last, whatever order they arrive in`() {
         val assembled = engine.assemble(
             listOf(
                 fragment(FragmentSource.KNOWLEDGE, "doc"),
@@ -26,12 +26,35 @@ class ContextEngineTest {
         assertEquals(
             listOf(
                 FragmentSource.SYSTEM,
-                FragmentSource.USER_MESSAGE,
                 FragmentSource.KNOWLEDGE,
                 FragmentSource.EPISODIC_MEMORY,
+                FragmentSource.USER_MESSAGE,
             ),
             assembled.fragments.map { it.source },
         )
+    }
+
+    @Test
+    fun `recalled memory never gets to be the last thing the model reads`() {
+        // The real failure this ordering exists to prevent: a chat about
+        // desserts, asked to elaborate, answered "о черной дыре." — the
+        // prompt had ended on a recalled memory fragment, so that is what
+        // the model continued. The question must be what the prompt ends on.
+        val rendered = engine.assemble(
+            listOf(
+                fragment(FragmentSource.SEMANTIC_MEMORY, "чёрные дыры искривляют пространство"),
+                fragment(FragmentSource.CONVERSATION, "Вы: расскажи про десерты"),
+                fragment(FragmentSource.USER_MESSAGE, "Подробнее"),
+                fragment(FragmentSource.SYSTEM, "Ты локальный ассистент."),
+            ),
+            contextWindowTokens = 4096,
+        ).render()
+
+        assertTrue(
+            rendered.endsWith("[USER_MESSAGE]\nПодробнее"),
+            "the prompt must end on the question, not on background material — got:\n$rendered",
+        )
+        assertTrue(rendered.startsWith("[SYSTEM]\n"), "instructions belong at the top — got:\n$rendered")
     }
 
     @Test
@@ -126,14 +149,20 @@ class ContextEngineTest {
 
     @Test
     fun `an explicit priority overrides the source default`() {
+        // Priority decides what survives a tight budget, not what order the
+        // survivors are read in — so this asserts on what was kept, not on
+        // position. Budget is 900 tokens and each fragment is ~600, so only
+        // the higher-priority one fits, default ranking notwithstanding.
+        val big = "a".repeat(4 * 600)
         val assembled = engine.assemble(
             listOf(
-                fragment(FragmentSource.SYSTEM, "rules"),
-                ContextFragment(FragmentSource.KNOWLEDGE, "pinned doc", priority = 200),
+                fragment(FragmentSource.SYSTEM, big),
+                ContextFragment(FragmentSource.KNOWLEDGE, big, priority = 200),
             ),
-            contextWindowTokens = 4096,
+            contextWindowTokens = 1200,
         )
 
-        assertEquals("pinned doc", assembled.fragments.first().text)
+        assertEquals(listOf(FragmentSource.KNOWLEDGE), assembled.fragments.map { it.source })
+        assertEquals(listOf(FragmentSource.SYSTEM), assembled.dropped.map { it.fragment.source })
     }
 }
