@@ -248,31 +248,21 @@ object LocalModels {
             runtime = RuntimeKind.LITERT,
             exactFileName = "gemma-4-E2B-it.litertlm",
         ),
-        // The one real, confirmed exception to the CHIP_SPECIFIC exclusion
-        // above: litert-community actually publishes an ahead-of-time build
-        // compiled specifically for Tensor G5 (Pixel 10), separate from the
-        // universal file the entry above downloads. The universal file's
-        // NPU section is missing entirely — "TF_LITE_AUX not found in the
-        // model" is not a bug in this app, it is Backend.NPU being asked to
-        // run a file that was never compiled for it. This is a genuinely
-        // different artifact, so it is a separate catalog entry rather than
-        // a variant of the one above: fits within its own RAM/storage
-        // budget check, never silently swapped in for a device that can't
-        // use it, and never CPU-retried on failure (see LiteRtRuntime) since
-        // a Tensor-G5-only file failing NPU means "wrong device," not
-        // "CPU can run this same file instead."
-        LocalModelSeed(
-            id = "gemma-4-e2b-it-litert-npu-g5",
-            title = "Gemma 4 E2B IT (NPU, Tensor G5)",
-            repoIds = listOf("litert-community/gemma-4-E2B-it-litert-lm"),
-            paramsLabel = "E2B · NPU only",
-            note = "Собрана заранее под NPU/TPU Google Tensor G5 (Pixel 10) — на CPU или другом чипе не запустится. " +
-                "Используйте обычную «Gemma 4 E2B IT (Tensor SDK)» выше, если этот вариант не загрузится.",
-            approxSizeBytes = 3_110_000_000,
-            runtime = RuntimeKind.LITERT,
-            exactFileName = "gemma-4-E2B-it_Google_Tensor_G5.litertlm",
-            requiresNpu = true,
-        ),
+        // A Tensor G5 ahead-of-time build (gemma-4-E2B-it_Google_Tensor_G5.
+        // litertlm) genuinely exists in this repo and was briefly added here
+        // as its own catalog entry — removed again after real-device testing
+        // produced a native SIGSEGV loading it via Backend.NPU, not a clean
+        // Kotlin exception. That crash turned out to match a confirmed,
+        // currently unresolved upstream bug: google-ai-edge/LiteRT#7787
+        // documents a dispatcher/runtime protocol mismatch on Pixel 10 —
+        // the NPU runtime libraries needed to consume this exact toolchain's
+        // AOT output were never shipped for any litert release after v2.1.1,
+        // and Google staff (issue #7598) have only offered v2.1.1 as a
+        // mitigation, which fails a different way (SIGABRT). No app-side fix
+        // exists for this: a native segfault cannot be caught from Kotlin,
+        // so shipping a download button for this file would just be handing
+        // users a reliable app crash. Revisit once Google ships a fixed
+        // NPU dispatcher release.
         LocalModelSeed(
             id = "gemma-4-e4b-it-litert",
             title = "Gemma 4 E4B IT (Tensor SDK)",

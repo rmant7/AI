@@ -703,14 +703,18 @@ class AppContainer private constructor(private val context: Context) {
         }
 
         /**
-         * Best-effort Tensor G5 detection for the one catalog entry that
-         * needs it (see LocalModels.SEEDS: gemma-4-e2b-it-litert-npu-g5).
-         * SOC_MODEL only exists from API 31, and Google has not published
-         * the exact string it returns on Pixel 10 — matched loosely rather
-         * than pinned to one guessed value, so a formatting difference fails
-         * safe (hasNpu stays false, nothing auto-recommends the NPU-only
-         * model) instead of being confidently wrong the way a hardcoded
-         * exact file name already burned this app once.
+         * Best-effort Tensor G5 detection, kept for a future catalog entry
+         * that actually needs [DeviceProfile.hasNpu] to gate on it —
+         * currently no [LocalModelSeed] sets `requiresNpu`, since the one
+         * that did (a real Tensor-G5-specific `.litertlm` build) was pulled
+         * after crashing with a native SIGSEGV on real hardware; see the
+         * removal note in LocalModels.SEEDS for why (a confirmed, currently
+         * unfixed dispatcher bug upstream, not something wrong with this
+         * detection). SOC_MODEL only exists from API 31, and Google has not
+         * published the exact string it returns on Pixel 10 — matched
+         * loosely rather than pinned to one guessed value, so a formatting
+         * difference fails safe instead of being confidently wrong the way
+         * a hardcoded exact file name already burned this app once.
          */
         private fun isTensorG5(): Boolean {
             if (Build.VERSION.SDK_INT < 31) return false
