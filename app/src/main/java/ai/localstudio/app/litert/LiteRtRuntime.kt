@@ -93,7 +93,23 @@ class LiteRtRuntime(
             cacheDir = context.cacheDir.path,
         )
         val engine = Engine(config)
-        engine.initialize()
+        try {
+            engine.initialize()
+        } catch (e: Exception) {
+            // Engine(config) can itself allocate real native memory for the
+            // model (observed: several GB) before initialize() ever reports
+            // whether that backend actually works. Leaving a failed engine
+            // unclosed here meant an NPU attempt's native allocation could
+            // still be resident — with nothing left holding a Kotlin
+            // reference to free it deterministically — while the very next
+            // line starts loading an entirely separate CPU copy of the same
+            // multi-gigabyte model. On a device already tight on memory,
+            // that transient double-residency is a plausible way to get
+            // OOM-killed during what should be a clean fallback, which is
+            // exactly what happened on a real device loading a ~3.6GB model.
+            runCatching { engine.close() }
+            throw e
+        }
         return engine
     }
 
