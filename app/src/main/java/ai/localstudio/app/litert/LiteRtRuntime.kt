@@ -8,6 +8,7 @@ import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.TextModelHandle
+import android.app.ActivityManager
 import android.content.Context
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Engine
@@ -68,6 +69,30 @@ class LiteRtRuntime(
                 log("LITERT_LOAD", "${file.name}: FAILED on CPU: ${e.message}")
                 throw ModelLoadException("LiteRT-LM could not load ${file.name}: ${e.message}")
             }
+            // The failed engine above is already closed (see loadWith), but
+            // this SDK's native cleanup timing isn't documented — nothing
+            // here guarantees it released its allocation before this check
+            // runs. A live headroom check right before committing to a
+            // second full load of a multi-gigabyte model is the difference
+            // between a clean fallback and repeating the exact OOM kill this
+            // app already hit on a real device (gemma-4-e4b-it, ~3.6GB):
+            // the NPU attempt's footprint plus a fresh CPU copy, resident at
+            // the same time, on a phone that only budgeted RAM for one.
+            val requiredBytes = binding.effectiveRequiredRamBytes
+            val availableBytes = availableRamBytes()
+            if (availableBytes < requiredBytes) {
+                log(
+                    "LITERT_LOAD",
+                    "${file.name}: $backend failed (${e.message}); skipping automatic CPU retry — " +
+                        "only ${availableBytes / MB}MB free, need ~${requiredBytes / MB}MB",
+                )
+                throw ModelLoadException(
+                    "LiteRT-LM: $backend failed to load ${file.name} (${e.message}). Automatic CPU " +
+                        "retry was skipped: only ~${availableBytes / MB}MB RAM is free right now and " +
+                        "this model needs ~${requiredBytes / MB}MB — retrying could crash the app. " +
+                        "Free up memory, or select CPU as the backend in Settings and try again.",
+                )
+            }
             log("LITERT_LOAD", "${file.name}: $backend failed (${e.message}), retrying on CPU")
             try {
                 loadWith(file, LiteRtBackend.CPU)
@@ -113,7 +138,17 @@ class LiteRtRuntime(
         return engine
     }
 
+    /** Free memory this instant — deliberately *not* [ai.localstudio.core.registry.DeviceProfile.usableRamBytes]'s budget, which is sized off total RAM for exactly this reason (see its doc comment); the retry check above needs "would this fit right now", not "is this device generally suitable". */
+    private fun availableRamBytes(): Long {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            ?: return Long.MAX_VALUE
+        val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
+        return info.availMem
+    }
+
     companion object {
+        private const val MB = 1024L * 1024L
+
         /**
          * Whether the Tensor SDK's classes are actually on the classpath —
          * always true once the Gradle dependency is present, but checked
