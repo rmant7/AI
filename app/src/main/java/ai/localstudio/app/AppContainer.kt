@@ -377,7 +377,7 @@ class AppContainer private constructor(private val context: Context) {
             // bubble's heading, which should stay the provider for a chain
             // rather than claim whichever model happens to lead the rotation.
             val label = candidates.singleOrNull()?.label ?: provider.title
-            val isLocalOnly = candidates.all { it.binding.runtime.isLocalRuntime() }
+            val isLocalOnly = candidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP }
             label to buildOrchestrator(runtime, isLocalOnly, candidates)
         }
 
