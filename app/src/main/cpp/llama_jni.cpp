@@ -164,6 +164,49 @@ std::string genericInstructScaffold(const std::string &system, const std::string
     return out;
 }
 
+/**
+ * Gemma's own turn markers, applied directly rather than through
+ * llama_chat_apply_template() — for when the GGUF's template is
+ * recognizably Gemma's (see [looksLikeGemmaTemplate]) but minja, llama.cpp's
+ * bundled jinja engine, fails to execute it. Observed repeatedly on-device
+ * with gemma-4-e4b-it-q4's real template (18810 chars — Gemma's official
+ * template does real work: tool calls, multi-turn history, a `raise_exception`
+ * a system-role message trips): both the system+user attempt AND the
+ * system-folded-into-user retry below returned an error, on every single
+ * turn of a real conversation, not as an occasional fluke. Falling through
+ * to [genericInstructScaffold] at that point was a severe, silent quality
+ * regression for a model this catalog leans on heavily — its own Alpaca-
+ * style "### Instruction:/### Response:" headers are not part of what
+ * Gemma was trained to recognise as a turn boundary, and a full assembled
+ * conversation document handed to it with no turn markers it understands
+ * produces exactly the "answers as if it has no memory of this
+ * conversation" failure this exists to avoid: the model has no way to tell
+ * which part of that wall of text is the live question versus quoted
+ * history, so it answers as if none of it were there. Gemma's own markers
+ * are simple, stable across its releases, and require no jinja execution
+ * at all — this is what the model actually saw during training, applied
+ * directly instead of through a template engine that has already failed
+ * once on this exact GGUF.
+ */
+std::string gemmaScaffold(const std::string &system, const std::string &user) {
+    const std::string merged = system.empty() ? user : system + "\n\n" + user;
+    return "<start_of_turn>user\n" + merged + "<end_of_turn>\n<start_of_turn>model\n";
+}
+
+/**
+ * A template failing to *execute* does not mean its source vanished —
+ * llama_model_chat_template() still returns the raw jinja text, which for
+ * every Gemma release still contains its turn markers as string literals
+ * even where the surrounding control flow (tool-call handling, the
+ * system-role rejection mentioned above) is what actually broke. Checking
+ * for one of those literals is a cheap, reliable way to recognise "this is
+ * a Gemma-family GGUF" without needing the jinja engine to have succeeded
+ * at anything first.
+ */
+bool looksLikeGemmaTemplate(const char *tmpl) {
+    return tmpl != nullptr && std::string(tmpl).find("<start_of_turn>") != std::string::npos;
+}
+
 /** What [applyChatTemplate] actually did last, surfaced to Kotlin so it reaches the in-app log. */
 std::string g_lastTemplateInfo = "not attempted yet";
 
@@ -212,6 +255,11 @@ std::string applyChatTemplate(llama_model *model, const std::string &system, con
                 g_lastTemplateInfo = "applied (system folded into the user turn)";
                 return std::string(buffer.data(), written);
             }
+        }
+        if (looksLikeGemmaTemplate(tmpl)) {
+            g_lastTemplateInfo = "present but FAILED to apply — using Gemma's own turn markers directly";
+            LOGE("chat template present but llama_chat_apply_template failed; applying Gemma's markers directly");
+            return gemmaScaffold(system, user);
         }
         g_lastTemplateInfo = "present but FAILED to apply — falling back to a generic instruct scaffold";
         LOGE("chat template present but llama_chat_apply_template failed; using the generic scaffold");
