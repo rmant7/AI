@@ -77,6 +77,17 @@ struct Session {
     int32_t decodedTokens = 0;
     int64_t prefillMs = 0;
     int64_t decodeMs = 0;
+
+    // What applyChatTemplate() actually did for this session's last turn,
+    // surfaced to Kotlin so it reaches the in-app log. Session-local rather
+    // than a shared global: Compare mode can run more than one local
+    // candidate's generate() at once (each with its own Session), and a
+    // global would have one candidate's outcome silently overwritten by
+    // another's mid-flight — the log would report whichever candidate
+    // happened to finish applying its template last, not the one actually
+    // being asked about, which made this diagnostic string actively
+    // misleading rather than merely unhelpful.
+    std::string lastTemplateInfo = "not attempted yet";
 };
 
 int64_t nowMs() {
@@ -224,23 +235,25 @@ bool isGemmaArchitecture(llama_model *model) {
     return arch.rfind("gemma", 0) == 0; // covers gemma, gemma2, gemma3, gemma4, ...
 }
 
-/** What [applyChatTemplate] actually did last, surfaced to Kotlin so it reaches the in-app log. */
-std::string g_lastTemplateInfo = "not attempted yet";
-
 /**
  * Formats the turn with the template baked into the GGUF. Gemma, Qwen and
  * Llama each want a different layout, and feeding a raw prompt to an
  * instruction-tuned model produces confident nonsense — the model answers a
  * question it was never asked to answer in that form.
+ *
+ * Takes the whole [Session], not just its model, so the outcome is recorded
+ * on [Session::lastTemplateInfo] — see that field's own comment for why this
+ * must not be a shared global.
  */
-std::string applyChatTemplate(llama_model *model, const std::string &system, const std::string &user) {
+std::string applyChatTemplate(Session *session, const std::string &system, const std::string &user) {
+    llama_model *model = session->model;
     const char *tmpl = llama_model_chat_template(model, nullptr);
     if (tmpl == nullptr) {
         // Not a warning to shrug at: without the model's own turn markers
         // the answer quality drop is severe and looks like the model being
         // bad rather than the prompt being malformed. Recorded so it shows
         // up in the app's own log next to the load line, not just logcat.
-        g_lastTemplateInfo = "MISSING in GGUF — falling back to a generic instruct scaffold";
+        session->lastTemplateInfo = "MISSING in GGUF — falling back to a generic instruct scaffold";
         LOGE("no chat template in this GGUF; using the generic instruct scaffold");
         return genericInstructScaffold(system, user);
     }
@@ -269,20 +282,20 @@ std::string applyChatTemplate(llama_model *model, const std::string &system, con
             written = llama_chat_apply_template(
                 tmpl, userOnly, 1, true, buffer.data(), (int32_t) buffer.size());
             if (written > 0) {
-                g_lastTemplateInfo = "applied (system folded into the user turn)";
+                session->lastTemplateInfo = "applied (system folded into the user turn)";
                 return std::string(buffer.data(), written);
             }
         }
         if (looksLikeGemmaTemplate(tmpl) || isGemmaArchitecture(model)) {
-            g_lastTemplateInfo = "present but FAILED to apply — using Gemma's own turn markers directly";
+            session->lastTemplateInfo = "present but FAILED to apply — using Gemma's own turn markers directly";
             LOGE("chat template present but llama_chat_apply_template failed; applying Gemma's markers directly");
             return gemmaScaffold(system, user);
         }
-        g_lastTemplateInfo = "present but FAILED to apply — falling back to a generic instruct scaffold";
+        session->lastTemplateInfo = "present but FAILED to apply — falling back to a generic instruct scaffold";
         LOGE("chat template present but llama_chat_apply_template failed; using the generic scaffold");
         return genericInstructScaffold(system, user);
     }
-    g_lastTemplateInfo = "applied";
+    session->lastTemplateInfo = "applied";
     return std::string(buffer.data(), written);
 }
 
@@ -401,7 +414,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeChatTemplateInfo(JNIEnv *env, jo
     const std::string state = tmpl == nullptr
         ? "absent from this GGUF"
         : "present (" + std::to_string(strlen(tmpl)) + " chars)";
-    return env->NewStringUTF((state + "; last turn: " + g_lastTemplateInfo).c_str());
+    return env->NewStringUTF((state + "; last turn: " + session->lastTemplateInfo).c_str());
 }
 
 JNIEXPORT jlong JNICALL
@@ -513,7 +526,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     if (onToken == nullptr) return -2;
 
     const std::string prompt = applyChatTemplate(
-        session->model, toStdString(env, systemPrompt), toStdString(env, userPrompt));
+        session, toStdString(env, systemPrompt), toStdString(env, userPrompt));
 
     std::vector<llama_token> tokens(prompt.size() + 64);
     int32_t count = llama_tokenize(
@@ -718,6 +731,15 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
 
     const jsize imageLen = env->GetArrayLength(imageBytes);
     jbyte *imageData = env->GetByteArrayElements(imageBytes, nullptr);
+    if (imageData == nullptr) {
+        // The JNI spec allows this to fail and return null rather than
+        // guarantee a buffer — realistically only under exactly the memory
+        // pressure this app already runs close to. Passing null straight
+        // into mtmd_helper_bitmap_init_from_buf would be a null-pointer
+        // dereference a few frames down, not a clean failure.
+        LOGE("GetByteArrayElements returned null for the attached image (%d bytes)", (int) imageLen);
+        return -7;
+    }
     mtmd_helper_bitmap_wrapper wrapper = mtmd_helper_bitmap_init_from_buf(
         session->mctx, reinterpret_cast<const unsigned char *>(imageData), (size_t) imageLen, false);
     env->ReleaseByteArrayElements(imageBytes, imageData, JNI_ABORT); // read-only access, nothing to write back
@@ -733,7 +755,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
     // the model reads the image, then what it was asked about it, matching
     // how the same request would read for a vision-capable cloud model.
     const std::string userWithMarker = std::string(mtmd_default_marker()) + "\n" + toStdString(env, userPrompt);
-    const std::string prompt = applyChatTemplate(session->model, toStdString(env, systemPrompt), userWithMarker);
+    const std::string prompt = applyChatTemplate(session, toStdString(env, systemPrompt), userWithMarker);
 
     mtmd_input_text text{prompt.c_str(), prompt.size(), true, true};
     mtmd::input_chunks chunks(mtmd_input_chunks_init());
