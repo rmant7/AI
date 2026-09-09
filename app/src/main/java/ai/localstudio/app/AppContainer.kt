@@ -3,6 +3,10 @@ package ai.localstudio.app
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
+import ai.localstudio.commercialmemory.AppMemory
+import ai.localstudio.commercialmemory.ExperimentMode
+import ai.localstudio.commercialmemory.JsonlExperimentLogger
+import ai.localstudio.commercialmemory.MemoryExperimentRunner
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.context.ContextEngine
 import ai.localstudio.core.engine.ModelSelector
@@ -88,6 +92,18 @@ class AppContainer private constructor(private val context: Context) {
             ).text
         },
     )
+
+    /**
+     * Stage 3's measurement harness (see :commercial-memory), wired to the
+     * real app for the first time: every turn's retrieve→rank→budget→select
+     * pass is logged as one JSON line here, in the same directory chat
+     * history and attached documents already live in. This is what actually
+     * turns "an architecture that could collect Stage-4 data" into data
+     * getting collected, on a real device, from real use — the whole point
+     * of shipping this rather than only unit-testing it.
+     */
+    private val memoryExperimentLogger = JsonlExperimentLogger(File(context.filesDir, "memory-experiments.jsonl"))
+    val memoryExperimentRunner = MemoryExperimentRunner(AppMemory(memory), logger = memoryExperimentLogger)
 
     val documents = DocumentStore(context)
 
@@ -412,6 +428,8 @@ class AppContainer private constructor(private val context: Context) {
             runtimeManager = manager,
             contextEngine = ContextEngine(),
             memory = memory,
+            memoryExperiment = memoryExperimentRunner,
+            memoryExperimentMode = ExperimentMode.COMMERCIAL_MEMORY,
             systemPrompt = settings.systemPrompt.ifBlank { null },
             // The context-window setting exists to keep a local llama.cpp
             // context (and its RAM) small enough for the device — it has
