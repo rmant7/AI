@@ -197,16 +197,17 @@ class NodeExecutors(
             // about a document shares no vocabulary with that document's
             // actual content. Attaching a specific file *is* the relevance
             // signal here, so this bypasses term-overlap scoring entirely by
-            // filtering on the "source" metadata AppContainer.rememberDocument
-            // tags every chunk with, rather than going through search()'s
-            // ordinary text query.
+            // filtering on the "source" *and* "conversationId" metadata
+            // AppContainer.rememberDocument tags every chunk with — the
+            // second key is what keeps two different chats that happen to
+            // attach a same-named file from pulling in each other's content.
             if (memory != null) {
                 for (name in context.attachedDocuments) {
                     val chunks = memory.search(
                         MemoryQuery(
                             text = "",
                             scopes = setOf(MemoryScope.SEMANTIC),
-                            metadataFilter = mapOf("source" to name),
+                            metadataFilter = mapOf("source" to name, "conversationId" to context.conversationId),
                             limit = ATTACHED_DOCUMENT_CHUNK_LIMIT,
                         ),
                     )

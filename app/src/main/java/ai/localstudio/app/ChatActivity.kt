@@ -13,6 +13,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
@@ -600,7 +601,7 @@ class ChatActivity : AppCompatActivity() {
             }
             result
                 .onSuccess { chunks ->
-                    container.rememberDocument(name, chunks)
+                    container.rememberDocument(name, chunks, conversationId)
                     container.settings.memoryEnabled = true
                     if (name !in sessionDocumentNames) sessionDocumentNames += name
                     invalidateOptionsMenu()
@@ -626,9 +627,28 @@ class ChatActivity : AppCompatActivity() {
      * image the eventual answer will silently ignore.
      */
     private fun attachImage(uri: Uri) {
-        val visionAvailable = container.settings.enabledProviderIds.any { CloudProviders.byId(it).visionCapable }
+        // CloudProvider.visionCapable answers this correctly for a cloud
+        // provider (a fixed property of the API), but local's own vision
+        // support isn't fixed at all — it depends on which specific model
+        // is installed and whether its projector downloaded (see
+        // AppContainer.localVisionAvailable's own comment). Checking the
+        // static flag for "local" here meant this refused an image outright
+        // — "none of the enabled models understands images" — for a model
+        // that, in fact, did.
+        val visionAvailable = container.settings.enabledProviderIds.any { id ->
+            if (id == CloudProviders.LOCAL.id) container.localVisionAvailable() else CloudProviders.byId(id).visionCapable
+        }
         if (!visionAvailable) {
-            Toast.makeText(this, R.string.chat_attach_image_no_vision, Toast.LENGTH_LONG).show()
+            // A dialog, not a Toast: this explains *why* and what to do
+            // about it, and a Toast — gone in a few seconds regardless of
+            // length, easy to miss entirely if the message is mid-scroll or
+            // the keyboard just opened — isn't something a user can go back
+            // and actually read once it's dismissed itself.
+            AlertDialog.Builder(this)
+                .setTitle(R.string.chat_attach_image_no_vision_title)
+                .setMessage(R.string.chat_attach_image_no_vision)
+                .setPositiveButton(R.string.dialog_ok, null)
+                .show()
             return
         }
         lifecycleScope.launch {

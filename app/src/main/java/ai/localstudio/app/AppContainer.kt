@@ -127,7 +127,11 @@ class AppContainer private constructor(private val context: Context) {
             if (!settings.memoryEnabled) return@launch
             documents.list().forEach { doc ->
                 val ids = doc.chunks.map { chunk ->
-                    memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to doc.name))
+                    memory.remember(
+                        chunk,
+                        MemoryScope.SEMANTIC,
+                        mapOf("source" to doc.name, "conversationId" to doc.conversationId),
+                    )
                 }
                 synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
             }
@@ -145,18 +149,29 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
-    suspend fun rememberDocument(name: String, chunks: List<String>): AttachedDocument = withContext(Dispatchers.IO) {
-        val ids = chunks.map { chunk -> memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to name)) }
-        val doc = AttachedDocument(
-            id = "doc-${System.currentTimeMillis()}",
-            name = name,
-            chunks = chunks,
-            addedAt = System.currentTimeMillis(),
-        )
-        documents.add(doc)
-        synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
-        doc
-    }
+    /**
+     * [conversationId] is tagged onto every chunk's memory metadata, not just
+     * onto the stored [AttachedDocument] record — [NodeExecutors.contextBuild]
+     * filters on it when force-including an attached document's content, so
+     * two different chats attaching files that happen to share a name can't
+     * cross-contaminate each other's context.
+     */
+    suspend fun rememberDocument(name: String, chunks: List<String>, conversationId: String): AttachedDocument =
+        withContext(Dispatchers.IO) {
+            val ids = chunks.map { chunk ->
+                memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to name, "conversationId" to conversationId))
+            }
+            val doc = AttachedDocument(
+                id = "doc-${System.currentTimeMillis()}",
+                name = name,
+                chunks = chunks,
+                addedAt = System.currentTimeMillis(),
+                conversationId = conversationId,
+            )
+            documents.add(doc)
+            synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
+            doc
+        }
 
     suspend fun forgetDocument(id: String) = withContext(Dispatchers.IO) {
         val ids = synchronized(documentMemoryIds) { documentMemoryIds.remove(id) }
@@ -388,7 +403,38 @@ class AppContainer private constructor(private val context: Context) {
         return CloudProviders.ALL.filter { it.id in ids }
     }
 
-    /** The best-fit installed local model as a fallback candidate, or null when nothing is installed. */
+    /**
+     * Same resolution [localCandidate] uses — the explicit choice from
+     * Models if it's actually installed, [ModelSelector]'s best fit
+     * otherwise — factored out so [localVisionAvailable] can ask "which
+     * model, specifically" without also building a runtime and a
+     * [FallbackCandidate] just to answer that.
+     */
+    private fun effectiveLocalSelection(registry: ModelRegistry): SelectedModel? {
+        val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
+        val chosen = registry.find(chosenId)
+            ?.takeIf { it.state == InstallState.INSTALLED }
+            ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
+        return chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION)
+    }
+
+    /**
+     * Whether the local model that would actually be used right now can see
+     * an attached image — never a static flag the way [CloudProvider.visionCapable]
+     * is for a cloud provider: local vision depends on which specific model
+     * is installed and whether its projector actually downloaded (see
+     * ModelStore.hasMmproj), not on the llama.cpp runtime as a whole. Gating
+     * "can I even attach an image" on [CloudProviders.LOCAL]'s own
+     * (necessarily false, for exactly that reason) visionCapable flag meant
+     * attaching an image was refused outright — "none of the enabled models
+     * understands images" — for a model that, in fact, did.
+     */
+    fun localVisionAvailable(): Boolean {
+        val seedId = effectiveLocalSelection(localRegistry())?.model?.id ?: return false
+        val seed = LocalModels.SEEDS.firstOrNull { it.id == seedId } ?: return false
+        return modelStore.hasMmproj(seed)
+    }
+
     /**
      * The model the user explicitly picked via "Использовать" in Models,
      * if it's actually installed right now — [ModelSelector] otherwise.
@@ -406,11 +452,7 @@ class AppContainer private constructor(private val context: Context) {
      */
     private fun localCandidate(): FallbackCandidate? {
         val registry = localRegistry()
-        val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
-        val chosen = registry.find(chosenId)
-            ?.takeIf { it.state == InstallState.INSTALLED }
-            ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
-        val selected = chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
+        val selected = effectiveLocalSelection(registry) ?: return null
         return FallbackCandidate(
             // Names the specific installed model, not just "Локально на
             // устройстве" — with several local models to choose from
