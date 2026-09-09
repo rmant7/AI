@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     // Both versions are declared here so AGP and the Kotlin Android plugin land
     // in the same classpath — the Kotlin plugin needs AGP's classes to apply.
@@ -28,6 +30,30 @@ val gitSha: String = runCatching {
 // Correlates with the "apk-N" GitHub Release tag CI publishes under.
 val ciRun: String = System.getenv("GITHUB_RUN_NUMBER") ?: "local"
 
+// Bundled cloud-provider keys: sourced from GitHub Actions secrets
+// (<PREFIX>_1, _2, ...) at CI build time, never committed to the repo, baked
+// into BuildConfig as a comma-joined list (Base64-encoded — see below) so a
+// fresh install has a working cloud fallback with nothing for the user to
+// type in. See ai.localstudio.app.keys.BundledApiKeys, which decodes this
+// and only ever reaches for one of these once the user's own key pool has
+// nothing usable. Locally (no such env vars set) this is just an empty
+// string, same as "no bundled keys".
+//
+// Base64, not the raw joined string: this CI workflow tees the whole build
+// log to a file and publishes a grepped excerpt of it to the (public)
+// ci-status branch on every run. A raw key is very unlikely to ever reach
+// that log, but an unlikely path (a value that broke the generated Kotlin
+// string literal and got echoed back in a compiler error, say) is exactly
+// the kind of thing worth foreclosing outright rather than trusting not to
+// happen — Base64's alphabet can never itself break a Kotlin string
+// literal, so there is no such path left for it to happen through.
+fun bundledKeys(envPrefix: String): String {
+    val joined = (1..5)
+        .mapNotNull { System.getenv("${envPrefix}_$it")?.trim()?.takeIf { key -> key.isNotEmpty() } }
+        .joinToString(",")
+    return Base64.getEncoder().encodeToString(joined.toByteArray(Charsets.UTF_8))
+}
+
 android {
     namespace = "ai.localstudio.app"
     compileSdk = 35
@@ -41,6 +67,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "CI_RUN", "\"$ciRun\"")
+        buildConfigField("String", "GROQ_BUNDLED_KEYS", "\"${bundledKeys("GROQ_API_KEY")}\"")
+        buildConfigField("String", "GEMINI_BUNDLED_KEYS", "\"${bundledKeys("GEMINI_API_KEY")}\"")
 
         ndk {
             // arm64 is every phone worth running a model on; x86_64 exists so
@@ -108,9 +136,15 @@ android {
 dependencies {
     implementation(project(":core"))
     implementation(project(":openai"))
+    implementation(project(":whisper"))
 
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    // Reads embedded orientation for an attached photo — BitmapFactory
+    // ignores it, so downscaling+recompressing without this would rotate
+    // sideways every image a phone camera saves as landscape bytes with a
+    // rotate tag rather than pre-rotated pixels.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
@@ -122,9 +156,6 @@ dependencies {
     // Renders the assistant's markdown (lists, **bold**, code) as formatted
     // text instead of the raw asterisks and hashes an LLM's output is full of.
     implementation("io.noties.markwon:core:4.6.2")
-
-    // On-device speech-to-text (Whisper, TFLite).
-    implementation("org.tensorflow:tensorflow-lite:2.16.1")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")

@@ -83,6 +83,25 @@ class OpenAiException(val status: Int, val body: String) : Exception(
 }
 
 /**
+ * Groq's own free-tier rate-limit message spells out the wait itself —
+ * "...Please try again in 15.84s." — and OpenAiException's message already
+ * surfaces that sentence via [OpenAiException.describe]. A small buffer is
+ * added on top of the parsed value: the provider's own clock and this
+ * device's are not perfectly synced, and retrying at the exact instant the
+ * limit lifts risks landing on the wrong side of it by a few hundred
+ * milliseconds. Returns null for any message that doesn't name a wait —
+ * most notably an actual daily-quota 429, which callers should fall back to
+ * [ApiKeyRotator.DEFAULT_COOLDOWN_MS] for instead.
+ */
+private val RETRY_AFTER_PATTERN = Regex("""try again in ([0-9]+(?:\.[0-9]+)?)\s*s""", RegexOption.IGNORE_CASE)
+
+private fun retryAfterMs(message: String?): Long? =
+    message
+        ?.let { RETRY_AFTER_PATTERN.find(it) }
+        ?.groupValues?.get(1)?.toDoubleOrNull()
+        ?.let { seconds -> (seconds * 1000).toLong() + 2_000L }
+
+/**
  * Runs models on an OpenAI-compatible endpoint — Ollama, llama-server, or any
  * other server speaking the same API.
  *
@@ -200,7 +219,7 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
             // streaming starts), so in practice it is always false there too.
             var emittedAny = false
             var ioRetries = 0
-            val rotator = config.keyRotator?.takeIf { it.poolSize() > 0 }
+            val rotator = config.keyRotator?.takeIf { it.hasAnyKey() }
             while (true) {
                 // Re-read every attempt, not just once before the loop: a 429
                 // below moves the pool's active key on, and the next attempt
@@ -208,7 +227,7 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                 val keyEntry = rotator?.activeKey()
                 if (rotator != null && keyEntry == null) {
                     throw ModelLoadException(
-                        rotator.exhaustionMessage() ?: "Нет доступных ключей API для этого провайдера",
+                        rotator.exhaustionMessage() ?: "No available API keys for this provider",
                     )
                 }
                 try {
@@ -235,11 +254,32 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                     // rotate to the pool's next key and try again rather than
                     // failing a turn that a second key would have answered.
                     if (rotator != null && keyEntry != null && e.status == 429 && !emittedAny) {
-                        rotator.markExhausted(keyEntry.id)
+                        // The blanket 24h default is right for an actual daily
+                        // quota, but Groq's free tier hands out the same HTTP
+                        // 429 for an ordinary per-minute burst — its own error
+                        // message says as much ("...Please try again in
+                        // 15.84s.") — and blacklisting the only bundled key
+                        // for a full day over a transient burst defeats the
+                        // point of bundling one at all. When the provider's
+                        // own message names a wait, that becomes the cooldown
+                        // instead of the default.
+                        val cooldownMs = retryAfterMs(e.message) ?: ApiKeyRotator.DEFAULT_COOLDOWN_MS
+                        rotator.markExhausted(keyEntry.id, cooldownMs)
                         continue
                     }
                     throw e
-                } catch (e: java.io.IOException) {
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Broader than java.io.IOException on purpose: a
+                    // connection blocked or intercepted by network-level
+                    // filtering (a DPI box resetting the connection, an ISP
+                    // returning a malformed response instead of actually
+                    // reaching the provider) does not reliably show up as one
+                    // specific exception type across every Android version —
+                    // whatever it throws, one retry then a normal, catchable
+                    // failure beats letting an unexpected exception type slip
+                    // past this loop uncaught.
                     if (emittedAny || cancelled.get() || ioRetries >= STREAM_RETRY_LIMIT) throw e
                     ioRetries++
                 }

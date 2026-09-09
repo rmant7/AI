@@ -47,24 +47,51 @@ class ApiKeyRotator(
     private val store: ApiKeyStore,
     private val providerId: String,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * A second, separate pool for keys bundled into the build itself — only
+     * ever reached for once [store]'s own pool has nothing usable right now,
+     * so a key the user added always wins. Kept in a store of its own rather
+     * than merged into [store]'s: these never came from the user, so they
+     * have no business appearing in a UI that lists what the user typed in
+     * and lets them delete it.
+     */
+    private val bundledStore: ApiKeyStore? = null,
 ) {
 
-    /** The key to use right now, or null when the pool is empty or every key is cooling down. */
+    /** The key to use right now, or null when both pools are empty or every key is cooling down. */
     fun activeKey(): ApiKeyEntry? {
         val now = clock()
-        return store.load(providerId).firstOrNull { it.cooldownUntilEpochMs <= now }
+        store.load(providerId).firstOrNull { it.cooldownUntilEpochMs <= now }?.let { return it }
+        return bundledStore?.load(providerId)?.firstOrNull { it.cooldownUntilEpochMs <= now }
     }
 
     /** Call after an HTTP 429 (rate limit or daily quota exceeded) using this key. */
     fun markExhausted(keyId: String, cooldownMs: Long = DEFAULT_COOLDOWN_MS) {
         val until = clock() + cooldownMs
         val pool = store.load(providerId)
-        store.save(providerId, pool.map { if (it.id == keyId) it.copy(cooldownUntilEpochMs = until) else it })
+        if (pool.any { it.id == keyId }) {
+            store.save(providerId, pool.map { if (it.id == keyId) it.copy(cooldownUntilEpochMs = until) else it })
+            return
+        }
+        val bundled = bundledStore ?: return
+        val bundledPool = bundled.load(providerId)
+        if (bundledPool.any { it.id == keyId }) {
+            bundled.save(providerId, bundledPool.map { if (it.id == keyId) it.copy(cooldownUntilEpochMs = until) else it })
+        }
     }
 
     fun pool(): List<ApiKeyEntry> = store.load(providerId)
 
     fun poolSize(): Int = pool().size
+
+    /**
+     * Whether there is a configured pool at all — the user's own, the
+     * bundled one, or both — regardless of whether anything in it is
+     * currently on cooldown. Callers use this to decide whether key rotation
+     * applies at all versus falling through to some other, keyless path;
+     * [poolSize] alone would miss a bundled-only pool with no user keys.
+     */
+    fun hasAnyKey(): Boolean = pool().isNotEmpty() || bundledStore?.load(providerId)?.isNotEmpty() == true
 
     fun add(key: String): ApiKeyEntry {
         val entry = ApiKeyEntry(id = java.util.UUID.randomUUID().toString(), key = key.trim())
@@ -82,14 +109,22 @@ class ApiKeyRotator(
      * usable (null) — an empty pool means "no pool configured yet", which the
      * caller is expected to handle by falling back to some other key source,
      * not by treating it as exhaustion.
+     *
+     * Considers both pools, same as [activeKey] and [hasAnyKey] — checking
+     * only [pool] here made this report nothing useful for the exact case
+     * [hasAnyKey] exists for: a user with no key of their own, running
+     * entirely on a bundled one. That combination produced the single most
+     * confusing failure this app can show — "No available API keys for this
+     * provider" while a bundled key visibly existed and was simply cooling
+     * down from a rate limit — instead of the real reason and an ETA.
      */
     fun exhaustionMessage(): String? {
-        val pool = pool()
-        if (pool.isEmpty()) return null
+        val combined = pool() + bundledStore?.load(providerId).orEmpty()
+        if (combined.isEmpty()) return null
         val now = clock()
-        if (pool.any { it.cooldownUntilEpochMs <= now }) return null
-        val minutesLeft = ((pool.minOf { it.cooldownUntilEpochMs } - now) / 60_000L).coerceAtLeast(0)
-        return "все ${pool.size} ключ(а/ей) достигли дневного лимита; следующий освободится через ~$minutesLeft мин"
+        if (combined.any { it.cooldownUntilEpochMs <= now }) return null
+        val minutesLeft = ((combined.minOf { it.cooldownUntilEpochMs } - now) / 60_000L).coerceAtLeast(0)
+        return "all ${combined.size} key(s) have hit the daily limit; the next one frees up in ~$minutesLeft min"
     }
 
     companion object {

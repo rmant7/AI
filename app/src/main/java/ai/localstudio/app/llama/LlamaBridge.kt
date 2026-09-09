@@ -54,6 +54,38 @@ class LlamaBridge {
         callback: TokenSink,
     ): Int
 
+    /**
+     * Loads the vision encoder a multimodal model ships as a separate file
+     * (mmproj) alongside its main GGUF — llama.cpp keeps the two apart, so
+     * this is a second call after [nativeLoad], not part of it. Returns
+     * false for a model with no real projector at that path, or one whose
+     * projector doesn't actually report vision support; either way
+     * [nativeGenerateWithImage] then has nothing to work with.
+     */
+    external fun nativeLoadMmproj(handle: Long, mmprojPath: String, threads: Int): Boolean
+
+    /**
+     * Same contract as [nativeGenerate], for a turn with exactly one
+     * attached image — [imageBytes] is the raw, already-decoded file
+     * content (whatever format stb_image handles: jpg, png, bmp, gif, ...),
+     * not a path or URI. Requires [nativeLoadMmproj] to have already
+     * succeeded for this handle; the prompt-cache reuse [nativeGenerate]
+     * does across turns does not apply here (see the native side's own doc
+     * comment) — every image turn starts the KV cache clean.
+     */
+    external fun nativeGenerateWithImage(
+        handle: Long,
+        systemPrompt: String?,
+        userPrompt: String,
+        imageBytes: ByteArray,
+        maxTokens: Int,
+        temperature: Float,
+        topP: Float,
+        topK: Int,
+        repeatPenalty: Float,
+        callback: TokenSink,
+    ): Int
+
     companion object {
         /**
          * Whether the native library is present and loadable on this device.

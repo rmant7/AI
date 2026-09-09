@@ -12,20 +12,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** Where a downloaded Whisper model — and the tokenizer it shares with every other size — live. */
+/**
+ * Where a downloaded Whisper model lives — a single self-contained ggml
+ * `.bin` file (weights, tokenizer and mel filters all in one), unlike the
+ * old TFLite path this replaced, which needed a separate shared vocab.json.
+ */
 class WhisperStore(private val context: Context) {
 
     fun directory(): File = File(context.filesDir, "whisper").apply { mkdirs() }
 
-    fun modelFile(seed: WhisperModelSeed): File = File(directory(), "${seed.id}.tflite")
-    fun modelPartFile(seed: WhisperModelSeed): File = File(directory(), "${seed.id}.tflite.part")
-    fun vocabFile(): File = File(directory(), "vocab.json")
-    fun vocabPartFile(): File = File(directory(), "vocab.json.part")
+    fun modelFile(seed: WhisperModelSeed): File = File(directory(), "${seed.id}.bin")
+    fun modelPartFile(seed: WhisperModelSeed): File = File(directory(), "${seed.id}.bin.part")
 
     fun isInstalled(seed: WhisperModelSeed): Boolean =
-        modelFile(seed).let { it.isFile && it.length() > MIN_PLAUSIBLE_MODEL_SIZE } && hasVocab()
-
-    fun hasVocab(): Boolean = vocabFile().let { it.isFile && it.length() > MIN_PLAUSIBLE_VOCAB_SIZE }
+        modelFile(seed).let { it.isFile && it.length() > MIN_PLAUSIBLE_MODEL_SIZE }
 
     /**
      * [preferredId] wins if that size is actually installed; otherwise the
@@ -47,7 +47,6 @@ class WhisperStore(private val context: Context) {
 
     private companion object {
         const val MIN_PLAUSIBLE_MODEL_SIZE = 10L * 1024 * 1024
-        const val MIN_PLAUSIBLE_VOCAB_SIZE = 10L * 1024
     }
 }
 
@@ -76,8 +75,6 @@ class WhisperDownloads(
         states.value[seed.id] ?: if (store.isInstalled(seed)) WhisperDownloadState.Installed else WhisperDownloadState.Idle
 
     fun start(seed: WhisperModelSeed) {
-        // Only one at a time: every size shares one vocab.json destination
-        // file, and two concurrent downloads would race writing it.
         if (jobs.values.any { it.isActive }) return
 
         onDownloadStarted()
@@ -85,21 +82,12 @@ class WhisperDownloads(
         activeDownloader = downloader
         jobs[seed.id] = scope.launch {
             try {
-                publish(seed, WhisperDownloadState.Running(DownloadProgress(0, seed.approxSizeBytes), "модель"))
+                publish(seed, WhisperDownloadState.Running(DownloadProgress(0, seed.approxSizeBytes), "model"))
                 downloader.download(
                     url = seed.modelUrl,
                     destination = store.modelFile(seed),
                     tempFile = store.modelPartFile(seed),
-                ) { progress -> publish(seed, WhisperDownloadState.Running(progress, "модель")) }
-
-                if (!store.hasVocab()) {
-                    publish(seed, WhisperDownloadState.Running(DownloadProgress(0, 0), "словарь"))
-                    downloader.download(
-                        url = WhisperModels.VOCAB_URL,
-                        destination = store.vocabFile(),
-                        tempFile = store.vocabPartFile(),
-                    ) { progress -> publish(seed, WhisperDownloadState.Running(progress, "словарь")) }
-                }
+                ) { progress -> publish(seed, WhisperDownloadState.Running(progress, "model")) }
 
                 publish(seed, WhisperDownloadState.Installed)
             } catch (e: Exception) {

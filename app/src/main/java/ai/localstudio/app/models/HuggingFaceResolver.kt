@@ -46,12 +46,12 @@ object HuggingFaceResolver {
                 // first one will repeat identically for the rest. Trying them
                 // anyway just produces the same line four times and burns the
                 // retry budget on a problem that is not about the repository.
-                throw IOException("Нет соединения с huggingface.co — проверьте интернет. (${e.message})")
+                throw IOException("No connection to huggingface.co — check your internet. (${e.message})")
             } catch (e: Exception) {
                 failures += "$repoId: ${e.message}"
             }
         }
-        throw IOException("Ни один источник не подошёл.\n" + failures.joinToString("\n"))
+        throw IOException("No source worked.\n" + failures.joinToString("\n"))
     }
 
     private class NoNetworkException(message: String) : IOException(message)
@@ -78,12 +78,37 @@ object HuggingFaceResolver {
     fun resolve(repoId: String, token: String? = null): ResolvedModelFile {
         val entries = fetchTree(repoId, token)
         val best = ArtifactResolver.pickBest(entries)
-            ?: throw IOException("нет подходящего файла .gguf (возможно, модель разбита на части)")
+            ?: throw IOException("no suitable .gguf file (the model may be split into parts)")
         return ResolvedModelFile(
             fileName = best.path.substringAfterLast('/'),
             sizeBytes = best.sizeBytes,
             downloadUrl = "https://huggingface.co/$repoId/resolve/main/${best.path}",
         )
+    }
+
+    /**
+     * Looks for one exact file name across a list of repos — used for a
+     * vision projector (mmproj), which carries no quant tag [ArtifactResolver]
+     * could match on and would otherwise have to be guessed at.
+     *
+     * Returns null rather than throwing on a total miss: a projector is a
+     * bonus, not a requirement, so a missing or renamed one should leave the
+     * model itself installable and usable, just without vision — never fail
+     * the whole download the way [resolveAny] does for the main GGUF.
+     */
+    fun resolveExact(repoIds: List<String>, fileName: String, token: String? = null): Pair<String, ResolvedModelFile>? {
+        for (repoId in repoIds) {
+            val match = runCatching { fetchTree(repoId, token) }
+                .getOrNull()
+                ?.firstOrNull { it.path.substringAfterLast('/') == fileName }
+                ?: continue
+            return repoId to ResolvedModelFile(
+                fileName = fileName,
+                sizeBytes = match.sizeBytes,
+                downloadUrl = "https://huggingface.co/$repoId/resolve/main/${match.path}",
+            )
+        }
+        return null
     }
 
     private fun fetchTree(repoId: String, token: String?): List<RemoteArtifact> {
@@ -97,14 +122,14 @@ object HuggingFaceResolver {
         }
         try {
             val status = connection.responseCode
-            if (status == 404) throw IOException("репозиторий не найден")
+            if (status == 404) throw IOException("repository not found")
             if (status == 401 || status == 403) {
                 throw IOException(
-                    "доступ закрыт (HTTP $status) — репозиторий gated: нужен токен Hugging Face " +
-                        "и принятая лицензия",
+                    "access denied (HTTP $status) — this repository is gated: it needs a Hugging Face " +
+                        "token and an accepted license",
                 )
             }
-            if (status !in 200..299) throw IOException("Hugging Face ответил HTTP $status")
+            if (status !in 200..299) throw IOException("Hugging Face responded with HTTP $status")
             return parseTree(connection.inputStream.bufferedReader().use { it.readText() })
         } finally {
             connection.disconnect()

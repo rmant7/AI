@@ -8,6 +8,10 @@ repositories {
 }
 
 dependencies {
+    // api, not implementation: MemoryProvider and friends are part of this
+    // module's own public surface (NodeExecutors, Orchestrator), so anything
+    // that depends on :core needs to see :memory's types too.
+    api(project(":memory"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation(kotlin("test"))

@@ -33,6 +33,8 @@ class ModelDownloads(
      * Android services or notifications.
      */
     private val onDownloadStarted: () -> Unit = {},
+    /** Best-effort mmproj download failures go here rather than surfacing as the model's own DownloadState.Failed — see [downloadMmproj]. */
+    private val appLogForMmproj: ((String) -> Unit)? = null,
 ) {
 
     private val states = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
@@ -41,11 +43,52 @@ class ModelDownloads(
     private val jobs = mutableMapOf<String, Job>()
     private val downloaders = mutableMapOf<String, ModelDownloader>()
 
+    /**
+     * When a backfill attempt (see [start]'s own comment) may next retry for
+     * a given seed, keyed by seed id — set only after a *failed* attempt.
+     * Every message sent rebuilds the local registry, which calls [start]
+     * again for any seed still missing its projector; with no cooldown, a
+     * network that simply can't reach huggingface.co right now (observed on
+     * a real device: DNS resolution failing for that host specifically,
+     * while the rest of the internet worked) would retry — with its own
+     * internal multi-attempt retry inside [downloadMmproj] — on every single
+     * turn for as long as that lasted, for a host with no realistic chance
+     * of answering differently a few seconds later.
+     */
+    private val mmprojBackfillCooldownUntil = mutableMapOf<String, Long>()
+
     fun stateOf(seed: LocalModelSeed): DownloadState =
         states.value[seed.id] ?: if (store.isInstalled(seed)) DownloadState.Installed else DownloadState.Idle
 
     fun start(seed: LocalModelSeed) {
         if (jobs[seed.id]?.isActive == true) return
+
+        // A model already installed before this seed declared a projector
+        // (or one downloaded while the projector's own fetch failed) has its
+        // main GGUF sitting right there — every seed's own download flow
+        // below assumes it's starting from nothing and re-resolves and
+        // re-fetches that multi-gigabyte file unconditionally. Backfilling
+        // just the missing projector, the same best-effort way a fresh
+        // install does (see downloadMmproj's own comment), is what actually
+        // turns vision on for a model someone already has instead of silent
+        // permanent text-only — nothing else ever revisits an installed
+        // model to check whether it's missing a file a later app update
+        // started expecting.
+        if (store.isInstalled(seed) && seed.mmprojFileName != null && !store.hasMmproj(seed)) {
+            if (System.currentTimeMillis() < (mmprojBackfillCooldownUntil[seed.id] ?: 0L)) return
+            onDownloadStarted()
+            val backfillDownloader = ModelDownloader()
+            downloaders[seed.id] = backfillDownloader
+            jobs[seed.id] = scope.launch {
+                downloadMmproj(seed, backfillDownloader)
+                if (!store.hasMmproj(seed)) {
+                    mmprojBackfillCooldownUntil[seed.id] = System.currentTimeMillis() + MMPROJ_BACKFILL_COOLDOWN_MS
+                }
+                publish(seed, DownloadState.Installed)
+                downloaders.remove(seed.id)
+            }
+            return
+        }
 
         onDownloadStarted()
         val downloader = ModelDownloader()
@@ -56,7 +99,7 @@ class ModelDownloads(
                 val (source, resolved) = HuggingFaceResolver.resolveAny(seed.repoIds, tokenProvider())
                 val free = store.freeSpaceBytes()
                 if (resolved.sizeBytes > 0 && resolved.sizeBytes + SLACK_BYTES > free) {
-                    publish(seed, DownloadState.Failed("Не хватает места: нужно ${gb(resolved.sizeBytes)}, свободно ${gb(free)}"))
+                    publish(seed, DownloadState.Failed("Not enough space: need ${gb(resolved.sizeBytes)}, ${gb(free)} free"))
                     return@launch
                 }
 
@@ -85,11 +128,13 @@ class ModelDownloads(
                     publish(
                         seed,
                         DownloadState.Failed(
-                            "Файл повреждён: получено $installedSize байт, ожидалось ${resolved.sizeBytes}",
+                            "File corrupted: got $installedSize bytes, expected ${resolved.sizeBytes}",
                         ),
                     )
                     return@launch
                 }
+
+                if (seed.mmprojFileName != null) downloadMmproj(seed, downloader)
 
                 publish(seed, DownloadState.Installed)
             } catch (e: Exception) {
@@ -97,6 +142,37 @@ class ModelDownloads(
             } finally {
                 downloaders.remove(seed.id)
             }
+        }
+    }
+
+    /**
+     * Best-effort: failure here does not fail [start] as a whole. The main
+     * GGUF is a model this app cannot run at all without; the projector is a
+     * bonus capability on top of an already-usable model, so a bad network
+     * blip, a renamed file, or a gated companion repo should leave the user
+     * with a working text-only model rather than no model — exactly the
+     * failure mode a hard [resolveAny]-style throw here would produce.
+     */
+    private suspend fun downloadMmproj(seed: LocalModelSeed, downloader: ModelDownloader) {
+        val fileName = seed.mmprojFileName ?: return
+        val resolved = HuggingFaceResolver.resolveExact(seed.repoIds, fileName, tokenProvider())
+        if (resolved == null) {
+            appLogForMmproj?.invoke("$fileName not found in any of ${seed.repoIds}")
+            return
+        }
+        val (source, file) = resolved
+        publish(seed, DownloadState.Running(DownloadProgress(store.mmprojFileFor(seed).length(), file.sizeBytes), source))
+        runCatching {
+            downloader.download(
+                url = file.downloadUrl,
+                destination = store.mmprojFileFor(seed),
+                tempFile = store.mmprojPartFor(seed),
+            ) { progress -> publish(seed, DownloadState.Running(progress, source)) }
+        }.onFailure {
+            // A corrupt or half-downloaded projector must not look installed —
+            // ModelStore.hasMmproj checks file presence, not validity beyond size.
+            store.mmprojFileFor(seed).delete()
+            appLogForMmproj?.invoke("mmproj download failed for ${seed.id}: ${it.message}")
         }
     }
 
@@ -117,10 +193,13 @@ class ModelDownloads(
         states.value = states.value + (seed.id to state)
     }
 
-    private fun gb(bytes: Long): String = "%.1f ГБ".format(bytes / 1_000_000_000.0)
+    private fun gb(bytes: Long): String = "%.1f GB".format(bytes / 1_000_000_000.0)
 
     private companion object {
         /** Never fill the disk to the last byte for a model. */
         const val SLACK_BYTES = 500L * 1024 * 1024
+
+        /** How long a failed mmproj backfill attempt sits out before retrying — see [mmprojBackfillCooldownUntil]. */
+        const val MMPROJ_BACKFILL_COOLDOWN_MS = 30 * 60 * 1000L
     }
 }

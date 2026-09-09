@@ -6,9 +6,9 @@ import ai.localstudio.core.context.ContextFragment
 import ai.localstudio.core.context.FragmentSource
 import ai.localstudio.core.knowledge.KnowledgeProvider
 import ai.localstudio.core.knowledge.KnowledgeQuery
-import ai.localstudio.core.memory.MemoryProvider
-import ai.localstudio.core.memory.MemoryQuery
-import ai.localstudio.core.memory.MemoryScope
+import ai.localstudio.memory.MemoryProvider
+import ai.localstudio.memory.MemoryQuery
+import ai.localstudio.memory.MemoryScope
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.pipeline.NodeExecutor
@@ -188,9 +188,32 @@ class NodeExecutors(
         if (context.attachedDocuments.isNotEmpty()) {
             fragments += ContextFragment(
                 source = FragmentSource.KNOWLEDGE,
-                text = "Пользователь прикрепил файлы: ${context.attachedDocuments.joinToString(", ")}. " +
-                    "Их содержимое доступно через фрагменты ниже, если они относятся к вопросу.",
+                text = "Пользователь прикрепил файлы: ${context.attachedDocuments.joinToString(", ")}.",
             )
+            // Fetched directly by exact document name — MEMORY_SEARCH's own
+            // lexical query (see CapabilityRouter) only ever surfaces a
+            // chunk that shares a word with the question, which a plain
+            // "what does this file say" fails by definition: a meta-question
+            // about a document shares no vocabulary with that document's
+            // actual content. Attaching a specific file *is* the relevance
+            // signal here, so this bypasses term-overlap scoring entirely by
+            // filtering on the "source" *and* "conversationId" metadata
+            // AppContainer.rememberDocument tags every chunk with — the
+            // second key is what keeps two different chats that happen to
+            // attach a same-named file from pulling in each other's content.
+            if (memory != null) {
+                for (name in context.attachedDocuments) {
+                    val chunks = memory.search(
+                        MemoryQuery(
+                            text = "",
+                            scopes = setOf(MemoryScope.SEMANTIC),
+                            metadataFilter = mapOf("source" to name, "conversationId" to context.conversationId),
+                            limit = ATTACHED_DOCUMENT_CHUNK_LIMIT,
+                        ),
+                    )
+                    fragments += chunks.map { item -> ContextFragment(FragmentSource.KNOWLEDGE, item.text, label = name) }
+                }
+            }
         }
 
         val images = mutableListOf<ImageRef>()
@@ -285,6 +308,16 @@ class NodeExecutors(
     private companion object {
         const val CONVERSATION_KEY = "conversationId"
         const val ROLE_KEY = "role"
+
+        /**
+         * High enough for most attached documents' entire chunk set (see
+         * DocumentIngest.chunk's ~1200-char chunks) to come through in one
+         * go — [ContextEngine.assemble] still trims to the actual token
+         * budget afterward, prioritizing the live question over this, so an
+         * unusually large document degrades gracefully rather than being
+         * hard-capped here at a size that would silently drop its end.
+         */
+        const val ATTACHED_DOCUMENT_CHUNK_LIMIT = 50
     }
 }
 

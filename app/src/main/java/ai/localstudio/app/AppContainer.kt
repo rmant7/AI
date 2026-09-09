@@ -9,9 +9,12 @@ import ai.localstudio.core.engine.ModelSelector
 import ai.localstudio.core.engine.NodeExecutors
 import ai.localstudio.core.engine.Orchestrator
 import ai.localstudio.core.engine.SelectedModel
-import ai.localstudio.core.memory.InMemoryMemoryProvider
-import ai.localstudio.core.memory.MemoryScope
+import ai.localstudio.core.engine.UserRequest
+import ai.localstudio.core.memory.LlmMemoryExtractor
+import ai.localstudio.core.pipeline.NodeValue
 import ai.localstudio.core.pipeline.PipelineCodec
+import ai.localstudio.memory.FileMemoryStore
+import ai.localstudio.memory.MemoryScope
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.InstallState
 import ai.localstudio.core.registry.ModelCatalog
@@ -28,6 +31,8 @@ import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
 import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
+import ai.localstudio.app.keys.BundledApiKeyStore
+import ai.localstudio.app.keys.BundledApiKeys
 import ai.localstudio.app.keys.PrefsApiKeyStore
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.log.AppLog
@@ -41,6 +46,7 @@ import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
+import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiException
@@ -63,8 +69,25 @@ class AppContainer private constructor(private val context: Context) {
 
     val settings = Settings(context)
 
-    /** Memory lives above the models, so it survives switching between runtimes. */
-    val memory = InMemoryMemoryProvider()
+    /**
+     * Memory lives above the models, so it survives switching between
+     * runtimes — and, via [FileMemoryStore], the process dying too. The
+     * extractor reuses [orchestrator] itself for consolidation's one model
+     * call rather than re-deriving "which model should answer this" from
+     * scratch — local-vs-cloud, fallback chains and cooldowns already work,
+     * and a second, independent selection path here would just be a second
+     * place for those to drift out of sync with the one everything else uses.
+     * memoryEnabled = false: consolidation must not recursively search or
+     * write memory for its own extraction call.
+     */
+    val memory = FileMemoryStore(
+        File(context.filesDir, "memory.json"),
+        extractor = LlmMemoryExtractor { prompt ->
+            orchestrator().handle(
+                UserRequest(conversationId = "memory-consolidation", text = prompt, memoryEnabled = false),
+            ).text
+        },
+    )
 
     val documents = DocumentStore(context)
 
@@ -73,8 +96,12 @@ class AppContainer private constructor(private val context: Context) {
     /** Per-provider pools of API keys — add/delete/validate in ApiKeysActivity. */
     val apiKeyStore = PrefsApiKeyStore(context, settings)
 
+    /** Cooldown state for keys baked into the build itself — see BundledApiKeys. Never shown in ApiKeysActivity. */
+    private val bundledApiKeyStore = BundledApiKeyStore(context)
+
     /** One rotator per provider, so cooldown state for Gemini and Mistral never mixes. */
-    fun apiKeyRotator(providerId: String): ApiKeyRotator = ApiKeyRotator(apiKeyStore, providerId)
+    fun apiKeyRotator(providerId: String): ApiKeyRotator =
+        ApiKeyRotator(apiKeyStore, providerId, bundledStore = bundledApiKeyStore)
 
     /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". */
     val appLog = AppLog(context)
@@ -91,6 +118,12 @@ class AppContainer private constructor(private val context: Context) {
     private val documentMemoryIds = mutableMapOf<String, List<String>>()
 
     init {
+        // Reconciled on every launch, not just the first: cheap when it's
+        // already a no-op, and it's how a bundled key added or rotated in a
+        // later build ever reaches an existing install.
+        BundledApiKeys.sync(bundledApiKeyStore, "groq")
+        BundledApiKeys.sync(bundledApiKeyStore, "gemini")
+
         // Checked once per process, before anything else has a chance to
         // throw: this is the one place a *native* crash (a segfault in
         // llama.cpp, say) becomes visible after the fact at all — the crash
@@ -127,7 +160,11 @@ class AppContainer private constructor(private val context: Context) {
             if (!settings.memoryEnabled) return@launch
             documents.list().forEach { doc ->
                 val ids = doc.chunks.map { chunk ->
-                    memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to doc.name))
+                    memory.remember(
+                        chunk,
+                        MemoryScope.SEMANTIC,
+                        mapOf("source" to doc.name, "conversationId" to doc.conversationId),
+                    )
                 }
                 synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
             }
@@ -145,18 +182,29 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
-    suspend fun rememberDocument(name: String, chunks: List<String>): AttachedDocument = withContext(Dispatchers.IO) {
-        val ids = chunks.map { chunk -> memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to name)) }
-        val doc = AttachedDocument(
-            id = "doc-${System.currentTimeMillis()}",
-            name = name,
-            chunks = chunks,
-            addedAt = System.currentTimeMillis(),
-        )
-        documents.add(doc)
-        synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
-        doc
-    }
+    /**
+     * [conversationId] is tagged onto every chunk's memory metadata, not just
+     * onto the stored [AttachedDocument] record — [NodeExecutors.contextBuild]
+     * filters on it when force-including an attached document's content, so
+     * two different chats attaching files that happen to share a name can't
+     * cross-contaminate each other's context.
+     */
+    suspend fun rememberDocument(name: String, chunks: List<String>, conversationId: String): AttachedDocument =
+        withContext(Dispatchers.IO) {
+            val ids = chunks.map { chunk ->
+                memory.remember(chunk, MemoryScope.SEMANTIC, mapOf("source" to name, "conversationId" to conversationId))
+            }
+            val doc = AttachedDocument(
+                id = "doc-${System.currentTimeMillis()}",
+                name = name,
+                chunks = chunks,
+                addedAt = System.currentTimeMillis(),
+                conversationId = conversationId,
+            )
+            documents.add(doc)
+            synchronized(documentMemoryIds) { documentMemoryIds[doc.id] = ids }
+            doc
+        }
 
     suspend fun forgetDocument(id: String) = withContext(Dispatchers.IO) {
         val ids = synchronized(documentMemoryIds) { documentMemoryIds.remove(id) }
@@ -173,8 +221,17 @@ class AppContainer private constructor(private val context: Context) {
         modelStore,
         tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+        appLogForMmproj = { message -> appLog.record("MMPROJ_DOWNLOAD", message) },
     )
 
+    // No auto-download of Tiny on first launch: voice input's mic button and
+    // Voice model category are both hidden (see activity_chat.xml and
+    // activity_models.xml) because whisper.cpp transcription still isn't
+    // reliable enough on-device — CPU contention with a local LLM can push a
+    // single transcription past a minute and derail the silence-based
+    // auto-stop entirely. Nothing reachable from the UI calls transcribe()
+    // while the mic is hidden, so fetching a model in the background would
+    // just be wasted disk space until this comes back properly.
     val whisperStore = WhisperStore(context)
     val whisperDownloads = WhisperDownloads(
         whisperStore,
@@ -194,14 +251,6 @@ class AppContainer private constructor(private val context: Context) {
      * recording instead of ever having either warm.
      */
     val whisperPreviewEngine = WhisperEngine(whisperStore)
-
-    // The auto-download-Tiny-on-first-launch init block that used to live
-    // here is gone along with the mic button: Whisper's transcription
-    // quality wasn't good enough to justify a speech model competing for RAM
-    // with the local LLM it sits next to. Nothing in WhisperEngine loads a
-    // model until something actually calls transcribe(), so with the mic
-    // button hidden and no auto-download, Whisper now costs nothing at
-    // runtime unless it's re-enabled.
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
@@ -294,7 +343,7 @@ class AppContainer private constructor(private val context: Context) {
         )
 
         val runtime: ModelRuntime = when {
-            candidates.isEmpty() -> StubRuntime()
+            candidates.isEmpty() -> StubRuntime(context)
             candidates.size == 1 -> candidates.single().runtime
             // CloudProviders.ALL lists Local first, so `enabled` — and
             // therefore `candidates` — already carries that order: this is
@@ -306,6 +355,33 @@ class AppContainer private constructor(private val context: Context) {
             cachedOrchestrator = it
             cachedSignature = signature
         }
+    }
+
+    /**
+     * Every [RuntimeManager] this container has ever built, so
+     * [releaseLocalModels] has something to actually reach — buildOrchestrator
+     * otherwise hands its manager straight to [NodeExecutors] with no
+     * reference kept anywhere else. Never pruned: an old, already-empty
+     * manager left in this list costs nothing (no native resources, just a
+     * small object), and a manager whose cached [Orchestrator] slot was
+     * replaced after a signature change — see compareCandidates' own doc
+     * comment on that gap — still gets evicted through here instead of
+     * staying orphaned forever.
+     */
+    private val runtimeManagers = mutableListOf<RuntimeManager>()
+
+    /**
+     * Frees every locally-loaded model (the LLM, its vision projector) —
+     * called right before starting a voice recording, so Whisper is not
+     * competing with an already-resident multi-GB local model for the same
+     * RAM budget the same way that local model was competing with Whisper
+     * before WhisperEngine started releasing itself after each use. Uses
+     * [RuntimeManager.evictIdle], not the blunter unloadAll: a model still
+     * actively mid-generation (refCount > 0) is left alone rather than
+     * force-freed out from under whatever is using it.
+     */
+    suspend fun releaseLocalModels() {
+        runtimeManagers.forEach { it.evictIdle() }
     }
 
     private fun buildOrchestrator(
@@ -323,6 +399,7 @@ class AppContainer private constructor(private val context: Context) {
             budgetBytes = device.usableRamBytes,
             runtimes = mapOf(runtime.kind to runtime),
         )
+        runtimeManagers += manager
         val executors = NodeExecutors(
             selector = ModelSelector(registry(registryCandidates), device),
             runtimeManager = manager,
@@ -363,6 +440,9 @@ class AppContainer private constructor(private val context: Context) {
      * [cloudCandidates] never fired either and the next message went
      * straight back to the same overloaded model.
      */
+    private val compareOrchestrators = mutableMapOf<String, Orchestrator>()
+    private val compareSignatures = mutableMapOf<String, String>()
+
     fun compareCandidates(): List<Pair<String, Orchestrator>> =
         enabledProviders().mapNotNull { provider ->
             val candidates = if (provider.id == CloudProviders.LOCAL.id) {
@@ -376,9 +456,44 @@ class AppContainer private constructor(private val context: Context) {
             // FallbackTextRuntime's own "Ответ от:" footer — this is just the
             // bubble's heading, which should stay the provider for a chain
             // rather than claim whichever model happens to lead the rotation.
-            val label = candidates.singleOrNull()?.label ?: provider.title
+            val label = candidates.singleOrNull()?.label ?: context.getString(provider.titleRes)
             val isLocalOnly = candidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP }
-            label to buildOrchestrator(runtime, isLocalOnly, candidates)
+
+            // Every call used to build a brand new RuntimeManager — meaning a
+            // brand new LlamaCppRuntime.load() for the local candidate on
+            // every single Compare-mode turn, with nothing ever freeing the
+            // *previous* turn's already-loaded model (a fresh RuntimeManager
+            // has no record of it, so it never gets to evict it): the old
+            // native session — GGUF weights, KV cache, mmproj encoder — just
+            // leaked, resident, while a second full copy loaded on top of it.
+            // Two turns of that on a multi-GB vision model is exactly what
+            // an OOM kill on the second message looks like. Cached the same
+            // way orchestrator() already caches the single-provider path:
+            // reused for this provider as long as nothing that would change
+            // its wiring actually has.
+            val signature = (
+                listOf(
+                    settings.customEndpoint,
+                    settings.temperature,
+                    settings.topP,
+                    settings.topK,
+                    settings.repeatPenalty,
+                    settings.contextTokens,
+                    settings.maxResponseTokens,
+                    settings.systemPrompt,
+                    settings.memoryEnabled,
+                    documents.list().isNotEmpty(),
+                    settings.chatModelFor(provider.id),
+                    settings.apiKeyFor(provider.id),
+                ) + candidates.map { it.model.id }
+            ).joinToString("|")
+
+            val cached = compareOrchestrators[provider.id]?.takeIf { compareSignatures[provider.id] == signature }
+            val orchestrator = cached ?: buildOrchestrator(runtime, isLocalOnly, candidates).also {
+                compareOrchestrators[provider.id] = it
+                compareSignatures[provider.id] = signature
+            }
+            label to orchestrator
         }
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
@@ -387,7 +502,38 @@ class AppContainer private constructor(private val context: Context) {
         return CloudProviders.ALL.filter { it.id in ids }
     }
 
-    /** The best-fit installed local model as a fallback candidate, or null when nothing is installed. */
+    /**
+     * Same resolution [localCandidate] uses — the explicit choice from
+     * Models if it's actually installed, [ModelSelector]'s best fit
+     * otherwise — factored out so [localVisionAvailable] can ask "which
+     * model, specifically" without also building a runtime and a
+     * [FallbackCandidate] just to answer that.
+     */
+    private fun effectiveLocalSelection(registry: ModelRegistry): SelectedModel? {
+        val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
+        val chosen = registry.find(chosenId)
+            ?.takeIf { it.state == InstallState.INSTALLED }
+            ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
+        return chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION)
+    }
+
+    /**
+     * Whether the local model that would actually be used right now can see
+     * an attached image — never a static flag the way [CloudProvider.visionCapable]
+     * is for a cloud provider: local vision depends on which specific model
+     * is installed and whether its projector actually downloaded (see
+     * ModelStore.hasMmproj), not on the llama.cpp runtime as a whole. Gating
+     * "can I even attach an image" on [CloudProviders.LOCAL]'s own
+     * (necessarily false, for exactly that reason) visionCapable flag meant
+     * attaching an image was refused outright — "none of the enabled models
+     * understands images" — for a model that, in fact, did.
+     */
+    fun localVisionAvailable(): Boolean {
+        val seedId = effectiveLocalSelection(localRegistry())?.model?.id ?: return false
+        val seed = LocalModels.SEEDS.firstOrNull { it.id == seedId } ?: return false
+        return modelStore.hasMmproj(seed)
+    }
+
     /**
      * The model the user explicitly picked via "Использовать" in Models,
      * if it's actually installed right now — [ModelSelector] otherwise.
@@ -405,19 +551,19 @@ class AppContainer private constructor(private val context: Context) {
      */
     private fun localCandidate(): FallbackCandidate? {
         val registry = localRegistry()
-        val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
-        val chosen = registry.find(chosenId)
-            ?.takeIf { it.state == InstallState.INSTALLED }
-            ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
-        val selected = chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION) ?: return null
+        val selected = effectiveLocalSelection(registry) ?: return null
         return FallbackCandidate(
             // Names the specific installed model, not just "Локально на
             // устройстве" — with several local models to choose from
             // (or a mix of a tiny and a huge one, tried at different times),
             // a generic label in the log and in the answer's own attribution
             // line answered "was it local?" but not "which local model?".
-            label = "${CloudProviders.LOCAL.title}: ${selected.model.id}",
-            runtime = LlamaCppRuntime(contextTokens = effectiveContextTokens(), log = appLog::record),
+            label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
+            runtime = LlamaCppRuntime(
+                contextTokens = effectiveContextTokens(),
+                log = appLog::record,
+                availableRamBytes = { currentAvailableRamBytes(context) },
+            ),
             model = selected.model,
             binding = selected.binding,
         )
@@ -477,8 +623,9 @@ class AppContainer private constructor(private val context: Context) {
             .filterNot { modelCooldowns.isOnCooldown(provider.id, it) }
         return modelNames.map { modelName ->
             val model = servedModel(modelName, RuntimeKind.REMOTE_OPENAI, Capability.TEXT_GENERATION, Capability.REASONING)
+            val providerTitle = context.getString(provider.titleRes)
             FallbackCandidate(
-                label = if (modelName == primaryModel) provider.title else "${provider.title} ($modelName)",
+                label = if (modelName == primaryModel) providerTitle else "$providerTitle ($modelName)",
                 runtime = runtime,
                 model = model,
                 binding = model.bindings.first(),
@@ -492,7 +639,7 @@ class AppContainer private constructor(private val context: Context) {
                         cachedOrchestrator = null
                         appLog.record(
                             "MODEL_COOLDOWN",
-                            "${provider.title} ($modelName): HTTP 503, skipping for " +
+                            "$providerTitle ($modelName): HTTP 503, skipping for " +
                                 "${ModelCooldownStore.DEFAULT_COOLDOWN_MS / 60_000} min",
                         )
                     }
@@ -537,6 +684,17 @@ class AppContainer private constructor(private val context: Context) {
      */
     private fun localRegistry(): ModelRegistry = ModelRegistry(
         installedSeeds().map { seed ->
+            // Best-effort backfill for a model that was already installed
+            // before it declared a projector, or whose projector fetch
+            // failed the first time — see ModelDownloads.start()'s own
+            // comment on why this can't wait for the user to notice and
+            // re-download the whole model. Cheap to call on every registry
+            // build: start() no-ops while a fetch for this seed is already
+            // running, and stops matching this condition entirely once
+            // hasMmproj(seed) actually becomes true.
+            if (seed.mmprojFileName != null && !modelStore.hasMmproj(seed)) {
+                downloads.start(seed)
+            }
             val file: File = modelStore.fileFor(seed)
             RegistryEntry(
                 ModelDescriptor(
@@ -559,6 +717,8 @@ class AppContainer private constructor(private val context: Context) {
                             // Left unmeasured on purpose: effectiveRequiredRamBytes
                             // then errs high, which is the safe direction here.
                             requiredRamBytes = null,
+                            mmprojArtifact = modelStore.mmprojFileFor(seed).absolutePath
+                                .takeIf { modelStore.hasMmproj(seed) },
                         ),
                     ),
                 ),
@@ -592,8 +752,8 @@ class AppContainer private constructor(private val context: Context) {
 
     val runtimeLabel: String
         get() = enabledProviders().takeIf { it.isNotEmpty() }
-            ?.joinToString(" → ") { it.title }
-            ?: CloudProviders.DEMO.title
+            ?.joinToString(" → ") { context.getString(it.titleRes) }
+            ?: context.getString(CloudProviders.DEMO.titleRes)
 
     private fun servedModel(
         id: String,
@@ -638,6 +798,22 @@ class AppContainer private constructor(private val context: Context) {
             instance ?: synchronized(this) {
                 instance ?: AppContainer(context.applicationContext).also { instance = it }
             }
+
+        /**
+         * A fresh `availMem` read, deliberately not routed through [DeviceProfile]
+         * — that class exists to plan a model's admission ahead of loading it,
+         * off *total* RAM, on purpose (see its own doc comment on why free memory
+         * alone would punish exactly the devices that can run the most). This is
+         * a different question, asked at a different moment: how much is
+         * genuinely free right *now*, for a soft, best-effort decision (skip
+         * loading a vision projector — see [LlamaCppRuntime]) rather than a hard
+         * admission gate.
+         */
+        fun currentAvailableRamBytes(context: Context): Long {
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
+            return info.availMem
+        }
 
         fun profileOf(context: Context, ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION): DeviceProfile {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager

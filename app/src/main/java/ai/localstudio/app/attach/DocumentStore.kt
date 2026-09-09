@@ -15,8 +15,19 @@ data class AttachedDocument(
     // listing files whose content silently isn't searchable anymore.
     val chunks: List<String>,
     val addedAt: Long,
+    /**
+     * The chat this was attached in. Defaults to [UNKNOWN_CONVERSATION] so a
+     * document saved before this field existed still decodes — it shows up
+     * grouped under "other/legacy" in the Files screen rather than crashing
+     * on load or being silently dropped.
+     */
+    val conversationId: String = UNKNOWN_CONVERSATION,
 ) {
     val chunkCount: Int get() = chunks.size
+
+    companion object {
+        const val UNKNOWN_CONVERSATION = ""
+    }
 }
 
 @Serializable

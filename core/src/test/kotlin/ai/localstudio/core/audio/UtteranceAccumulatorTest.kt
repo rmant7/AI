@@ -41,7 +41,10 @@ class UtteranceAccumulatorTest {
 
     @Test
     fun `an utterance is finalized after a pause and returns exactly what was buffered`() {
-        val accumulator = UtteranceAccumulator(config)
+        // A config of its own, independent of whatever the shipped default
+        // pause happens to be — this test is about the finalize mechanism,
+        // not about pinning that value.
+        val accumulator = UtteranceAccumulator(UtteranceConfig(silenceToFinalizeMs = 800))
         repeat(5) { accumulator.append(loud()) }
         assertFalse(accumulator.shouldFinalize)
 

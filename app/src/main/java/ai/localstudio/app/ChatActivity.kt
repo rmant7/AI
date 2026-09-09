@@ -3,6 +3,9 @@ package ai.localstudio.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
@@ -10,8 +13,10 @@ import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import ai.localstudio.app.attach.DocumentIngest
@@ -23,6 +28,7 @@ import ai.localstudio.app.history.toStored
 import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.engine.UserRequest
+import ai.localstudio.core.runtime.ANSWERED_BY_LABEL
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.pipeline.ConversationTurn
 import ai.localstudio.core.pipeline.NodeValue
@@ -46,6 +52,16 @@ class ChatActivity : AppCompatActivity() {
     private val recorder = AudioRecorder()
     private var isGenerating = false
     private var generationJob: kotlinx.coroutines.Job? = null
+    // Set for the duration of finalizeRecording()'s async transcribe() call —
+    // both a guard against pressing Send while it's running (see send()) and
+    // part of why the mic button alone isn't enough to tell "busy" from
+    // "idle" for that check.
+    private var isTranscribing = false
+    // Computed once when a recording starts (see toggleRecording()) and
+    // reused by both the preview loop and the final pass — see
+    // detectSpokenLanguage()'s own comment for why this is read from the
+    // conversation rather than the device's system language.
+    private var micLanguageHint = "auto"
     // Distinguishes "user tapped stop" from every other way generate() can
     // fail, so cancelling shows a plain "stopped" line instead of an error.
     private var stoppedByUser = false
@@ -59,6 +75,22 @@ class ChatActivity : AppCompatActivity() {
     // question about *this* photo, not something to keep resending on every
     // later message the way a document's extracted text is kept in memory.
     private var pendingImage: ImageRef? = null
+
+    /**
+     * Documents attached during *this* open chat, not [AppContainer]'s whole
+     * shared library (container.documents.list(), which is genuinely global
+     * across every chat — see FilesActivity's own doc comment). That
+     * distinction used to not matter: attachedDocuments only ever produced a
+     * one-line "user attached these files" mention. It started mattering the
+     * moment a document's actual extracted content began being force-fetched
+     * every turn (see NodeExecutors.contextBuild) — the global list would
+     * have force-fed an unrelated PDF from a *different* chat, attached
+     * hours or days earlier, into every unrelated turn of this one, and did
+     * exactly that on a real device before this existed: asked about an
+     * attached photo, the local model brought up "no information in the
+     * provided PDF" — a file this conversation never even attached.
+     */
+    private val sessionDocumentNames = mutableListOf<String>()
 
     private val pickDocument = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
@@ -130,7 +162,7 @@ class ChatActivity : AppCompatActivity() {
             // one instead, and only fires once: persisting it below means
             // the next launch sees a non-"Вы" last message and stays quiet.
             val lastMessage = adapter.messages().lastOrNull()
-            if (lastMessage != null && lastMessage.role == "Вы") {
+            if (lastMessage != null && lastMessage.role == Message.ROLE_USER) {
                 container.appLog.record(
                     "INTERRUPTED_TURN",
                     "Conversation $conversationId: last message has no reply after relaunch",
@@ -192,8 +224,7 @@ class ChatActivity : AppCompatActivity() {
         }
 
         MENU_CLEAR -> {
-            adapter.clear()
-            conversationId = "chat-" + System.currentTimeMillis()
+            startNewConversation()
             true
         }
 
@@ -233,16 +264,46 @@ class ChatActivity : AppCompatActivity() {
         openHistory.launch(HistoryActivity.intent(this))
     }
 
+    /**
+     * Fire-and-forget, and only when leaving a conversation rather than
+     * after every turn: MEMORY_UPDATE already writes each turn's exchange
+     * as WORKING memory (see NodeExecutors) whenever memory is on, and
+     * nothing ever turned that into anything durable or cleared it —
+     * consolidate() existed but nothing called it, so working memory just
+     * grew forever, unbounded, for the life of the process. Now that memory
+     * persists across restarts too (FileMemoryStore), leaving that
+     * unconsolidated would mean it grows forever on disk instead — this is
+     * what actually distills a finished conversation into durable memories
+     * and clears its working set, using whichever model this app would
+     * otherwise answer with (see AppContainer's own comment on why).
+     */
+    private fun consolidatePreviousConversation(id: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { container.memory.consolidate(id) }
+        }
+    }
+
     private fun startNewConversation() {
+        consolidatePreviousConversation(conversationId)
         adapter.clear()
         conversationId = "chat-" + System.currentTimeMillis()
+        sessionDocumentNames.clear()
+        updateStatus()
     }
 
     private fun openConversation(conversation: Conversation) {
+        consolidatePreviousConversation(conversationId)
         conversationId = conversation.id
         adapter.clear()
         conversation.messages.forEach { adapter.add(it.toMessage()) }
         binding.messages.scrollToPosition((adapter.itemCount - 1).coerceAtLeast(0))
+        // Which documents were attached during this conversation isn't
+        // persisted (see sessionDocumentNames' own comment) — reopening it
+        // starts with none "active", falling back to ordinary lexical
+        // memory search for anything attached here previously rather than
+        // force-including it again.
+        sessionDocumentNames.clear()
+        updateStatus()
     }
 
     private fun persist() {
@@ -252,7 +313,7 @@ class ChatActivity : AppCompatActivity() {
         history.save(
             Conversation(
                 id = conversationId,
-                title = ChatHistoryStore.titleFor(stored),
+                title = ChatHistoryStore.titleFor(stored, getString(R.string.history_untitled_chat)),
                 updatedAt = System.currentTimeMillis(),
                 messages = stored,
                 // Carried over rather than dropped: this runs after every
@@ -267,13 +328,20 @@ class ChatActivity : AppCompatActivity() {
         if (container.settings.memoryEnabled) R.string.memory_on else R.string.memory_off
 
     private fun updateStatus() {
-        val memory = if (container.settings.memoryEnabled) "память вкл" else "память выкл"
+        val memory = getString(if (container.settings.memoryEnabled) R.string.status_memory_on else R.string.status_memory_off)
         // container.activeModelName, not settings.chatModel: that getter is
         // scoped to whichever provider is selected in the Settings dropdown
         // right now, independent of which providers are actually enabled —
         // showing a Gemini model name while only local was enabled was that
         // mismatch, not a sign the router itself was using Gemini.
-        binding.statusText.text = "${container.activeModelName} · ${container.runtimeLabel} · $memory"
+        val files = if (sessionDocumentNames.isEmpty()) {
+            ""
+        } else {
+            " · " + resources.getQuantityString(
+                R.plurals.chat_status_files, sessionDocumentNames.size, sessionDocumentNames.size,
+            )
+        }
+        binding.statusText.text = "${container.activeModelName} · ${container.runtimeLabel} · $memory$files"
     }
 
     private fun send() {
@@ -284,11 +352,33 @@ class ChatActivity : AppCompatActivity() {
         // exactly what "sent three messages, got zero replies, no error
         // either" looks like from the outside.
         if (isGenerating) return
+        if (recorder.isRecording || isTranscribing) {
+            // Reproduced on a real device: starting a local generation while
+            // Whisper is still recording or transcribing pits two heavy CPU-
+            // bound native calls against each other on the same cores —
+            // measured as high as a 30x generation slowdown (1.1 tok/s
+            // against this device's normal rate) and, more visibly, the
+            // silence-based auto-stop and the transcription itself both
+            // stretching out to minutes because the coroutines driving them
+            // barely get scheduled. Blocking Send here is the mirror of mic
+            // already being disabled during an active generation below —
+            // the two heavy paths are now mutually exclusive by construction
+            // instead of relying on either one finishing "fast enough".
+            Toast.makeText(this, R.string.chat_busy_recording, Toast.LENGTH_SHORT).show()
+            return
+        }
         val text = binding.input.text?.toString()?.trim().orEmpty()
-        if (text.isEmpty()) return
+        // An attached image or document is itself the message for anyone
+        // who just wants "look at this" answered — every other chat app
+        // sends a picture with no caption the same way. Requiring typed
+        // text on top of that turned attaching something into two steps
+        // where one should do, and the second one added nothing the
+        // attachment didn't already say.
+        val hasAttachment = pendingImage != null || sessionDocumentNames.isNotEmpty()
+        if (text.isEmpty() && !hasAttachment) return
 
         binding.input.setText("")
-        adapter.add(Message.user(text))
+        adapter.add(Message.user(text, imageDataUri = pendingImage?.uri))
         binding.messages.scrollToPosition(adapter.itemCount - 1)
         persist()
         isGenerating = true
@@ -304,7 +394,7 @@ class ChatActivity : AppCompatActivity() {
             .filterNot { it.isError }
             .takeLast(MAX_HISTORY_TURNS)
             .map { ConversationTurn(it.role, it.body) }
-        val attachedDocuments = container.documents.list().map { it.name }
+        val attachedDocuments = sessionDocumentNames.toList()
         // Cleared immediately, same as the text field above: this turn owns
         // whatever was staged, and a lingering thumbnail after sending would
         // read as "still attached" for the next message too.
@@ -403,8 +493,8 @@ class ChatActivity : AppCompatActivity() {
                     // i.e. pure local-only — gets the same line added here
                     // instead, so an answer is never shown with no
                     // indication at all of which model actually produced it.
-                    val body = answer.text.ifBlank { "(пустой ответ)" }.let { answerText ->
-                        container.soleAnswererLabel?.let { label -> "$answerText\n\n---\nОтвет от: $label" } ?: answerText
+                    val body = answer.text.ifBlank { getString(R.string.chat_empty_answer) }.let { answerText ->
+                        container.soleAnswererLabel?.let { label -> "$answerText\n\n---\n$ANSWERED_BY_LABEL$label" } ?: answerText
                     }
                     adapter.update(
                         placeholderIndex,
@@ -412,22 +502,39 @@ class ChatActivity : AppCompatActivity() {
                             body = body,
                             details = buildString {
                                 append(answer.plan.capabilities.joinToString(", ") { it.id })
-                                answer.context?.let { append(" · контекст: ${it.fragments.size} фрагм.") }
-                                if (answer.droppedFragments > 0) append(", отброшено ${answer.droppedFragments}")
-                                append(" · ${answer.trace.sumOf { it.durationMs }} мс")
+                                answer.context?.let { append(" · ").append(getString(R.string.chat_detail_context_fragments, it.fragments.size)) }
+                                if (answer.droppedFragments > 0) append(getString(R.string.chat_detail_dropped, answer.droppedFragments))
+                                append(" · ").append(getString(R.string.chat_detail_duration_ms, answer.trace.sumOf { it.durationMs }))
                             },
                         ),
                     )
                 }
                 .onFailure { error ->
                     val body = if (error is kotlinx.coroutines.TimeoutCancellationException) {
-                        "Модель не ответила за ${GENERATION_TIMEOUT_MS / 1000} с. Возможно, модель слишком тяжёлая " +
-                            "для этого устройства, или что-то зависло — попробуйте ещё раз или выберите модель полегче."
+                        getString(R.string.chat_timeout_message, GENERATION_TIMEOUT_MS / 1000)
                     } else {
                         error.message ?: error.toString()
                     }
                     container.appLog.record("GENERATION_ERROR", "${error.javaClass.simpleName}: $body")
-                    adapter.update(placeholderIndex, Message.error(body = body, details = error.javaClass.simpleName))
+                    // A fallback chain (see FallbackTextRuntime) can stream
+                    // real, useful text from one candidate before a LATER
+                    // candidate's failure ends the whole turn — e.g. Groq
+                    // answers in full, then Gemini is tried as a second
+                    // opinion and its connection drops mid-stream. That text
+                    // already reached the screen; replacing the bubble with a
+                    // bare error message threw it away and left the user
+                    // looking at an answer that had visibly existed a moment
+                    // earlier. Whatever streamed is kept, with the failure
+                    // noted underneath instead of overwriting it.
+                    val partialText = partial.value
+                    if (!partialText.isNullOrBlank()) {
+                        adapter.update(
+                            placeholderIndex,
+                            Message.assistant(body = "$partialText\n\n---\n⚠ $body", details = error.javaClass.simpleName),
+                        )
+                    } else {
+                        adapter.update(placeholderIndex, Message.error(body = body, details = error.javaClass.simpleName))
+                    }
                 }
             binding.messages.scrollToPosition(adapter.itemCount - 1)
             persist()
@@ -511,15 +618,15 @@ class ChatActivity : AppCompatActivity() {
                                     onPartialText = { partial.value = it },
                                 )
                             }
-                            answer.text.ifBlank { "(пустой ответ)" }
+                            answer.text.ifBlank { getString(R.string.chat_empty_answer) }
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                             container.appLog.record("GENERATION_ERROR", "$label: timeout after ${GENERATION_TIMEOUT_MS}ms")
-                            "Ошибка: не ответила за ${GENERATION_TIMEOUT_MS / 1000} с"
+                            getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Exception) {
                             container.appLog.record("GENERATION_ERROR", "$label: ${e.javaClass.simpleName}: ${e.message}")
-                            "Ошибка: ${e.message ?: e.toString()}"
+                            getString(R.string.chat_compare_generic_error, e.message ?: e.toString())
                         } finally {
                             // In a finally, not just after the try: the
                             // CancellationException branch above rethrows
@@ -531,6 +638,20 @@ class ChatActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             adapter.update(placeholderIndex, Message.assistant(body = "**$label:**\n$rendered", details = null).copy(timestamp = startedAt))
                             binding.messages.scrollToPosition(adapter.itemCount - 1)
+                            // Persisted the moment THIS source finishes, not
+                            // only once every source has: a native crash in
+                            // one candidate (llama.cpp, most often the local
+                            // one) kills the process outright and nothing
+                            // Kotlin-level runs afterward, including whatever
+                            // was waiting for jobs.awaitAll() below. Without
+                            // this, an already-successful Groq/Gemini answer
+                            // sitting only in the adapter's in-memory list —
+                            // never written to disk — was wiped on relaunch
+                            // and replaced with the generic "no reply"
+                            // placeholder (see the INTERRUPTED_TURN handling
+                            // in onCreate), even though it had already been
+                            // shown on screen before the crash.
+                            persist()
                         }
                     }
                 }
@@ -549,7 +670,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun ingestDocument(uri: Uri) {
         lifecycleScope.launch {
-            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { "файл" }
+            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { getString(R.string.chat_default_file_name) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val text = DocumentIngest.extractText(this@ChatActivity, uri)
@@ -558,8 +679,9 @@ class ChatActivity : AppCompatActivity() {
             }
             result
                 .onSuccess { chunks ->
-                    container.rememberDocument(name, chunks)
+                    container.rememberDocument(name, chunks, conversationId)
                     container.settings.memoryEnabled = true
+                    if (name !in sessionDocumentNames) sessionDocumentNames += name
                     invalidateOptionsMenu()
                     updateStatus()
                     Toast.makeText(this@ChatActivity, getString(R.string.chat_attach_added, name, chunks.size), Toast.LENGTH_SHORT).show()
@@ -583,30 +705,108 @@ class ChatActivity : AppCompatActivity() {
      * image the eventual answer will silently ignore.
      */
     private fun attachImage(uri: Uri) {
-        val visionAvailable = container.settings.enabledProviderIds.any { CloudProviders.byId(it).visionCapable }
+        // CloudProvider.visionCapable answers this correctly for a cloud
+        // provider (a fixed property of the API), but local's own vision
+        // support isn't fixed at all — it depends on which specific model
+        // is installed and whether its projector downloaded (see
+        // AppContainer.localVisionAvailable's own comment). Checking the
+        // static flag for "local" here meant this refused an image outright
+        // — "none of the enabled models understands images" — for a model
+        // that, in fact, did.
+        val visionAvailable = container.settings.enabledProviderIds.any { id ->
+            if (id == CloudProviders.LOCAL.id) container.localVisionAvailable() else CloudProviders.byId(id).visionCapable
+        }
         if (!visionAvailable) {
-            Toast.makeText(this, R.string.chat_attach_image_no_vision, Toast.LENGTH_LONG).show()
+            // A dialog, not a Toast: this explains *why* and what to do
+            // about it, and a Toast — gone in a few seconds regardless of
+            // length, easy to miss entirely if the message is mid-scroll or
+            // the keyboard just opened — isn't something a user can go back
+            // and actually read once it's dismissed itself.
+            AlertDialog.Builder(this)
+                .setTitle(R.string.chat_attach_image_no_vision_title)
+                .setMessage(R.string.chat_attach_image_no_vision)
+                .setPositiveButton(R.string.dialog_ok, null)
+                .show()
             return
         }
         lifecycleScope.launch {
-            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { "изображение" }
+            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { getString(R.string.chat_default_image_name) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw java.io.IOException("Не удалось открыть файл")
-                    if (bytes.size > MAX_IMAGE_BYTES) {
+                    val originalBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw java.io.IOException(getString(R.string.error_could_not_open_file))
+                    if (originalBytes.size > MAX_IMAGE_BYTES) {
                         throw java.io.IOException(
-                            getString(R.string.chat_attach_image_too_large, "%.1f МБ".format(Locale.US, bytes.size / 1_000_000.0)),
+                            getString(
+                                R.string.chat_attach_image_too_large,
+                                getString(R.string.unit_mb, "%.1f".format(Locale.US, originalBytes.size / 1_000_000.0)),
+                            ),
                         )
                     }
+
+                    // BitmapFactory ignores the orientation tag entirely — it
+                    // decodes raw pixels as stored, not as the photo should be
+                    // viewed. A phone camera routinely saves landscape byte
+                    // order with a rotate-90 tag rather than pre-rotated
+                    // pixels, so skipping this would silently hand the model
+                    // (and the sent-message thumbnail) a sideways photo.
+                    val rotationDegrees = runCatching {
+                        ExifInterface(java.io.ByteArrayInputStream(originalBytes)).rotationDegrees
+                    }.getOrDefault(0)
+
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(originalBytes, 0, originalBytes.size, bounds)
+                    var sampleSize = 1
+                    while (bounds.outWidth / (sampleSize * 2) >= MAX_IMAGE_DIMENSION ||
+                        bounds.outHeight / (sampleSize * 2) >= MAX_IMAGE_DIMENSION
+                    ) {
+                        sampleSize *= 2
+                    }
+                    val decoded = BitmapFactory.decodeByteArray(
+                        originalBytes, 0, originalBytes.size,
+                        BitmapFactory.Options().apply { inSampleSize = sampleSize },
+                    ) ?: throw java.io.IOException(getString(R.string.error_could_not_decode_image))
+
+                    val oriented = if (rotationDegrees != 0) {
+                        val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                        Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+                            .also { if (it !== decoded) decoded.recycle() }
+                    } else decoded
+
+                    val longestSide = maxOf(oriented.width, oriented.height)
+                    val scaled = if (longestSide > MAX_IMAGE_DIMENSION) {
+                        val scale = MAX_IMAGE_DIMENSION.toFloat() / longestSide
+                        Bitmap.createScaledBitmap(
+                            oriented,
+                            (oriented.width * scale).toInt().coerceAtLeast(1),
+                            (oriented.height * scale).toInt().coerceAtLeast(1),
+                            true,
+                        ).also { if (it !== oriented) oriented.recycle() }
+                    } else oriented
+                    val width = scaled.width
+                    val height = scaled.height
+
+                    val jpegBytes = java.io.ByteArrayOutputStream().use { stream ->
+                        scaled.compress(Bitmap.CompressFormat.JPEG, IMAGE_JPEG_QUALITY, stream)
+                        stream.toByteArray()
+                    }
+                    scaled.recycle()
+
                     // A content:// URI means nothing outside this process —
                     // core/openai are plain JVM with no Context to resolve
                     // it, so the image is embedded as a self-contained data
                     // URI right here rather than threading Android-specific
-                    // access down through the runtime layer.
-                    val mimeType = contentResolver.getType(uri).takeIf { !it.isNullOrBlank() } ?: "image/jpeg"
-                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                    ImageRef(uri = "data:$mimeType;base64,$base64")
+                    // access down through the runtime layer. Downscaled
+                    // first: a local vision model's encode cost scales with
+                    // resolution — a raw phone-camera photo (several
+                    // megapixels, and some vision models tile a large image
+                    // into several crops before encoding) turned a single
+                    // image turn into a multi-minute, largely uncancellable
+                    // native call on a real device. The same downscale also
+                    // shrinks a cloud upload for no quality most vision APIs
+                    // would keep anyway — they downscale server-side too.
+                    val base64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+                    ImageRef(uri = "data:image/jpeg;base64,$base64", widthPx = width, heightPx = height)
                 }
             }
             result
@@ -650,7 +850,16 @@ class ChatActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.chat_mic_no_model, Toast.LENGTH_LONG).show()
                 return
             }
+            // Symmetric with WhisperEngine releasing itself once a
+            // transcription is done: a local LLM left resident from an
+            // earlier turn would otherwise compete with Whisper for the
+            // same RAM the moment it loads for this recording's final pass.
+            // Skipped while a turn is actually generating — nothing here
+            // should force-evict a model something else is using right now,
+            // though evictIdle() itself would just no-op on it either way.
+            if (!isGenerating) lifecycleScope.launch { container.releaseLocalModels() }
             recordingPrefix = binding.input.text?.toString().orEmpty()
+            micLanguageHint = detectSpokenLanguage()
             recorder.start()
             binding.micButton.setIconResource(R.drawable.ic_stop)
             binding.statusText.text = getString(R.string.chat_recording)
@@ -662,31 +871,108 @@ class ChatActivity : AppCompatActivity() {
     }
 
     /**
+     * What language whisper.cpp is told to expect, instead of "auto" — see
+     * WhisperTranscriber's own doc comment for why "auto" specifically hurts
+     * the live preview loop. The device's system language was the first
+     * thing tried here, but that is which language Android's own menus are
+     * in, not which language is actually being typed and spoken in THIS
+     * chat — someone can easily run a phone in English and mostly write
+     * Russian, or vice versa, or simply be having a Russian conversation
+     * with a model on an English-language device. The conversation already
+     * sitting on screen says directly what's being spoken far more
+     * reliably than a device-wide setting ever could: any Cyrillic already
+     * typed or answered in this chat means Russian, any other conversation
+     * text at all means English (the two languages this app's own UI is
+     * localized into and the only ones worth risking a wrong guess over),
+     * and a chat with nothing typed yet at all falls back to "auto" — there
+     * is simply no evidence yet to go on.
+     */
+    private fun detectSpokenLanguage(): String {
+        val text = buildString {
+            append(binding.input.text ?: "")
+            adapter.messages().takeLast(6).forEach { append(' ').append(it.body) }
+        }
+        if (text.any { it in 'Ѐ'..'ӿ' }) return "ru"
+        if (text.any { it.isLetter() }) return "en"
+        return "auto"
+    }
+
+    /**
      * Stops recording and runs the one accurate transcription pass — called
      * either from a manual tap on the mic button, or automatically once
-     * [AudioRecorder.shouldFinalize] reports the documented pause (0.8s of
+     * [AudioRecorder.shouldFinalize] reports the documented pause (2s of
      * silence after speech) or the 25s window filling up, so a turn does not
      * require tapping stop at all if the pause is left to do it.
      */
     private fun finalizeRecording() {
         previewJob?.cancel()
         previewJob = null
+        // Tiny is done for this recording the moment it stops — freed here
+        // rather than left resident until the next one, for the same reason
+        // the main engine is freed below.
+        container.whisperPreviewEngine.release()
         val audio = recorder.stop()
         binding.micButton.setIconResource(R.drawable.ic_mic)
         updateStatus()
         val seed = container.whisperStore.installedSeed(container.settings.whisperModelId) ?: return
 
+        // WhisperEngine holds one native handle at a time with no locking of
+        // its own — it was never meant to be called from two coroutines at
+        // once. Nothing used to stop that: recorder.isRecording goes false
+        // the instant recorder.stop() returns above, well before this
+        // transcription actually finishes, so tapping the mic again while it
+        // was still running started a *second* recording that could reach
+        // its own finalizeRecording — and so its own transcribe() call on
+        // the very same engine — while the first one was still inside
+        // whisper_full() or, worse, right as its own release() below freed
+        // the handle the first call was still using. A used-after-freed
+        // native context is exactly a crash with no exception and no clean
+        // error, which is what tapping mic, mic again, then stop produced.
+        // Disabling the button for the duration closes that window outright
+        // rather than trying to make concurrent access to it safe.
+        // Whatever the field holds the instant recording stops — the preview
+        // loop's last update, ordinarily. This transcription can take far
+        // longer than usual (CPU contention with an active local generation
+        // stretches it from seconds to over a minute — see send()'s own
+        // guard against that), long enough that a user who gets impatient
+        // and types their own message in the meantime must not have it
+        // clobbered the moment the real transcription finally lands.
+        val textBeforeTranscribing = binding.input.text?.toString().orEmpty()
+        binding.micButton.isEnabled = false
+        isTranscribing = true
         lifecycleScope.launch {
-            binding.statusText.text = getString(R.string.chat_transcribing)
-            val result = withContext(Dispatchers.Default) {
-                runCatching { container.whisperEngine.transcribe(seed, audio) }
-            }
-            updateStatus()
-            result
-                .onSuccess { text -> if (text.isNotBlank()) setInputText(text) }
-                .onFailure { error ->
-                    Toast.makeText(this@ChatActivity, error.message ?: error.toString(), Toast.LENGTH_LONG).show()
+            try {
+                binding.statusText.text = getString(R.string.chat_transcribing)
+                val result = withContext(Dispatchers.Default) {
+                    runCatching { container.whisperEngine.transcribe(seed, audio, micLanguageHint) }
                 }
+                // Freed immediately after this one transcription, not kept
+                // warm for next time: the very next thing that happens is
+                // usually Send, which loads (or already has loaded) a local
+                // LLM, and a multi-hundred-MB-to-GB Whisper model sitting
+                // resident at the same time is exactly the kind of memory
+                // pressure a native crash looks like from the outside, with
+                // no exception and no clean error to explain it. Costs a
+                // reload (from disk, a second or so for Turbo) on the next
+                // recording; worth it over risking that.
+                container.whisperEngine.release()
+                updateStatus()
+                result
+                    .onSuccess { text ->
+                        val untouchedSinceStop = binding.input.text?.toString().orEmpty() == textBeforeTranscribing
+                        if (text.isNotBlank() && untouchedSinceStop) setInputText(text)
+                        // else: the user already typed their own message
+                        // while this ran — trusting their edit over a
+                        // transcription that arrived a minute late is the
+                        // whole point of textBeforeTranscribing above.
+                    }
+                    .onFailure { error ->
+                        Toast.makeText(this@ChatActivity, error.message ?: error.toString(), Toast.LENGTH_LONG).show()
+                    }
+            } finally {
+                binding.micButton.isEnabled = true
+                isTranscribing = false
+            }
         }
     }
 
@@ -720,8 +1006,9 @@ class ChatActivity : AppCompatActivity() {
                 if (previewAvailable) {
                     val snapshot = recorder.snapshot()
                     if (snapshot.isNotEmpty()) {
-                        val partial = runCatching { container.whisperPreviewEngine.transcribe(previewSeed, snapshot) }
-                            .getOrNull()
+                        val partial = runCatching {
+                            container.whisperPreviewEngine.transcribe(previewSeed, snapshot, micLanguageHint)
+                        }.getOrNull()
                         if (!partial.isNullOrBlank()) setInputText(partial)
                     }
                 }
@@ -764,6 +1051,12 @@ class ChatActivity : AppCompatActivity() {
             this, if (busy) R.drawable.ic_stop else R.drawable.ic_send,
         )
         binding.sendButton.contentDescription = getString(if (busy) R.string.chat_stop else R.string.send)
+        // The mic has no "stop the other thing" role generation's own button
+        // already covers, so it is disabled outright rather than doubling as
+        // anything — see send()'s own guard for why starting a recording
+        // during an active generation must not be possible at all, not just
+        // discouraged.
+        binding.micButton.isEnabled = !busy
     }
 
     private companion object {
@@ -804,6 +1097,17 @@ class ChatActivity : AppCompatActivity() {
         // instead of sending a multi-minute upload that the server rejects
         // anyway.
         const val MAX_IMAGE_BYTES = 20L * 1024 * 1024
+
+        // Longest side after downscaling. Generous relative to what a vision
+        // model actually reads at — cloud APIs downscale to roughly this
+        // range server-side already, and llama.cpp's mtmd encoders (Gemma's
+        // included) operate on inputs well under this — while still far
+        // below a modern phone camera's native resolution, which is what
+        // was turning a single attached photo into a multi-minute vision
+        // encode on-device (see llama_jni.cpp's nativeGenerateWithImage).
+        const val MAX_IMAGE_DIMENSION = 1280
+
+        const val IMAGE_JPEG_QUALITY = 85
 
         // Short enough to read as "live", long enough that Tiny is done
         // transcribing everything so far well before the next tick.

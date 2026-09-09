@@ -45,6 +45,20 @@ import java.util.concurrent.atomic.AtomicReference
 private val nativeOpMutex = Mutex()
 
 /**
+ * How much free RAM must be visible, relative to the projector *file's*
+ * size, before [LlamaCppRuntime.load] will even attempt [LlamaBridge.nativeLoadMmproj].
+ * The file is only the vision encoder's weights; encoding an actual image
+ * needs activation buffers on top of that — but for a single, already-
+ * downscaled image (see ChatActivity.attachImage's 1280px cap) at inference
+ * time, not training, that is nowhere near another full copy of the
+ * weights. 2.0 was a first, deliberately-cautious guess that turned out to
+ * block a real device with genuine headroom to spare (1633MB free against
+ * a ~990MB projector); 1.4 still leaves real margin above the bare weight
+ * size without being the reason vision never gets to run at all.
+ */
+private const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
+
+/**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
  * which is what lets the router, pipelines, context engine and memory stay
  * untouched: only the registration changes.
@@ -60,6 +74,22 @@ class LlamaCppRuntime(
      * so tests and any other caller don't need a real [AppLog][ai.localstudio.app.log.AppLog].
      */
     private val log: (tag: String, message: String) -> Unit = { _, _ -> },
+    /**
+     * Free RAM right now, read fresh whenever [load] needs it — never cached,
+     * since it changes constantly and the whole point is to catch the device
+     * being tighter *now* than [binding]'s own admission check assumed.
+     *
+     * That check ([ai.localstudio.core.runtime.RuntimeManager]'s budget
+     * comparison) is sized off the main GGUF alone, deliberately: folding a
+     * vision projector's cost into the *same* gate would risk rejecting a
+     * model outright — text and all — on a device where only the vision
+     * *add-on* doesn't fit, for a model that worked fine as text-only before
+     * mmproj existed. This is the separate, softer check that instead lets
+     * the base model load normally and only skips the projector, exactly
+     * like a projector that failed to download. Defaults to "assume plenty"
+     * so tests and any other caller don't need a real device.
+     */
+    private val availableRamBytes: () -> Long = { Long.MAX_VALUE },
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
@@ -122,7 +152,38 @@ class LlamaCppRuntime(
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
         log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms")
-        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, log)
+
+        // Best-effort, and only if a projector was actually downloaded for
+        // this model (see ModelStore.hasMmproj) — a model with none behaves
+        // exactly as it always did, text-only. Also skipped outright when
+        // there isn't visibly enough free RAM left after the base model's
+        // own load to also hold a vision encoder — attempting it anyway was
+        // observed on a real device to reliably run the whole process out of
+        // memory a turn or two later (Android's OOM killer, not a catchable
+        // Kotlin exception), losing whatever the conversation was doing at
+        // the time. The margin is deliberately generous: the projector's
+        // *file* size is only its weights, and encoding an image needs
+        // activation buffers on top that scale with the same size.
+        val hasVision = binding.mmprojArtifact?.let { mmprojPath ->
+            val mmprojBytes = File(mmprojPath).length()
+            val headroom = availableRamBytes()
+            if (mmprojBytes > 0 && headroom < mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR) {
+                log(
+                    "LOCAL_LOAD",
+                    "${file.name}: mmproj SKIPPED — only ${headroom / 1_000_000}MB free, " +
+                        "want ~${(mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR / 1_000_000).toLong()}MB for $mmprojPath",
+                )
+                false
+            } else {
+                nativeOpMutex.withLock {
+                    runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
+                }.also { loaded ->
+                    log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} from $mmprojPath")
+                }
+            }
+        } ?: false
+
+        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, log)
     }
 }
 
@@ -131,6 +192,8 @@ private class LlamaTextModel(
     override val ramBytes: Long,
     private val bridge: LlamaBridge,
     private val handle: Long,
+    /** Whether [LlamaBridge.nativeLoadMmproj] succeeded for this handle — see [generate]. */
+    private val hasVision: Boolean,
     private val log: (tag: String, message: String) -> Unit,
 ) : TextModelHandle {
 
@@ -150,7 +213,12 @@ private class LlamaTextModel(
         var tokenCount = 0
         var firstTokenLogged = false
         val completed = AtomicBoolean(false)
-        log("LOCAL_GENERATE", "$modelId: starting (prompt=${request.prompt.length} chars, maxTokens=${request.maxTokens})")
+        val image = request.images.firstOrNull().takeIf { hasVision }
+        log(
+            "LOCAL_GENERATE",
+            "$modelId: starting (prompt=${request.prompt.length} chars, maxTokens=${request.maxTokens}" +
+                (if (image != null) ", with image" else "") + ")",
+        )
 
         val sink = object : LlamaBridge.TokenSink {
             override fun onToken(text: String) {
@@ -179,17 +247,43 @@ private class LlamaTextModel(
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
             }
             val produced = nativeOpMutex.withLock {
-                bridge.nativeGenerate(
-                    handle = handle,
-                    systemPrompt = request.systemPrompt,
-                    userPrompt = request.prompt,
-                    maxTokens = request.maxTokens,
-                    temperature = request.temperature.toFloat(),
-                    topP = request.topP.toFloat(),
-                    topK = request.topK,
-                    repeatPenalty = request.repeatPenalty.toFloat(),
-                    callback = sink,
-                )
+                if (image != null) {
+                    // ImageRef.uri is always a "data:<mime>;base64,<payload>" string
+                    // here, never a content:// or file path — ChatActivity.attachImage()
+                    // builds it that way specifically because core/openai are plain JVM
+                    // modules with no Android Context to resolve a real URI against.
+                    val imageBytes = runCatching {
+                        android.util.Base64.decode(image.uri.substringAfter(",", ""), android.util.Base64.NO_WRAP)
+                    }.getOrNull()
+                    if (imageBytes == null || imageBytes.isEmpty()) {
+                        -1
+                    } else {
+                        bridge.nativeGenerateWithImage(
+                            handle = handle,
+                            systemPrompt = request.systemPrompt,
+                            userPrompt = request.prompt,
+                            imageBytes = imageBytes,
+                            maxTokens = request.maxTokens,
+                            temperature = request.temperature.toFloat(),
+                            topP = request.topP.toFloat(),
+                            topK = request.topK,
+                            repeatPenalty = request.repeatPenalty.toFloat(),
+                            callback = sink,
+                        )
+                    }
+                } else {
+                    bridge.nativeGenerate(
+                        handle = handle,
+                        systemPrompt = request.systemPrompt,
+                        userPrompt = request.prompt,
+                        maxTokens = request.maxTokens,
+                        temperature = request.temperature.toFloat(),
+                        topP = request.topP.toFloat(),
+                        topK = request.topK,
+                        repeatPenalty = request.repeatPenalty.toFloat(),
+                        callback = sink,
+                    )
+                }
             }
             completed.set(true)
             val elapsedMs = System.currentTimeMillis() - start

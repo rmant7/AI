@@ -10,6 +10,7 @@ pluginManagement {
 
 rootProject.name = "local-ai-studio"
 
+include(":memory")
 include(":core")
 include(":openai")
 
@@ -23,4 +24,5 @@ val hasAndroidSdk = System.getenv("ANDROID_HOME") != null ||
 
 if (hasAndroidSdk) {
     include(":app")
+    include(":whisper")
 }

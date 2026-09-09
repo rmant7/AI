@@ -171,6 +171,35 @@ class OpenAiRuntimeTest {
     }
 
     @Test
+    fun `a rate limit that names its own wait gets a short cooldown, not the 24h default`() = runBlocking {
+        val store = InMemoryApiKeyStore()
+        val rotator = ApiKeyRotator(store, "groq")
+        val onlyKey = rotator.add("only-key")
+        server.chatStatus = 429
+        // Groq's actual free-tier wording for a per-minute burst, as opposed
+        // to a real daily-quota exhaustion — the whole point of parsing this
+        // is telling those two apart instead of treating every 429 the same.
+        server.quotaErrorBody = """
+            {"error":{"message":"Rate limit reached for model `x` in organization `y` on : Limit 6000, Used 6000, Requested 33. Please try again in 0.05s.","type":"tokens","code":"rate_limit_exceeded"}}
+        """.trimIndent()
+
+        val pooledRuntime = OpenAiRuntime(OpenAiConfig(baseUrl = server.baseUrl, keyRotator = rotator))
+        val model = descriptor("qwen3:8b", setOf(Capability.TEXT_GENERATION))
+        val handle = assertIs<TextModelHandle>(pooledRuntime.load(model, model.bindings.first()))
+
+        assertFailsWith<ai.localstudio.core.runtime.ModelLoadException> {
+            handle.generate(GenerationRequest(prompt = "hi")).toList()
+        }
+
+        val cooldownUntil = rotator.pool().first { it.id == onlyKey.id }.cooldownUntilEpochMs
+        assertTrue(cooldownUntil > 0)
+        assertTrue(
+            cooldownUntil - System.currentTimeMillis() < 60_000,
+            "a wait the provider itself named (0.05s) must not fall back to the 24h default",
+        )
+    }
+
+    @Test
     fun `a provider with no pool configured falls back to the plain apiKey untouched`() = runBlocking {
         // Regression guard: adding keyRotator to OpenAiConfig must not change
         // behavior for every provider that has not opted into a pool yet.

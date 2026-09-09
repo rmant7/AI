@@ -100,16 +100,18 @@
                 android:minHeight="48dp"
                 android:paddingVertical="12dp" />
 
-            <!-- Disabled for now: Whisper transcription quality isn't good
-                 enough to be worth keeping a speech model loaded in RAM
-                 alongside a local LLM, where every gigabyte competes with
-                 the model actually doing the work. -->
+            <!-- Disabled for now: whisper.cpp transcription quality/latency on
+                 device is not reliable enough to ship (see the session notes
+                 around 2026-09-09) — CPU contention with a local LLM can push
+                 a single transcription past a minute and derail auto-stop
+                 entirely. Voice input is intended to come back once that's
+                 solved properly, not abandoned. -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/micButton"
+                android:visibility="gone"
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:visibility="gone"
                 android:contentDescription="@string/chat_mic"
                 app:icon="@drawable/ic_mic" />
 

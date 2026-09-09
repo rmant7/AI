@@ -7,6 +7,18 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
+/**
+ * The label prefixing whichever candidate actually answered — shared with
+ * [ai.localstudio.core.memory.LlmMemoryExtractor], which strips lines
+ * starting with it before consolidating a conversation, and with
+ * [ai.localstudio.app.ChatActivity]'s own copy of this same footer for the
+ * single-candidate case this class never sees. Fixed in English rather than
+ * following the device's language: this module has no access to Android
+ * string resources, and a label two different producers could render
+ * differently would silently break the strip-before-consolidating regex.
+ */
+const val ANSWERED_BY_LABEL = "Answer from: "
+
 /** One provider this chain can fall through to, tried in the order the list is built in. */
 data class FallbackCandidate(
     val label: String,
@@ -132,7 +144,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
                     emit(attributionFooter(candidate.label, failures))
                     return@flow
                 }
-                failures += "${candidate.label}: пустой ответ"
+                failures += "${candidate.label}: empty response"
             } catch (e: CancellationException) {
                 // Same reasoning as the load-side catch above: propagate
                 // instead of recording it as this candidate's failure and
@@ -156,7 +168,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
                 active = null
             }
         }
-        throw ModelLoadException("Ни один источник не ответил:\n" + failures.joinToString("\n"))
+        throw ModelLoadException("No source answered:\n" + failures.joinToString("\n"))
     }
 
     private fun attributionFooter(answeredBy: String, failures: List<String>) = buildString {
@@ -166,7 +178,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
             append(failures.joinToString("; "))
             append("\n")
         }
-        append("Ответ от: ")
+        append(ANSWERED_BY_LABEL)
         append(answeredBy)
     }
 

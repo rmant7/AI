@@ -66,12 +66,22 @@ endif()
 
 FetchContent_MakeAvailable(llamacpp)
 
+# mtmd (multimodal: image/audio input) lives under tools/, which this project
+# never adds as a whole — LLAMA_BUILD_TOOLS is OFF above, deliberately, to
+# skip llama-cli/llama-server/the rest of the CLI tools this app has no use
+# for. The mtmd *library* target itself has no such gate in its own
+# CMakeLists.txt (only its CLI executables — llama-mtmd-cli and friends — do,
+# behind that same LLAMA_BUILD_TOOLS), so it is added directly here instead
+# of pulling in everything else under tools/ just to reach it.
+add_subdirectory(${llamacpp_SOURCE_DIR}/tools/mtmd ${CMAKE_CURRENT_BINARY_DIR}/mtmd-build)
+
 add_library(llama_jni SHARED llama_jni.cpp)
 
 target_include_directories(llama_jni PRIVATE
     ${llamacpp_SOURCE_DIR}/include
     ${llamacpp_SOURCE_DIR}/ggml/include
+    ${llamacpp_SOURCE_DIR}/tools/mtmd
 )
 
 find_library(log-lib log)
-target_link_libraries(llama_jni llama ggml ${log-lib})
+target_link_libraries(llama_jni llama ggml mtmd ${log-lib})

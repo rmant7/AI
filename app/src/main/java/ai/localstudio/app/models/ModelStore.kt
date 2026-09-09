@@ -26,13 +26,61 @@ class ModelStore(private val context: Context) {
     fun isInstalled(seed: LocalModelSeed): Boolean =
         fileFor(seed).let { it.isFile && it.length() > MIN_PLAUSIBLE_SIZE }
 
-    fun installedSize(seed: LocalModelSeed): Long = fileFor(seed).takeIf { it.isFile }?.length() ?: 0
+    /**
+     * Total disk footprint of this model — the main GGUF plus its projector
+     * when one is installed. Reporting only the main file's size here left
+     * the "Установлена · N ГБ" status understating actual usage by however
+     * big the mmproj file was, which is not a rounding error: this model's
+     * own projector is roughly a third of the main file's size on top.
+     */
+    fun installedSize(seed: LocalModelSeed): Long =
+        (fileFor(seed).takeIf { it.isFile }?.length() ?: 0) +
+            (mmprojFileFor(seed).takeIf { it.isFile }?.length() ?: 0)
 
     fun partialSize(seed: LocalModelSeed): Long = partFor(seed).takeIf { it.isFile }?.length() ?: 0
 
     fun delete(seed: LocalModelSeed) {
         fileFor(seed).delete()
         partFor(seed).delete()
+        mmprojFileFor(seed).delete()
+        mmprojPartFor(seed).delete()
+    }
+
+    /**
+     * A vision-capable model's projector, downloaded and named separately
+     * from its main GGUF — llama.cpp keeps the two apart, and this app
+     * mirrors that rather than trying to merge them into one file.
+     */
+    fun mmprojFileFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.mmproj.gguf")
+
+    fun mmprojPartFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.mmproj.gguf.part")
+
+    /**
+     * True once the projector is actually on disk, not just declared by the
+     * seed — a model whose main GGUF finished but whose (much smaller,
+     * best-effort) projector download failed is still usable, just
+     * text-only, and this is what [LlamaCppRuntime] checks to know which.
+     */
+    fun hasMmproj(seed: LocalModelSeed): Boolean =
+        seed.mmprojFileName != null && mmprojFileFor(seed).let { it.isFile && it.length() > 0 }
+
+    /**
+     * Files sitting in the models directory that don't belong to any seed
+     * this catalog currently knows about — a real, observed case: a model
+     * downloaded from a different branch under active development (a
+     * `.litertlm` file from a LiteRT-LM/Tensor SDK runtime this build
+     * doesn't even compile in) stays on disk exactly as-is across a plain
+     * branch/version switch, since nothing about switching branches touches
+     * app-private storage. Nothing in this app ever revisits this directory
+     * looking for files it doesn't recognize, so without this they would sit
+     * there, invisible and undeletable through the app, for as long as the
+     * app is installed.
+     */
+    fun orphanedFiles(knownSeeds: List<LocalModelSeed>): List<File> {
+        val known = knownSeeds.flatMap {
+            listOf(fileFor(it).name, partFor(it).name, mmprojFileFor(it).name, mmprojPartFor(it).name)
+        }.toSet()
+        return directory().listFiles()?.filter { it.isFile && it.name !in known }.orEmpty()
     }
 
     fun freeSpaceBytes(): Long = directory().freeSpace

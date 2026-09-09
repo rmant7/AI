@@ -64,7 +64,7 @@ class FallbackTextRuntimeTest {
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
         assertTrue(text.startsWith("ответ локально"))
-        assertTrue(text.contains("Ответ от: local"), "the answering candidate should be named even with no fallback: $text")
+        assertTrue(text.contains("Answer from: local"), "the answering candidate should be named even with no fallback: $text")
         // No fallback happened, so there is nothing to warn about — only the
         // plain attribution line, no "⚠" failure summary.
         assertTrue(!text.contains("⚠"))
@@ -100,7 +100,7 @@ class FallbackTextRuntimeTest {
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
         assertTrue(text.startsWith("cloud answered"))
-        assertTrue(text.contains("пустой ответ"))
+        assertTrue(text.contains("empty response"))
     }
 
     @Test
@@ -200,7 +200,7 @@ class FallbackTextRuntimeTest {
         val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
 
         assertTrue(text.startsWith("just an answer"))
-        assertTrue(text.contains("Ответ от: local"))
+        assertTrue(text.contains("Answer from: local"))
     }
 
     @Test

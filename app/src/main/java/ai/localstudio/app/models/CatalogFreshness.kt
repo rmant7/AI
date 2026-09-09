@@ -61,6 +61,6 @@ class CatalogFreshness(context: Context) {
 
     private companion object {
         const val MIN_INTERVAL_MS = 60 * 60 * 1000L
-        const val NO_NETWORK_MARKER = "Нет соединения"
+        const val NO_NETWORK_MARKER = "No connection"
     }
 }

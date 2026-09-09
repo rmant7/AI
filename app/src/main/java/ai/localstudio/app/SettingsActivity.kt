@@ -12,6 +12,8 @@ import android.widget.ArrayAdapter
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivitySettingsBinding
 import ai.localstudio.app.llama.LlamaBridge
@@ -49,10 +51,12 @@ class SettingsActivity : AppCompatActivity() {
         settings = container.settings
         pendingEnabled = settings.enabledProviderIds.toMutableSet()
 
+        setupLanguageSpinner()
+
         binding.providerSpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            CloudProviders.ALL.map { it.title },
+            CloudProviders.ALL.map { getString(it.titleRes) },
         )
         binding.providerSpinner.setSelection(
             CloudProviders.ALL.indexOfFirst { it.id == settings.providerId }.coerceAtLeast(0),
@@ -114,6 +118,38 @@ class SettingsActivity : AppCompatActivity() {
         renderApiKeysSummary(settings.provider)
     }
 
+    /**
+     * `null` means "system default" — an empty [LocaleListCompat], which
+     * tells AppCompat to stop overriding and follow the device language
+     * again. AppCompat persists whichever choice is made here itself, so
+     * there's nothing else to store or read back on the next launch.
+     */
+    private fun setupLanguageSpinner() {
+        val tags = listOf(null, "en", "ru")
+        binding.languageSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            listOf(
+                getString(R.string.settings_language_system),
+                getString(R.string.settings_language_en),
+                getString(R.string.settings_language_ru),
+            ),
+        )
+        val currentTag = AppCompatDelegate.getApplicationLocales().toLanguageTags().substringBefore(',').ifBlank { null }
+        binding.languageSpinner.setSelection(tags.indexOf(currentTag).coerceAtLeast(0))
+        binding.languageSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val tag = tags[position]
+                val newLocales = if (tag == null) LocaleListCompat.getEmptyLocaleList() else LocaleListCompat.forLanguageTags(tag)
+                if (newLocales.toLanguageTags() != AppCompatDelegate.getApplicationLocales().toLanguageTags()) {
+                    AppCompatDelegate.setApplicationLocales(newLocales)
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
     private fun renderWhisper() {
         val installed = container.whisperStore.installedSeed(settings.whisperModelId)
         val running = WhisperModels.SEEDS.firstOrNull { container.whisperDownloads.stateOf(it) is WhisperDownloadState.Running }
@@ -125,14 +161,17 @@ class SettingsActivity : AppCompatActivity() {
                 "${running.title}: ${state.stage} ${(state.progress.fraction * 100).toInt()}%"
             }
 
-            failed != null -> "Ошибка: " + (container.whisperDownloads.stateOf(failed) as WhisperDownloadState.Failed).message
+            failed != null -> getString(
+                R.string.settings_whisper_error,
+                (container.whisperDownloads.stateOf(failed) as WhisperDownloadState.Failed).message,
+            )
             installed != null -> getString(R.string.settings_whisper_installed, installed.title)
             else -> getString(R.string.settings_whisper_none)
         }
     }
 
     private fun showProvider(provider: CloudProvider) {
-        binding.providerHint.text = provider.keyHint
+        binding.providerHint.text = getString(provider.keyHintRes)
         binding.endpointBlock.visibility = if (provider.editableUrl) View.VISIBLE else View.GONE
         binding.apiKeyBlock.visibility = if (provider.needsKey) View.VISIBLE else View.GONE
 
@@ -169,7 +208,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun renderEnabledSummary() {
-        val titles = CloudProviders.ALL.filter { it.id in pendingEnabled }.map { it.title }
+        val titles = CloudProviders.ALL.filter { it.id in pendingEnabled }.map { getString(it.titleRes) }
         binding.enabledProvidersSummary.text = if (titles.isEmpty()) {
             getString(R.string.settings_no_sources)
         } else {
