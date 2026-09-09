@@ -807,13 +807,17 @@ class ChatActivity : AppCompatActivity() {
     /**
      * Stops recording and runs the one accurate transcription pass — called
      * either from a manual tap on the mic button, or automatically once
-     * [AudioRecorder.shouldFinalize] reports the documented pause (0.8s of
+     * [AudioRecorder.shouldFinalize] reports the documented pause (2s of
      * silence after speech) or the 25s window filling up, so a turn does not
      * require tapping stop at all if the pause is left to do it.
      */
     private fun finalizeRecording() {
         previewJob?.cancel()
         previewJob = null
+        // Tiny is done for this recording the moment it stops — freed here
+        // rather than left resident until the next one, for the same reason
+        // the main engine is freed below.
+        container.whisperPreviewEngine.release()
         val audio = recorder.stop()
         binding.micButton.setIconResource(R.drawable.ic_mic)
         updateStatus()
@@ -824,6 +828,16 @@ class ChatActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.Default) {
                 runCatching { container.whisperEngine.transcribe(seed, audio) }
             }
+            // Freed immediately after this one transcription, not kept warm
+            // for next time: the very next thing that happens is usually
+            // Send, which loads (or already has loaded) a local LLM — and a
+            // multi-hundred-MB-to-GB Whisper model sitting resident at the
+            // same time is exactly the kind of memory pressure a native
+            // crash in llama.cpp looks like from the outside, with no
+            // exception and no clean error to explain it. Costs a reload
+            // (from disk, a second or so for Turbo) on the next recording;
+            // worth it over risking that.
+            container.whisperEngine.release()
             updateStatus()
             result
                 .onSuccess { text -> if (text.isNotBlank()) setInputText(text) }

@@ -50,7 +50,7 @@ data class UtteranceConfig(
     /** Whisper's own analysis window; past this an utterance is cut whether or not the speaker paused. */
     val maxUtteranceSeconds: Int = 25,
     /** Long enough not to cut on a mid-sentence breath. */
-    val silenceToFinalizeMs: Int = 800,
+    val silenceToFinalizeMs: Int = 2_000,
     /** Below this whisper has too little context to produce anything useful. */
     val minTranscribeMs: Int = 400,
     /** How often the in-progress utterance is re-transcribed for partial text. */

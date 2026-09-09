@@ -22,7 +22,7 @@ import java.nio.ByteOrder
  *   language, which is what "Chinese text, then it corrects to English"
  *   looked like.
  * - **[shouldFinalize] exposes the documented pause-based turn-taking**
- *   (0.8s of silence after speech, or the 25s window filling up) so the
+ *   (2s of silence after speech, or the 25s window filling up) so the
  *   caller can auto-stop instead of only ever waiting for a manual tap.
  */
 class AudioRecorder(private val config: UtteranceConfig = UtteranceConfig()) {
