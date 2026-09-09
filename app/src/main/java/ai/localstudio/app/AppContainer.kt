@@ -420,6 +420,9 @@ class AppContainer private constructor(private val context: Context) {
      * [cloudCandidates] never fired either and the next message went
      * straight back to the same overloaded model.
      */
+    private val compareOrchestrators = mutableMapOf<String, Orchestrator>()
+    private val compareSignatures = mutableMapOf<String, String>()
+
     fun compareCandidates(): List<Pair<String, Orchestrator>> =
         enabledProviders().mapNotNull { provider ->
             val candidates = if (provider.id == CloudProviders.LOCAL.id) {
@@ -435,7 +438,42 @@ class AppContainer private constructor(private val context: Context) {
             // rather than claim whichever model happens to lead the rotation.
             val label = candidates.singleOrNull()?.label ?: context.getString(provider.titleRes)
             val isLocalOnly = candidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP }
-            label to buildOrchestrator(runtime, isLocalOnly, candidates)
+
+            // Every call used to build a brand new RuntimeManager — meaning a
+            // brand new LlamaCppRuntime.load() for the local candidate on
+            // every single Compare-mode turn, with nothing ever freeing the
+            // *previous* turn's already-loaded model (a fresh RuntimeManager
+            // has no record of it, so it never gets to evict it): the old
+            // native session — GGUF weights, KV cache, mmproj encoder — just
+            // leaked, resident, while a second full copy loaded on top of it.
+            // Two turns of that on a multi-GB vision model is exactly what
+            // an OOM kill on the second message looks like. Cached the same
+            // way orchestrator() already caches the single-provider path:
+            // reused for this provider as long as nothing that would change
+            // its wiring actually has.
+            val signature = (
+                listOf(
+                    settings.customEndpoint,
+                    settings.temperature,
+                    settings.topP,
+                    settings.topK,
+                    settings.repeatPenalty,
+                    settings.contextTokens,
+                    settings.maxResponseTokens,
+                    settings.systemPrompt,
+                    settings.memoryEnabled,
+                    documents.list().isNotEmpty(),
+                    settings.chatModelFor(provider.id),
+                    settings.apiKeyFor(provider.id),
+                ) + candidates.map { it.model.id }
+            ).joinToString("|")
+
+            val cached = compareOrchestrators[provider.id]?.takeIf { compareSignatures[provider.id] == signature }
+            val orchestrator = cached ?: buildOrchestrator(runtime, isLocalOnly, candidates).also {
+                compareOrchestrators[provider.id] = it
+                compareSignatures[provider.id] = signature
+            }
+            label to orchestrator
         }
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
