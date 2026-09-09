@@ -793,6 +793,14 @@ class ChatActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.chat_mic_no_model, Toast.LENGTH_LONG).show()
                 return
             }
+            // Symmetric with WhisperEngine releasing itself once a
+            // transcription is done: a local LLM left resident from an
+            // earlier turn would otherwise compete with Whisper for the
+            // same RAM the moment it loads for this recording's final pass.
+            // Skipped while a turn is actually generating — nothing here
+            // should force-evict a model something else is using right now,
+            // though evictIdle() itself would just no-op on it either way.
+            if (!isGenerating) lifecycleScope.launch { container.releaseLocalModels() }
             recordingPrefix = binding.input.text?.toString().orEmpty()
             recorder.start()
             binding.micButton.setIconResource(R.drawable.ic_stop)

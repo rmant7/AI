@@ -365,6 +365,33 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
+    /**
+     * Every [RuntimeManager] this container has ever built, so
+     * [releaseLocalModels] has something to actually reach — buildOrchestrator
+     * otherwise hands its manager straight to [NodeExecutors] with no
+     * reference kept anywhere else. Never pruned: an old, already-empty
+     * manager left in this list costs nothing (no native resources, just a
+     * small object), and a manager whose cached [Orchestrator] slot was
+     * replaced after a signature change — see compareCandidates' own doc
+     * comment on that gap — still gets evicted through here instead of
+     * staying orphaned forever.
+     */
+    private val runtimeManagers = mutableListOf<RuntimeManager>()
+
+    /**
+     * Frees every locally-loaded model (the LLM, its vision projector) —
+     * called right before starting a voice recording, so Whisper is not
+     * competing with an already-resident multi-GB local model for the same
+     * RAM budget the same way that local model was competing with Whisper
+     * before WhisperEngine started releasing itself after each use. Uses
+     * [RuntimeManager.evictIdle], not the blunter unloadAll: a model still
+     * actively mid-generation (refCount > 0) is left alone rather than
+     * force-freed out from under whatever is using it.
+     */
+    suspend fun releaseLocalModels() {
+        runtimeManagers.forEach { it.evictIdle() }
+    }
+
     private fun buildOrchestrator(
         runtime: ModelRuntime,
         isLocalOnly: Boolean,
@@ -380,6 +407,7 @@ class AppContainer private constructor(private val context: Context) {
             budgetBytes = device.usableRamBytes,
             runtimes = mapOf(runtime.kind to runtime),
         )
+        runtimeManagers += manager
         val executors = NodeExecutors(
             selector = ModelSelector(registry(registryCandidates), device),
             runtimeManager = manager,
