@@ -118,6 +118,13 @@ class AppContainer private constructor(private val context: Context) {
     private val documentMemoryIds = mutableMapOf<String, List<String>>()
 
     init {
+        // Must run before sync() below: a cooldown sync() would otherwise
+        // preserve as "unchanged" is exactly what this clears. One-time
+        // self-heal for installs that hit a bundled key's daily-limit
+        // message before the short-cooldown fix shipped — see this
+        // method's own doc comment for why clearing unconditionally is safe.
+        bundledApiKeyStore.clearStaleCooldownsOnce()
+
         // Reconciled on every launch, not just the first: cheap when it's
         // already a no-op, and it's how a bundled key added or rotated in a
         // later build ever reaches an existing install.
