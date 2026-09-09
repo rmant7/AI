@@ -224,6 +224,14 @@ class AppContainer private constructor(private val context: Context) {
         appLogForMmproj = { message -> appLog.record("MMPROJ_DOWNLOAD", message) },
     )
 
+    // No auto-download of Tiny on first launch: voice input's mic button and
+    // Voice model category are both hidden (see activity_chat.xml and
+    // activity_models.xml) because whisper.cpp transcription still isn't
+    // reliable enough on-device — CPU contention with a local LLM can push a
+    // single transcription past a minute and derail the silence-based
+    // auto-stop entirely. Nothing reachable from the UI calls transcribe()
+    // while the mic is hidden, so fetching a model in the background would
+    // just be wasted disk space until this comes back properly.
     val whisperStore = WhisperStore(context)
     val whisperDownloads = WhisperDownloads(
         whisperStore,
@@ -243,22 +251,6 @@ class AppContainer private constructor(private val context: Context) {
      * recording instead of ever having either warm.
      */
     val whisperPreviewEngine = WhisperEngine(whisperStore)
-
-    init {
-        // Restores voice input to something that works out of the box: with
-        // the old TFLite backend this auto-download was removed because
-        // transcription quality wasn't good enough to justify a speech model
-        // competing for RAM with the local LLM it sits next to. Now that
-        // transcription runs through whisper.cpp instead (see WhisperBridge),
-        // that's no longer true, and Tiny is small enough (75 MB) that
-        // fetching it automatically costs nothing worth gating behind a
-        // manual visit to Models. Nothing in WhisperEngine loads a model into
-        // RAM until something actually calls transcribe(), so this only ever
-        // costs disk space up front, never memory.
-        if (WhisperModels.SEEDS.none { whisperStore.isInstalled(it) }) {
-            whisperDownloads.start(WhisperModels.byId(WhisperModels.TINY_ID)!!)
-        }
-    }
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

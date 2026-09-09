@@ -19,8 +19,13 @@
          Agents are the reason this is a toggle group and not a hardcoded
          pair of buttons — a third/fourth entry is one more button, not a
          restructure. -->
+    <!-- Voice category hidden alongside the mic button in activity_chat.xml
+         — see that file's comment. The listener, the VOICE category enum,
+         and voiceRows() are all left wired in ModelsActivity.kt; only the
+         toggle that makes the category reachable is hidden, same as before. -->
     <com.google.android.material.button.MaterialButtonToggleGroup
         android:id="@+id/categoryToggle"
+        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="12dp"
