@@ -31,6 +31,8 @@ import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
 import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
+import ai.localstudio.app.keys.BundledApiKeyStore
+import ai.localstudio.app.keys.BundledApiKeys
 import ai.localstudio.app.keys.PrefsApiKeyStore
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.log.AppLog
@@ -94,8 +96,12 @@ class AppContainer private constructor(private val context: Context) {
     /** Per-provider pools of API keys — add/delete/validate in ApiKeysActivity. */
     val apiKeyStore = PrefsApiKeyStore(context, settings)
 
+    /** Cooldown state for keys baked into the build itself — see BundledApiKeys. Never shown in ApiKeysActivity. */
+    private val bundledApiKeyStore = BundledApiKeyStore(context)
+
     /** One rotator per provider, so cooldown state for Gemini and Mistral never mixes. */
-    fun apiKeyRotator(providerId: String): ApiKeyRotator = ApiKeyRotator(apiKeyStore, providerId)
+    fun apiKeyRotator(providerId: String): ApiKeyRotator =
+        ApiKeyRotator(apiKeyStore, providerId, bundledStore = bundledApiKeyStore)
 
     /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". */
     val appLog = AppLog(context)
@@ -112,6 +118,12 @@ class AppContainer private constructor(private val context: Context) {
     private val documentMemoryIds = mutableMapOf<String, List<String>>()
 
     init {
+        // Reconciled on every launch, not just the first: cheap when it's
+        // already a no-op, and it's how a bundled key added or rotated in a
+        // later build ever reaches an existing install.
+        BundledApiKeys.sync(bundledApiKeyStore, "groq")
+        BundledApiKeys.sync(bundledApiKeyStore, "gemini")
+
         // Checked once per process, before anything else has a chance to
         // throw: this is the one place a *native* crash (a segfault in
         // llama.cpp, say) becomes visible after the fact at all — the crash

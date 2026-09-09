@@ -93,4 +93,30 @@ class ApiKeyRotatorTest {
         assertEquals(1, rotator.poolSize())
         assertEquals(0, mistral.poolSize())
     }
+
+    @Test
+    fun `a bundled key is used only once the user's own pool has nothing usable`() {
+        val bundledStore = InMemoryApiKeyStore()
+        val bundled = bundledStore.let {
+            val entry = ApiKeyEntry(id = "bundled-1", key = "bundled-key")
+            it.save("gemini", listOf(entry))
+            entry
+        }
+        val withFallback = ApiKeyRotator(store, "gemini", clock = { now }, bundledStore = bundledStore)
+
+        // Nothing of the user's own yet — falls straight to the bundled key.
+        assertEquals(bundled, withFallback.activeKey())
+
+        // The user's own key, once added, wins over the bundled one.
+        val userKey = withFallback.add("user-key")
+        assertEquals(userKey, withFallback.activeKey())
+
+        // Once the user's own key is exhausted, it falls back to the bundled one again.
+        withFallback.markExhausted(userKey.id)
+        assertEquals(bundled.id, withFallback.activeKey()?.id)
+
+        // The bundled key can be marked exhausted too, and stops being returned.
+        withFallback.markExhausted(bundled.id)
+        assertNull(withFallback.activeKey())
+    }
 }

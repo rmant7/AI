@@ -47,24 +47,51 @@ class ApiKeyRotator(
     private val store: ApiKeyStore,
     private val providerId: String,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * A second, separate pool for keys bundled into the build itself — only
+     * ever reached for once [store]'s own pool has nothing usable right now,
+     * so a key the user added always wins. Kept in a store of its own rather
+     * than merged into [store]'s: these never came from the user, so they
+     * have no business appearing in a UI that lists what the user typed in
+     * and lets them delete it.
+     */
+    private val bundledStore: ApiKeyStore? = null,
 ) {
 
-    /** The key to use right now, or null when the pool is empty or every key is cooling down. */
+    /** The key to use right now, or null when both pools are empty or every key is cooling down. */
     fun activeKey(): ApiKeyEntry? {
         val now = clock()
-        return store.load(providerId).firstOrNull { it.cooldownUntilEpochMs <= now }
+        store.load(providerId).firstOrNull { it.cooldownUntilEpochMs <= now }?.let { return it }
+        return bundledStore?.load(providerId)?.firstOrNull { it.cooldownUntilEpochMs <= now }
     }
 
     /** Call after an HTTP 429 (rate limit or daily quota exceeded) using this key. */
     fun markExhausted(keyId: String, cooldownMs: Long = DEFAULT_COOLDOWN_MS) {
         val until = clock() + cooldownMs
         val pool = store.load(providerId)
-        store.save(providerId, pool.map { if (it.id == keyId) it.copy(cooldownUntilEpochMs = until) else it })
+        if (pool.any { it.id == keyId }) {
+            store.save(providerId, pool.map { if (it.id == keyId) it.copy(cooldownUntilEpochMs = until) else it })
+            return
+        }
+        val bundled = bundledStore ?: return
+        val bundledPool = bundled.load(providerId)
+        if (bundledPool.any { it.id == keyId }) {
+            bundled.save(providerId, bundledPool.map { if (it.id == keyId) it.copy(cooldownUntilEpochMs = until) else it })
+        }
     }
 
     fun pool(): List<ApiKeyEntry> = store.load(providerId)
 
     fun poolSize(): Int = pool().size
+
+    /**
+     * Whether there is a configured pool at all — the user's own, the
+     * bundled one, or both — regardless of whether anything in it is
+     * currently on cooldown. Callers use this to decide whether key rotation
+     * applies at all versus falling through to some other, keyless path;
+     * [poolSize] alone would miss a bundled-only pool with no user keys.
+     */
+    fun hasAnyKey(): Boolean = pool().isNotEmpty() || bundledStore?.load(providerId)?.isNotEmpty() == true
 
     fun add(key: String): ApiKeyEntry {
         val entry = ApiKeyEntry(id = java.util.UUID.randomUUID().toString(), key = key.trim())

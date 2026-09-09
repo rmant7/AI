@@ -200,7 +200,7 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
             // streaming starts), so in practice it is always false there too.
             var emittedAny = false
             var ioRetries = 0
-            val rotator = config.keyRotator?.takeIf { it.poolSize() > 0 }
+            val rotator = config.keyRotator?.takeIf { it.hasAnyKey() }
             while (true) {
                 // Re-read every attempt, not just once before the loop: a 429
                 // below moves the pool's active key on, and the next attempt

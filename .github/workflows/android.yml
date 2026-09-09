@@ -51,7 +51,23 @@ jobs:
       # whole build fails before either module's C++ actually compiles. Fully
       # serial execution costs a little wall-clock time; it is not optional
       # once a second native module exists.
+      # Bundled cloud-provider keys, read by app/build.gradle.kts and baked
+      # into BuildConfig — see ai.localstudio.app.keys.BundledApiKeys.
+      # Referencing a secret that doesn't exist yet just yields an empty
+      # string, so adding a _2/_3 slot later needs no workflow change here,
+      # only in the "5" this list goes up to.
       - name: Build debug APK
+        env:
+          GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
+          GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
+          GROQ_API_KEY_4: ${{ secrets.GROQ_API_KEY_4 }}
+          GROQ_API_KEY_5: ${{ secrets.GROQ_API_KEY_5 }}
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+          GEMINI_API_KEY_5: ${{ secrets.GEMINI_API_KEY_5 }}
         run: ./gradlew --no-daemon --max-workers=1 :app:assembleDebug 2>&1 | tee -a build.log
 
       - name: Name the APK after the build
