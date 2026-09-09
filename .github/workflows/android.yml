@@ -43,8 +43,16 @@ jobs:
       - name: Test core and openai
         run: ./gradlew --no-daemon :core:test :openai:test 2>&1 | tee -a build.log
 
+      # --max-workers=1: with two native-build modules now (:app's llama_jni
+      # and :whisper's whisper_jni), Gradle configures both CMake projects in
+      # parallel on a fresh runner, and AGP's own auto-install of the missing
+      # cmake;3.22.1 SDK component is not safe against two modules triggering
+      # it at the same moment — one install collides with the other and the
+      # whole build fails before either module's C++ actually compiles. Fully
+      # serial execution costs a little wall-clock time; it is not optional
+      # once a second native module exists.
       - name: Build debug APK
-        run: ./gradlew --no-daemon :app:assembleDebug 2>&1 | tee -a build.log
+        run: ./gradlew --no-daemon --max-workers=1 :app:assembleDebug 2>&1 | tee -a build.log
 
       - name: Name the APK after the build
         id: apk
