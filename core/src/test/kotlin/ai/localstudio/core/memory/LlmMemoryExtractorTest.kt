@@ -40,7 +40,7 @@ class LlmMemoryExtractorTest {
 
     @Test
     fun `an attribution footer from the fallback chain is not treated as a fact`() = runBlocking {
-        val extractor = LlmMemoryExtractor { "Настоящий факт\n\n---\nОтвет от: Google Gemini" }
+        val extractor = LlmMemoryExtractor { "Настоящий факт\n\n---\nAnswer from: Google Gemini" }
 
         val result = extractor.extract("c1", working("реплика"))
 

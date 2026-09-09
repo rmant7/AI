@@ -22,8 +22,8 @@ class WhisperTranscriber(private val modelFile: File, private val vocabFile: Fil
     private var tokenizer: WhisperTokenizer? = null
 
     suspend fun initialize() = withContext(Dispatchers.IO) {
-        if (!modelFile.isFile) throw IllegalStateException("Модель не найдена: ${modelFile.absolutePath}")
-        if (!vocabFile.isFile) throw IllegalStateException("Словарь не найден: ${vocabFile.absolutePath}")
+        if (!modelFile.isFile) throw IllegalStateException("Model not found: ${modelFile.absolutePath}")
+        if (!vocabFile.isFile) throw IllegalStateException("Vocabulary not found: ${vocabFile.absolutePath}")
 
         tokenizer = WhisperTokenizer.fromVocabJson(vocabFile)
         interpreter = Interpreter(modelFile, Interpreter.Options().apply { setNumThreads(4) })
@@ -31,8 +31,8 @@ class WhisperTranscriber(private val modelFile: File, private val vocabFile: Fil
 
     /** [audioData] is 16-bit PCM, mono, 16kHz, little-endian. */
     suspend fun transcribe(audioData: ByteArray): String = withContext(Dispatchers.Default) {
-        val currentInterpreter = interpreter ?: throw IllegalStateException("Модель не инициализирована")
-        val currentTokenizer = tokenizer ?: throw IllegalStateException("Словарь не загружен")
+        val currentInterpreter = interpreter ?: throw IllegalStateException("Model not initialized")
+        val currentTokenizer = tokenizer ?: throw IllegalStateException("Vocabulary not loaded")
 
         val audioFloats = decodePcmToFloat(audioData)
         if (rmsEnergy(audioFloats) < SILENCE_THRESHOLD) return@withContext ""

@@ -330,7 +330,7 @@ class AppContainer private constructor(private val context: Context) {
         )
 
         val runtime: ModelRuntime = when {
-            candidates.isEmpty() -> StubRuntime()
+            candidates.isEmpty() -> StubRuntime(context)
             candidates.size == 1 -> candidates.single().runtime
             // CloudProviders.ALL lists Local first, so `enabled` — and
             // therefore `candidates` — already carries that order: this is
@@ -412,7 +412,7 @@ class AppContainer private constructor(private val context: Context) {
             // FallbackTextRuntime's own "Ответ от:" footer — this is just the
             // bubble's heading, which should stay the provider for a chain
             // rather than claim whichever model happens to lead the rotation.
-            val label = candidates.singleOrNull()?.label ?: provider.title
+            val label = candidates.singleOrNull()?.label ?: context.getString(provider.titleRes)
             val isLocalOnly = candidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP }
             label to buildOrchestrator(runtime, isLocalOnly, candidates)
         }
@@ -479,7 +479,7 @@ class AppContainer private constructor(private val context: Context) {
             // (or a mix of a tiny and a huge one, tried at different times),
             // a generic label in the log and in the answer's own attribution
             // line answered "was it local?" but not "which local model?".
-            label = "${CloudProviders.LOCAL.title}: ${selected.model.id}",
+            label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
             runtime = LlamaCppRuntime(
                 contextTokens = effectiveContextTokens(),
                 log = appLog::record,
@@ -544,8 +544,9 @@ class AppContainer private constructor(private val context: Context) {
             .filterNot { modelCooldowns.isOnCooldown(provider.id, it) }
         return modelNames.map { modelName ->
             val model = servedModel(modelName, RuntimeKind.REMOTE_OPENAI, Capability.TEXT_GENERATION, Capability.REASONING)
+            val providerTitle = context.getString(provider.titleRes)
             FallbackCandidate(
-                label = if (modelName == primaryModel) provider.title else "${provider.title} ($modelName)",
+                label = if (modelName == primaryModel) providerTitle else "$providerTitle ($modelName)",
                 runtime = runtime,
                 model = model,
                 binding = model.bindings.first(),
@@ -559,7 +560,7 @@ class AppContainer private constructor(private val context: Context) {
                         cachedOrchestrator = null
                         appLog.record(
                             "MODEL_COOLDOWN",
-                            "${provider.title} ($modelName): HTTP 503, skipping for " +
+                            "$providerTitle ($modelName): HTTP 503, skipping for " +
                                 "${ModelCooldownStore.DEFAULT_COOLDOWN_MS / 60_000} min",
                         )
                     }
@@ -672,8 +673,8 @@ class AppContainer private constructor(private val context: Context) {
 
     val runtimeLabel: String
         get() = enabledProviders().takeIf { it.isNotEmpty() }
-            ?.joinToString(" → ") { it.title }
-            ?: CloudProviders.DEMO.title
+            ?.joinToString(" → ") { context.getString(it.titleRes) }
+            ?: context.getString(CloudProviders.DEMO.titleRes)
 
     private fun servedModel(
         id: String,

@@ -89,7 +89,7 @@ class ApiKeyRotator(
         val now = clock()
         if (pool.any { it.cooldownUntilEpochMs <= now }) return null
         val minutesLeft = ((pool.minOf { it.cooldownUntilEpochMs } - now) / 60_000L).coerceAtLeast(0)
-        return "все ${pool.size} ключ(а/ей) достигли дневного лимита; следующий освободится через ~$minutesLeft мин"
+        return "all ${pool.size} key(s) have hit the daily limit; the next one frees up in ~$minutesLeft min"
     }
 
     companion object {

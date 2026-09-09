@@ -223,9 +223,9 @@ class ModelsActivity : AppCompatActivity() {
                         val totalApproxBytes = seed.approxSizeBytes + seed.mmprojApproxSizeBytes
                         if (totalApproxBytes > 0) append(" · ~${size(totalApproxBytes)}")
                         append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
-                        if (!fitsBudget) append(" · превышает бюджет памяти")
+                        if (!fitsBudget) append(" · ").append(getString(R.string.model_exceeds_ram_budget))
                         if (knownStale) append(" · ").append(getString(R.string.model_catalog_stale))
-                        append("\n").append(seed.note)
+                        append("\n").append(seed.resolvedNote(this@ModelsActivity))
                     },
                     selected = selected,
                     status = textStatus(state, container.modelStore.installedSize(seed)),
@@ -319,8 +319,12 @@ class ModelsActivity : AppCompatActivity() {
                     status = when {
                         state is WhisperDownloadState.Installed -> getString(R.string.model_state_installed)
                         state is WhisperDownloadState.Running ->
-                            "${state.stage}: ${size(state.progress.bytesDownloaded)} из " +
-                                (if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?")
+                            getString(
+                                R.string.download_progress_label,
+                                state.stage,
+                                size(state.progress.bytesDownloaded),
+                                if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?",
+                            )
                         state is WhisperDownloadState.Failed ->
                             getString(R.string.model_state_error, state.message.lineSequence().first())
                         blocked -> getString(R.string.model_state_wait_other)
@@ -353,8 +357,12 @@ class ModelsActivity : AppCompatActivity() {
         is DownloadState.Installed -> getString(R.string.model_state_installed) + " · ${size(installedBytes)}"
         is DownloadState.Resolving -> getString(R.string.model_state_resolving, state.repoId)
         is DownloadState.Running ->
-            "${state.source}: ${size(state.progress.bytesDownloaded)} из " +
-                (if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?")
+            getString(
+                R.string.download_progress_label,
+                state.source,
+                size(state.progress.bytesDownloaded),
+                if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?",
+            )
         is DownloadState.Failed -> getString(R.string.model_state_error, state.message.lineSequence().first())
         DownloadState.Idle -> null
     }
@@ -384,18 +392,18 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun describeDevice(device: DeviceProfile) = buildString {
-        append("RAM: ${gb(device.totalRamBytes)} всего, ${gb(device.availableRamBytes)} свободно\n")
-        append("Бюджет на модель: ${gb(device.usableRamBytes)} (${container.settings.ramBudgetPercent}% RAM)\n")
-        append("Ядер: ${device.cpuCores} · свободно на диске: ${gb(device.availableStorageBytes)}")
+        append(getString(R.string.device_ram_line, gb(device.totalRamBytes), gb(device.availableRamBytes))).append("\n")
+        append(getString(R.string.device_budget_line, gb(device.usableRamBytes), container.settings.ramBudgetPercent)).append("\n")
+        append(getString(R.string.device_cores_line, device.cpuCores, gb(device.availableStorageBytes)))
     }
 
     private fun gb(bytes: Long): String =
-        if (bytes >= 1_000_000_000) "%.1f ГБ".format(bytes / 1_000_000_000.0)
-        else "%.0f МБ".format(bytes / 1_000_000.0)
+        if (bytes >= 1_000_000_000) getString(R.string.unit_gb, "%.1f".format(bytes / 1_000_000_000.0))
+        else getString(R.string.unit_mb, "%.0f".format(bytes / 1_000_000.0))
 
     private fun size(bytes: Long): String =
-        if (bytes >= 1_000_000_000) "%.2f ГБ".format(bytes / 1_000_000_000.0)
-        else "%.0f МБ".format(bytes / 1_000_000.0)
+        if (bytes >= 1_000_000_000) getString(R.string.unit_gb, "%.2f".format(bytes / 1_000_000_000.0))
+        else getString(R.string.unit_mb, "%.0f".format(bytes / 1_000_000.0))
 
     private fun fitLabel(fit: ModelFit): String = getString(
         when (fit) {

@@ -85,20 +85,20 @@ class WhisperDownloads(
         activeDownloader = downloader
         jobs[seed.id] = scope.launch {
             try {
-                publish(seed, WhisperDownloadState.Running(DownloadProgress(0, seed.approxSizeBytes), "модель"))
+                publish(seed, WhisperDownloadState.Running(DownloadProgress(0, seed.approxSizeBytes), "model"))
                 downloader.download(
                     url = seed.modelUrl,
                     destination = store.modelFile(seed),
                     tempFile = store.modelPartFile(seed),
-                ) { progress -> publish(seed, WhisperDownloadState.Running(progress, "модель")) }
+                ) { progress -> publish(seed, WhisperDownloadState.Running(progress, "model")) }
 
                 if (!store.hasVocab()) {
-                    publish(seed, WhisperDownloadState.Running(DownloadProgress(0, 0), "словарь"))
+                    publish(seed, WhisperDownloadState.Running(DownloadProgress(0, 0), "vocabulary"))
                     downloader.download(
                         url = WhisperModels.VOCAB_URL,
                         destination = store.vocabFile(),
                         tempFile = store.vocabPartFile(),
-                    ) { progress -> publish(seed, WhisperDownloadState.Running(progress, "словарь")) }
+                    ) { progress -> publish(seed, WhisperDownloadState.Running(progress, "vocabulary")) }
                 }
 
                 publish(seed, WhisperDownloadState.Installed)

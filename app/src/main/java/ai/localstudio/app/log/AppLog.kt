@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
+import ai.localstudio.app.R
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -65,14 +66,14 @@ class AppLog(private val context: Context) {
 
         val reason = describeExitReason(last.reason) ?: return // ordinary exits aren't worth logging
         val description = last.description?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
-        record("PROCESS_EXIT", "Предыдущий запуск завершился: $reason$description")
+        record("PROCESS_EXIT", context.getString(R.string.log_process_exit, reason, description))
     }
 
     private fun describeExitReason(reason: Int): String? = when (reason) {
-        ApplicationExitInfo.REASON_CRASH_NATIVE -> "нативный крэш (например, сегфолт в llama.cpp)"
-        ApplicationExitInfo.REASON_CRASH -> "необработанное исключение в приложении"
-        ApplicationExitInfo.REASON_LOW_MEMORY -> "процесс убит системой из-за нехватки памяти (OOM)"
-        ApplicationExitInfo.REASON_ANR -> "приложение не отвечало (ANR)"
+        ApplicationExitInfo.REASON_CRASH_NATIVE -> context.getString(R.string.log_exit_reason_crash_native)
+        ApplicationExitInfo.REASON_CRASH -> context.getString(R.string.log_exit_reason_crash)
+        ApplicationExitInfo.REASON_LOW_MEMORY -> context.getString(R.string.log_exit_reason_low_memory)
+        ApplicationExitInfo.REASON_ANR -> context.getString(R.string.log_exit_reason_anr)
         else -> null
     }
 

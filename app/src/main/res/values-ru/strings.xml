@@ -193,4 +193,82 @@
     <string name="api_keys_invalid">✗ Ключ отклонён провайдером</string>
     <string name="api_keys_rate_limited">Провайдер ограничил частоту запросов — ключ может быть рабочим</string>
     <string name="api_keys_unknown">Не удалось проверить (сеть или провайдер ответили неожиданно)</string>
+
+    <string name="provider_title_demo">Демо-режим (без сети)</string>
+    <string name="provider_keyhint_demo">Ключ не нужен: отвечает встроенный runtime, видно маршрут и контекст.</string>
+    <string name="provider_title_local">Локально на устройстве (llama.cpp)</string>
+    <string name="provider_keyhint_local">Ключ и сеть не нужны. Модель скачивается один раз на экране «Модели» и дальше работает офлайн.</string>
+    <string name="provider_title_gemini">Google Gemini</string>
+    <string name="provider_keyhint_gemini">Ключ: aistudio.google.com → Get API key. Бесплатный уровень — только Flash/Flash-Lite; Pro — платно.</string>
+    <string name="provider_title_mistral">Mistral</string>
+    <string name="provider_keyhint_mistral">Ключ: console.mistral.ai → API keys. Бесплатный уровень Experiment даёт доступ ко всем моделям с ограничением по скорости.</string>
+    <string name="provider_title_groq">Groq</string>
+    <string name="provider_keyhint_groq">Ключ: console.groq.com → API keys. Бесплатно, без карты — лимит по запросам в день.</string>
+    <string name="provider_title_xai">xAI Grok</string>
+    <string name="provider_keyhint_xai">Ключ: console.x.ai. Бесплатных моделей нет — при регистрации дают $25 кредита, дальше платно.</string>
+    <string name="provider_title_openrouter">OpenRouter</string>
+    <string name="provider_keyhint_openrouter">Ключ: openrouter.ai → Keys. Модели с суффиксом :free бесплатны, но список часто меняется.</string>
+    <string name="provider_title_custom">Свой сервер (Ollama, llama-server)</string>
+    <string name="provider_keyhint_custom">Адрес OpenAI-совместимого сервера в вашей сети.</string>
+
+    <string name="download_notification_channel">Загрузка моделей</string>
+    <string name="download_notification_preparing">Подготовка загрузки…</string>
+    <string name="download_notification_searching">Поиск файла…</string>
+    <string name="download_notification_title_one">Загрузка модели</string>
+    <string name="download_notification_title_many">Загрузка моделей (%1$d)</string>
+    <string name="download_notification_whisper_progress">Whisper: %1$d%%</string>
+
+    <string name="error_unsupported_file_type">Поддерживаются только .txt и .pdf</string>
+    <string name="error_could_not_open_file">Не удалось открыть файл</string>
+
+    <string name="log_process_exit">Предыдущий запуск завершился: %1$s%2$s</string>
+    <string name="log_exit_reason_crash_native">нативный крэш (например, сегфолт в llama.cpp)</string>
+    <string name="log_exit_reason_crash">необработанное исключение в приложении</string>
+    <string name="log_exit_reason_low_memory">процесс убит системой из-за нехватки памяти (OOM)</string>
+    <string name="log_exit_reason_anr">приложение не отвечало (ANR)</string>
+
+    <string name="stub_demo_intro">Демонстрационный режим: модель не подключена.\n\n</string>
+    <string name="stub_demo_sections">Запрос прошёл всю систему. Секций в контексте: %1$d</string>
+    <string name="stub_demo_hint">Подключите Ollama или llama-server в настройках — маршрут, сборка контекста и память останутся ровно теми же, изменится только то, кто генерирует ответ.</string>
+    <string name="stub_demo_transcript">(демонстрационная расшифровка)</string>
+
+    <string name="note_gemma_4_e4b">Новейшая Gemma; сопоставима по размеру с Gemma 3 4B. Понимает прикреплённые изображения.</string>
+    <string name="note_gemma_4_12b">Новейшая Gemma среднего размера.</string>
+    <string name="note_gemma_4_26b_a4b">MoE-модель: качество крупной модели при инференсе на уровне ~4B активных параметров.</string>
+    <string name="note_gemma_4_31b">Самая большая новая Gemma. Нужно много памяти и терпение к скорости.</string>
+    <string name="note_gemma_3_1b">Маленькая и быстрая: хороша, чтобы проверить, что локальный запуск работает.</string>
+    <string name="note_gemma_3_4b">Баланс качества и скорости.</string>
+    <string name="note_gemma_3_12b">Заметно умнее 4B; на телефоне отвечает медленнее, но помещается.</string>
+    <string name="note_gemma_3_27b">Самая большая из Gemma. Нужно ~16 ГБ памяти и терпение к скорости.</string>
+    <string name="note_qwen3_5_9b">Новейший Qwen; сильна в коде и языках.</string>
+    <string name="note_qwen3_5_4b">Новейший Qwen среднего размера.</string>
+    <string name="note_qwen3_5_0_8b">Совсем маленькая — для слабых устройств или быстрой проверки.</string>
+    <string name="note_llama_3_1_8b">Классика; хорошо держит длинный диалог.</string>
+
+    <string name="model_exceeds_ram_budget">превышает бюджет памяти</string>
+    <string name="download_progress_label">%1$s: %2$s из %3$s</string>
+    <string name="device_ram_line">RAM: %1$s всего, %2$s свободно</string>
+    <string name="device_budget_line">Бюджет на модель: %1$s (%2$d%% RAM)</string>
+    <string name="device_cores_line">Ядер: %1$d · свободно на диске: %2$s</string>
+    <string name="unit_gb">%1$s ГБ</string>
+    <string name="unit_mb">%1$s МБ</string>
+
+    <string name="role_user">Вы</string>
+    <string name="role_assistant">Модель</string>
+    <string name="role_error">Ошибка</string>
+    <string name="clip_label_model_answer">Ответ модели</string>
+    <string name="history_untitled_chat">Новый чат</string>
+    <string name="status_memory_on">память вкл</string>
+    <string name="status_memory_off">память выкл</string>
+
+    <string name="chat_empty_answer">(пустой ответ)</string>
+    <string name="chat_detail_context_fragments">контекст: %1$d фрагм.</string>
+    <string name="chat_detail_dropped">, отброшено %1$d</string>
+    <string name="chat_detail_duration_ms">%1$d мс</string>
+    <string name="chat_timeout_message">Модель не ответила за %1$d с. Возможно, модель слишком тяжёлая для этого устройства, или что-то зависло — попробуйте ещё раз или выберите модель полегче.</string>
+    <string name="chat_compare_timeout_error">Ошибка: не ответила за %1$d с</string>
+    <string name="chat_compare_generic_error">Ошибка: %1$s</string>
+    <string name="chat_default_file_name">файл</string>
+    <string name="chat_default_image_name">изображение</string>
+    <string name="error_could_not_decode_image">Не удалось распознать изображение</string>
 </resources>

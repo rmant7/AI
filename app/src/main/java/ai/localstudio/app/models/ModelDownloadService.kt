@@ -49,7 +49,7 @@ class ModelDownloadService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForegroundCompat(buildNotification("Подготовка загрузки…"))
+        startForegroundCompat(buildNotification(getString(R.string.download_notification_preparing)))
 
         val container = AppContainer.get(this)
         combine(container.downloads.state, container.whisperDownloads.state) { ggufStates, whisperStates ->
@@ -69,8 +69,10 @@ class ModelDownloadService : Service() {
 
                 val parts = buildList {
                     ggufRunning.forEach { add("${(it.progress.fraction * 100).toInt()}%") }
-                    whisperRunning.forEach { add("Whisper: ${(it.progress.fraction * 100).toInt()}%") }
-                    if (isEmpty() && ggufResolving) add("Поиск файла…")
+                    whisperRunning.forEach {
+                        add(getString(R.string.download_notification_whisper_progress, (it.progress.fraction * 100).toInt()))
+                    }
+                    if (isEmpty() && ggufResolving) add(getString(R.string.download_notification_searching))
                 }
                 notificationManager.notify(NOTIFICATION_ID, buildNotification(parts.joinToString(" · "), activeCount))
             }
@@ -100,7 +102,11 @@ class ModelDownloadService : Service() {
     }
 
     private fun buildNotification(text: String, activeCount: Int = 0): Notification {
-        val title = if (activeCount > 1) "Загрузка моделей ($activeCount)" else "Загрузка модели"
+        val title = if (activeCount > 1) {
+            getString(R.string.download_notification_title_many, activeCount)
+        } else {
+            getString(R.string.download_notification_title_one)
+        }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
@@ -114,7 +120,7 @@ class ModelDownloadService : Service() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             notificationManager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Загрузка моделей", NotificationManager.IMPORTANCE_LOW),
+                NotificationChannel(CHANNEL_ID, getString(R.string.download_notification_channel), NotificationManager.IMPORTANCE_LOW),
             )
         }
     }

@@ -191,4 +191,82 @@
     <string name="api_keys_invalid">✗ Key rejected by provider</string>
     <string name="api_keys_rate_limited">Provider rate-limited the request — the key may still work</string>
     <string name="api_keys_unknown">Couldn\'t validate (network issue or an unexpected provider response)</string>
+
+    <string name="provider_title_demo">Demo mode (no network)</string>
+    <string name="provider_keyhint_demo">No key needed: the built-in runtime answers, and you can see the route and context.</string>
+    <string name="provider_title_local">Local, on-device (llama.cpp)</string>
+    <string name="provider_keyhint_local">No key or network needed. The model downloads once on the Models screen and then runs offline.</string>
+    <string name="provider_title_gemini">Google Gemini</string>
+    <string name="provider_keyhint_gemini">Key: aistudio.google.com → Get API key. Free tier is Flash/Flash-Lite only; Pro is paid.</string>
+    <string name="provider_title_mistral">Mistral</string>
+    <string name="provider_keyhint_mistral">Key: console.mistral.ai → API keys. The free Experiment tier gives rate-limited access to every model.</string>
+    <string name="provider_title_groq">Groq</string>
+    <string name="provider_keyhint_groq">Key: console.groq.com → API keys. Free, no card — limited to a daily request quota.</string>
+    <string name="provider_title_xai">xAI Grok</string>
+    <string name="provider_keyhint_xai">Key: console.x.ai. No free models — sign-up grants $25 of credit, then it\'s paid.</string>
+    <string name="provider_title_openrouter">OpenRouter</string>
+    <string name="provider_keyhint_openrouter">Key: openrouter.ai → Keys. Models with a :free suffix are free, but the list changes often.</string>
+    <string name="provider_title_custom">Custom server (Ollama, llama-server)</string>
+    <string name="provider_keyhint_custom">Address of an OpenAI-compatible server on your network.</string>
+
+    <string name="download_notification_channel">Model downloads</string>
+    <string name="download_notification_preparing">Preparing download…</string>
+    <string name="download_notification_searching">Looking for the file…</string>
+    <string name="download_notification_title_one">Downloading model</string>
+    <string name="download_notification_title_many">Downloading models (%1$d)</string>
+    <string name="download_notification_whisper_progress">Whisper: %1$d%%</string>
+
+    <string name="error_unsupported_file_type">Only .txt and .pdf are supported</string>
+    <string name="error_could_not_open_file">Couldn\'t open the file</string>
+
+    <string name="log_process_exit">Previous run ended: %1$s%2$s</string>
+    <string name="log_exit_reason_crash_native">native crash (e.g. a segfault in llama.cpp)</string>
+    <string name="log_exit_reason_crash">unhandled exception in the app</string>
+    <string name="log_exit_reason_low_memory">process was killed by the system due to low memory (OOM)</string>
+    <string name="log_exit_reason_anr">app wasn\'t responding (ANR)</string>
+
+    <string name="stub_demo_intro">Demo mode: no model connected.\n\n</string>
+    <string name="stub_demo_sections">The request went through the whole system. Sections in context: %1$d</string>
+    <string name="stub_demo_hint">Connect Ollama or llama-server in Settings — routing, context assembly and memory stay exactly the same; only who generates the answer changes.</string>
+    <string name="stub_demo_transcript">(demo transcript)</string>
+
+    <string name="note_gemma_4_e4b">The newest Gemma; comparable in size to Gemma 3 4B. Understands attached images.</string>
+    <string name="note_gemma_4_12b">The newest mid-size Gemma.</string>
+    <string name="note_gemma_4_26b_a4b">An MoE model: large-model quality at the inference cost of roughly 4B active parameters.</string>
+    <string name="note_gemma_4_31b">The biggest new Gemma. Needs a lot of memory and patience with speed.</string>
+    <string name="note_gemma_3_1b">Small and fast: good for checking that local inference actually works.</string>
+    <string name="note_gemma_3_4b">A balance of quality and speed.</string>
+    <string name="note_gemma_3_12b">Noticeably smarter than the 4B; answers slower on a phone, but fits.</string>
+    <string name="note_gemma_3_27b">The largest Gemma. Needs about 16 GB of memory and patience with speed.</string>
+    <string name="note_qwen3_5_9b">The newest Qwen; strong at code and languages.</string>
+    <string name="note_qwen3_5_4b">The newest mid-size Qwen.</string>
+    <string name="note_qwen3_5_0_8b">Tiny — for weak devices or a quick check.</string>
+    <string name="note_llama_3_1_8b">A classic; holds up well in long conversations.</string>
+
+    <string name="model_exceeds_ram_budget">exceeds memory budget</string>
+    <string name="download_progress_label">%1$s: %2$s of %3$s</string>
+    <string name="device_ram_line">RAM: %1$s total, %2$s free</string>
+    <string name="device_budget_line">Model budget: %1$s (%2$d%% RAM)</string>
+    <string name="device_cores_line">Cores: %1$d · free on disk: %2$s</string>
+    <string name="unit_gb">%1$s GB</string>
+    <string name="unit_mb">%1$s MB</string>
+
+    <string name="role_user">You</string>
+    <string name="role_assistant">Model</string>
+    <string name="role_error">Error</string>
+    <string name="clip_label_model_answer">Model\'s answer</string>
+    <string name="history_untitled_chat">New chat</string>
+    <string name="status_memory_on">memory on</string>
+    <string name="status_memory_off">memory off</string>
+
+    <string name="chat_empty_answer">(empty response)</string>
+    <string name="chat_detail_context_fragments">context: %1$d fragments</string>
+    <string name="chat_detail_dropped">, dropped %1$d</string>
+    <string name="chat_detail_duration_ms">%1$d ms</string>
+    <string name="chat_timeout_message">The model didn\'t reply within %1$d s. It may be too heavy for this device, or something hung — try again or pick a lighter model.</string>
+    <string name="chat_compare_timeout_error">Error: no reply within %1$d s</string>
+    <string name="chat_compare_generic_error">Error: %1$s</string>
+    <string name="chat_default_file_name">file</string>
+    <string name="chat_default_image_name">image</string>
+    <string name="error_could_not_decode_image">Couldn\'t decode the image</string>
 </resources>

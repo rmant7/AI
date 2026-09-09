@@ -1,5 +1,7 @@
 package ai.localstudio.app
 
+import androidx.annotation.StringRes
+
 /**
  * A cloud model behind an API key, with no server for the user to run.
  *
@@ -15,10 +17,10 @@ package ai.localstudio.app
  */
 data class CloudProvider(
     val id: String,
-    val title: String,
+    @StringRes val titleRes: Int,
     val baseUrl: String,
     val defaultModel: String,
-    val keyHint: String,
+    @StringRes val keyHintRes: Int,
     val needsKey: Boolean = true,
     val editableUrl: Boolean = false,
     /**
@@ -42,19 +44,19 @@ object CloudProviders {
 
     val DEMO = CloudProvider(
         id = "demo",
-        title = "Демо-режим (без сети)",
+        titleRes = R.string.provider_title_demo,
         baseUrl = "",
         defaultModel = "stub",
-        keyHint = "Ключ не нужен: отвечает встроенный runtime, видно маршрут и контекст.",
+        keyHintRes = R.string.provider_keyhint_demo,
         needsKey = false,
     )
 
     val LOCAL = CloudProvider(
         id = "local",
-        title = "Локально на устройстве (llama.cpp)",
+        titleRes = R.string.provider_title_local,
         baseUrl = "",
         defaultModel = "gemma-4-e4b-it-q4",
-        keyHint = "Ключ и сеть не нужны. Модель скачивается один раз на экране «Модели» и дальше работает офлайн.",
+        keyHintRes = R.string.provider_keyhint_local,
         needsKey = false,
     )
 
@@ -63,10 +65,10 @@ object CloudProviders {
         DEMO,
         CloudProvider(
             id = "gemini",
-            title = "Google Gemini",
+            titleRes = R.string.provider_title_gemini,
             baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
             defaultModel = "gemini-3.7-flash",
-            keyHint = "Ключ: aistudio.google.com → Get API key. Бесплатный уровень — только Flash/Flash-Lite; Pro — платно.",
+            keyHintRes = R.string.provider_keyhint_gemini,
             // gemini-2.0-flash-lite deliberately dropped: reported dead/
             // retired, not just occasionally overloaded — the runtime
             // cooldown below handles "overloaded right now", but a model
@@ -81,10 +83,10 @@ object CloudProviders {
         ),
         CloudProvider(
             id = "mistral",
-            title = "Mistral",
+            titleRes = R.string.provider_title_mistral,
             baseUrl = "https://api.mistral.ai/v1",
             defaultModel = "mistral-small-latest",
-            keyHint = "Ключ: console.mistral.ai → API keys. Бесплатный уровень Experiment даёт доступ ко всем моделям с ограничением по скорости.",
+            keyHintRes = R.string.provider_keyhint_mistral,
             freeModels = listOf(
                 "mistral-small-latest",
                 "devstral-small-latest",
@@ -95,10 +97,10 @@ object CloudProviders {
         ),
         CloudProvider(
             id = "groq",
-            title = "Groq",
+            titleRes = R.string.provider_title_groq,
             baseUrl = "https://api.groq.com/openai/v1",
             defaultModel = "openai/gpt-oss-120b",
-            keyHint = "Ключ: console.groq.com → API keys. Бесплатно, без карты — лимит по запросам в день.",
+            keyHintRes = R.string.provider_keyhint_groq,
             freeModels = listOf(
                 "openai/gpt-oss-120b",
                 "openai/gpt-oss-20b",
@@ -109,10 +111,10 @@ object CloudProviders {
         ),
         CloudProvider(
             id = "xai",
-            title = "xAI Grok",
+            titleRes = R.string.provider_title_xai,
             baseUrl = "https://api.x.ai/v1",
             defaultModel = "grok-4-fast",
-            keyHint = "Ключ: console.x.ai. Бесплатных моделей нет — при регистрации дают \$25 кредита, дальше платно.",
+            keyHintRes = R.string.provider_keyhint_xai,
             freeModels = listOf(
                 "grok-4-fast",
                 "grok-4.1-fast",
@@ -121,10 +123,10 @@ object CloudProviders {
         ),
         CloudProvider(
             id = "openrouter",
-            title = "OpenRouter",
+            titleRes = R.string.provider_title_openrouter,
             baseUrl = "https://openrouter.ai/api/v1",
             defaultModel = "meta-llama/llama-3.3-70b-instruct:free",
-            keyHint = "Ключ: openrouter.ai → Keys. Модели с суффиксом :free бесплатны, но список часто меняется.",
+            keyHintRes = R.string.provider_keyhint_openrouter,
             freeModels = listOf(
                 "meta-llama/llama-3.3-70b-instruct:free",
                 "qwen/qwen-2.5-7b-instruct:free",
@@ -132,10 +134,10 @@ object CloudProviders {
         ),
         CloudProvider(
             id = "custom",
-            title = "Свой сервер (Ollama, llama-server)",
+            titleRes = R.string.provider_title_custom,
             baseUrl = "http://192.168.1.10:11434/v1",
             defaultModel = "qwen3:8b",
-            keyHint = "Адрес OpenAI-совместимого сервера в вашей сети.",
+            keyHintRes = R.string.provider_keyhint_custom,
             needsKey = false,
             editableUrl = true,
             freeModels = listOf("qwen3:8b", "llama3.1:8b", "gemma3:12b", "deepseek-r1:8b"),

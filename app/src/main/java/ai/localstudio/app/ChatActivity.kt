@@ -28,6 +28,7 @@ import ai.localstudio.app.history.toStored
 import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.engine.UserRequest
+import ai.localstudio.core.runtime.ANSWERED_BY_LABEL
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.pipeline.ConversationTurn
 import ai.localstudio.core.pipeline.NodeValue
@@ -151,7 +152,7 @@ class ChatActivity : AppCompatActivity() {
             // one instead, and only fires once: persisting it below means
             // the next launch sees a non-"Вы" last message and stays quiet.
             val lastMessage = adapter.messages().lastOrNull()
-            if (lastMessage != null && lastMessage.role == "Вы") {
+            if (lastMessage != null && lastMessage.role == Message.ROLE_USER) {
                 container.appLog.record(
                     "INTERRUPTED_TURN",
                     "Conversation $conversationId: last message has no reply after relaunch",
@@ -302,7 +303,7 @@ class ChatActivity : AppCompatActivity() {
         history.save(
             Conversation(
                 id = conversationId,
-                title = ChatHistoryStore.titleFor(stored),
+                title = ChatHistoryStore.titleFor(stored, getString(R.string.history_untitled_chat)),
                 updatedAt = System.currentTimeMillis(),
                 messages = stored,
                 // Carried over rather than dropped: this runs after every
@@ -317,7 +318,7 @@ class ChatActivity : AppCompatActivity() {
         if (container.settings.memoryEnabled) R.string.memory_on else R.string.memory_off
 
     private fun updateStatus() {
-        val memory = if (container.settings.memoryEnabled) "память вкл" else "память выкл"
+        val memory = getString(if (container.settings.memoryEnabled) R.string.status_memory_on else R.string.status_memory_off)
         // container.activeModelName, not settings.chatModel: that getter is
         // scoped to whichever provider is selected in the Settings dropdown
         // right now, independent of which providers are actually enabled —
@@ -467,8 +468,8 @@ class ChatActivity : AppCompatActivity() {
                     // i.e. pure local-only — gets the same line added here
                     // instead, so an answer is never shown with no
                     // indication at all of which model actually produced it.
-                    val body = answer.text.ifBlank { "(пустой ответ)" }.let { answerText ->
-                        container.soleAnswererLabel?.let { label -> "$answerText\n\n---\nОтвет от: $label" } ?: answerText
+                    val body = answer.text.ifBlank { getString(R.string.chat_empty_answer) }.let { answerText ->
+                        container.soleAnswererLabel?.let { label -> "$answerText\n\n---\n$ANSWERED_BY_LABEL$label" } ?: answerText
                     }
                     adapter.update(
                         placeholderIndex,
@@ -476,17 +477,16 @@ class ChatActivity : AppCompatActivity() {
                             body = body,
                             details = buildString {
                                 append(answer.plan.capabilities.joinToString(", ") { it.id })
-                                answer.context?.let { append(" · контекст: ${it.fragments.size} фрагм.") }
-                                if (answer.droppedFragments > 0) append(", отброшено ${answer.droppedFragments}")
-                                append(" · ${answer.trace.sumOf { it.durationMs }} мс")
+                                answer.context?.let { append(" · ").append(getString(R.string.chat_detail_context_fragments, it.fragments.size)) }
+                                if (answer.droppedFragments > 0) append(getString(R.string.chat_detail_dropped, answer.droppedFragments))
+                                append(" · ").append(getString(R.string.chat_detail_duration_ms, answer.trace.sumOf { it.durationMs }))
                             },
                         ),
                     )
                 }
                 .onFailure { error ->
                     val body = if (error is kotlinx.coroutines.TimeoutCancellationException) {
-                        "Модель не ответила за ${GENERATION_TIMEOUT_MS / 1000} с. Возможно, модель слишком тяжёлая " +
-                            "для этого устройства, или что-то зависло — попробуйте ещё раз или выберите модель полегче."
+                        getString(R.string.chat_timeout_message, GENERATION_TIMEOUT_MS / 1000)
                     } else {
                         error.message ?: error.toString()
                     }
@@ -575,15 +575,15 @@ class ChatActivity : AppCompatActivity() {
                                     onPartialText = { partial.value = it },
                                 )
                             }
-                            answer.text.ifBlank { "(пустой ответ)" }
+                            answer.text.ifBlank { getString(R.string.chat_empty_answer) }
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                             container.appLog.record("GENERATION_ERROR", "$label: timeout after ${GENERATION_TIMEOUT_MS}ms")
-                            "Ошибка: не ответила за ${GENERATION_TIMEOUT_MS / 1000} с"
+                            getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Exception) {
                             container.appLog.record("GENERATION_ERROR", "$label: ${e.javaClass.simpleName}: ${e.message}")
-                            "Ошибка: ${e.message ?: e.toString()}"
+                            getString(R.string.chat_compare_generic_error, e.message ?: e.toString())
                         } finally {
                             // In a finally, not just after the try: the
                             // CancellationException branch above rethrows
@@ -613,7 +613,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun ingestDocument(uri: Uri) {
         lifecycleScope.launch {
-            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { "файл" }
+            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { getString(R.string.chat_default_file_name) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val text = DocumentIngest.extractText(this@ChatActivity, uri)
@@ -673,14 +673,17 @@ class ChatActivity : AppCompatActivity() {
             return
         }
         lifecycleScope.launch {
-            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { "изображение" }
+            val name = DocumentIngest.fileName(this@ChatActivity, uri).ifBlank { getString(R.string.chat_default_image_name) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val originalBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw java.io.IOException("Не удалось открыть файл")
+                        ?: throw java.io.IOException(getString(R.string.error_could_not_open_file))
                     if (originalBytes.size > MAX_IMAGE_BYTES) {
                         throw java.io.IOException(
-                            getString(R.string.chat_attach_image_too_large, "%.1f МБ".format(Locale.US, originalBytes.size / 1_000_000.0)),
+                            getString(
+                                R.string.chat_attach_image_too_large,
+                                getString(R.string.unit_mb, "%.1f".format(Locale.US, originalBytes.size / 1_000_000.0)),
+                            ),
                         )
                     }
 
@@ -705,7 +708,7 @@ class ChatActivity : AppCompatActivity() {
                     val decoded = BitmapFactory.decodeByteArray(
                         originalBytes, 0, originalBytes.size,
                         BitmapFactory.Options().apply { inSampleSize = sampleSize },
-                    ) ?: throw java.io.IOException("Не удалось распознать изображение")
+                    ) ?: throw java.io.IOException(getString(R.string.error_could_not_decode_image))
 
                     val oriented = if (rotationDegrees != 0) {
                         val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }

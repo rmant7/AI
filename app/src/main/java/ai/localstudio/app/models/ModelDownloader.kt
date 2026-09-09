@@ -49,15 +49,15 @@ class ModelDownloader(
         cancelled = false
         var failures = 0
         var backoff = initialBackoffMs
-        var lastError: IOException = IOException("Загрузка не началась")
+        var lastError: IOException = IOException("Download did not start")
 
         while (failures < maxConsecutiveFailures) {
-            if (cancelled) throw IOException("Загрузка отменена")
+            if (cancelled) throw IOException("Download cancelled")
             val before = if (tempFile.exists()) tempFile.length() else 0L
             try {
                 downloadOnce(url, tempFile, listener)
                 destination.delete()
-                if (!tempFile.renameTo(destination)) throw IOException("Не удалось сохранить файл")
+                if (!tempFile.renameTo(destination)) throw IOException("Couldn't save the file")
                 return
             } catch (e: IOException) {
                 if (cancelled) throw e
@@ -69,7 +69,7 @@ class ModelDownloader(
                 backoff = if (progressed) initialBackoffMs else (backoff * 2).coerceAtMost(maxBackoffMs)
             }
         }
-        throw IOException("${lastError.message} (после $maxConsecutiveFailures попыток)", lastError)
+        throw IOException("${lastError.message} (after $maxConsecutiveFailures attempts)", lastError)
     }
 
     private fun downloadOnce(url: String, tempFile: File, listener: Listener) {
@@ -79,7 +79,7 @@ class ModelDownloader(
         try {
             val status = connection.responseCode
             if (status !in 200..299) {
-                throw IOException("Сервер ответил HTTP $status${describe(connection)}")
+                throw IOException("Server responded with HTTP $status${describe(connection)}")
             }
 
             // A 200 in reply to a Range request means the server ignored it and
@@ -98,7 +98,7 @@ class ModelDownloader(
                     var lastReportBytes = 0L
                     var lastReportAt = 0L
                     while (true) {
-                        if (cancelled) throw IOException("Загрузка отменена")
+                        if (cancelled) throw IOException("Download cancelled")
                         val read = input.read(buffer)
                         if (read < 0) break
                         output.write(buffer, 0, read)
@@ -124,7 +124,7 @@ class ModelDownloader(
             }
 
             if (total > 0 && tempFile.length() < total) {
-                throw IOException("Передано ${tempFile.length()} из $total байт")
+                throw IOException("Transferred ${tempFile.length()} of $total bytes")
             }
         } finally {
             connection.disconnect()
@@ -151,10 +151,10 @@ class ModelDownloader(
 
             val location = connection.getHeaderField("Location")
             connection.disconnect()
-            if (location.isNullOrBlank()) throw IOException("Редирект HTTP $status без адреса")
+            if (location.isNullOrBlank()) throw IOException("HTTP $status redirect with no address")
             current = URI.create(current).resolve(location).toString()
         }
-        throw IOException("Слишком много редиректов")
+        throw IOException("Too many redirects")
     }
 
     private fun describe(connection: HttpURLConnection): String = runCatching {

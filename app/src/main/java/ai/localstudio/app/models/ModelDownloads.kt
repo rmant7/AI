@@ -99,7 +99,7 @@ class ModelDownloads(
                 val (source, resolved) = HuggingFaceResolver.resolveAny(seed.repoIds, tokenProvider())
                 val free = store.freeSpaceBytes()
                 if (resolved.sizeBytes > 0 && resolved.sizeBytes + SLACK_BYTES > free) {
-                    publish(seed, DownloadState.Failed("Не хватает места: нужно ${gb(resolved.sizeBytes)}, свободно ${gb(free)}"))
+                    publish(seed, DownloadState.Failed("Not enough space: need ${gb(resolved.sizeBytes)}, ${gb(free)} free"))
                     return@launch
                 }
 
@@ -128,7 +128,7 @@ class ModelDownloads(
                     publish(
                         seed,
                         DownloadState.Failed(
-                            "Файл повреждён: получено $installedSize байт, ожидалось ${resolved.sizeBytes}",
+                            "File corrupted: got $installedSize bytes, expected ${resolved.sizeBytes}",
                         ),
                     )
                     return@launch
@@ -193,7 +193,7 @@ class ModelDownloads(
         states.value = states.value + (seed.id to state)
     }
 
-    private fun gb(bytes: Long): String = "%.1f ГБ".format(bytes / 1_000_000_000.0)
+    private fun gb(bytes: Long): String = "%.1f GB".format(bytes / 1_000_000_000.0)
 
     private companion object {
         /** Never fill the disk to the last byte for a model. */

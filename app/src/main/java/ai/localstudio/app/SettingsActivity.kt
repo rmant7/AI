@@ -56,7 +56,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.providerSpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            CloudProviders.ALL.map { it.title },
+            CloudProviders.ALL.map { getString(it.titleRes) },
         )
         binding.providerSpinner.setSelection(
             CloudProviders.ALL.indexOfFirst { it.id == settings.providerId }.coerceAtLeast(0),
@@ -171,7 +171,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showProvider(provider: CloudProvider) {
-        binding.providerHint.text = provider.keyHint
+        binding.providerHint.text = getString(provider.keyHintRes)
         binding.endpointBlock.visibility = if (provider.editableUrl) View.VISIBLE else View.GONE
         binding.apiKeyBlock.visibility = if (provider.needsKey) View.VISIBLE else View.GONE
 
@@ -208,7 +208,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun renderEnabledSummary() {
-        val titles = CloudProviders.ALL.filter { it.id in pendingEnabled }.map { it.title }
+        val titles = CloudProviders.ALL.filter { it.id in pendingEnabled }.map { getString(it.titleRes) }
         binding.enabledProvidersSummary.text = if (titles.isEmpty()) {
             getString(R.string.settings_no_sources)
         } else {

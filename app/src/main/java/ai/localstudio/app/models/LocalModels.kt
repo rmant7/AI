@@ -1,6 +1,8 @@
 package ai.localstudio.app.models
 
+import ai.localstudio.app.R
 import ai.localstudio.core.capability.Capability
+import androidx.annotation.StringRes
 
 /**
  * A model this app knows how to fetch and run on the device.
@@ -21,7 +23,13 @@ data class LocalModelSeed(
     val title: String,
     val repoIds: List<String>,
     val paramsLabel: String,
-    val note: String,
+    /**
+     * A catalog seed's note is a fixed, translatable description ([noteRes]);
+     * a custom seed's is the literal repo id the user typed, which has no
+     * translation to look up. [resolvedNote] picks whichever applies.
+     */
+    val note: String = "",
+    @StringRes val noteRes: Int? = null,
     val approxSizeBytes: Long,
     val capabilities: Set<Capability> = setOf(Capability.TEXT_GENERATION, Capability.REASONING),
     val contextTokens: Int = 4096,
@@ -45,7 +53,9 @@ data class LocalModelSeed(
      * upfront estimate optimistic, never wrong in the dangerous direction.
      */
     val mmprojApproxSizeBytes: Long = 0,
-)
+) {
+    fun resolvedNote(context: android.content.Context): String = noteRes?.let { context.getString(it) } ?: note
+}
 
 object LocalModels {
 
@@ -65,7 +75,7 @@ object LocalModels {
                 "unsloth/gemma-4-E4B-it-GGUF",
             ),
             paramsLabel = "E4B · Q4",
-            note = "Новейшая Gemma; сопоставима по размеру с Gemma 3 4B. Понимает прикреплённые изображения.",
+            noteRes = R.string.note_gemma_4_e4b,
             approxSizeBytes = 2_600_000_000,
             // Confirmed present in this exact repo (unsloth/gemma-4-E4B-it-GGUF/
             // blob/main/mmproj-F16.gguf) rather than assumed from a naming
@@ -86,7 +96,7 @@ object LocalModels {
                 "unsloth/gemma-4-12B-it-qat-GGUF",
             ),
             paramsLabel = "12B · Q4",
-            note = "Новейшая Gemma среднего размера.",
+            noteRes = R.string.note_gemma_4_12b,
             approxSizeBytes = 7_200_000_000,
         ),
         LocalModelSeed(
@@ -96,8 +106,8 @@ object LocalModels {
                 "unsloth/gemma-4-26B-A4B-it-GGUF",
                 "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
             ),
-            paramsLabel = "26B (MoE, ~4B активных) · Q4",
-            note = "MoE-модель: качество крупной модели при инференсе на уровне ~4B активных параметров.",
+            paramsLabel = "26B (MoE, ~4B active) · Q4",
+            noteRes = R.string.note_gemma_4_26b_a4b,
             approxSizeBytes = 15_600_000_000,
         ),
         LocalModelSeed(
@@ -107,7 +117,7 @@ object LocalModels {
                 "unsloth/gemma-4-31B-it-GGUF",
             ),
             paramsLabel = "31B · Q4",
-            note = "Самая большая новая Gemma. Нужно много памяти и терпение к скорости.",
+            noteRes = R.string.note_gemma_4_31b,
             approxSizeBytes = 18_600_000_000,
         ),
         LocalModelSeed(
@@ -119,7 +129,7 @@ object LocalModels {
                 "google/gemma-3-1b-it-qat-q4_0-gguf",
             ),
             paramsLabel = "1B · Q4",
-            note = "Маленькая и быстрая: хороша, чтобы проверить, что локальный запуск работает.",
+            noteRes = R.string.note_gemma_3_1b,
             approxSizeBytes = 800_000_000,
         ),
         LocalModelSeed(
@@ -132,7 +142,7 @@ object LocalModels {
                 "google/gemma-3-4b-it-qat-q4_0-gguf",
             ),
             paramsLabel = "4B · Q4",
-            note = "Баланс качества и скорости.",
+            noteRes = R.string.note_gemma_3_4b,
             approxSizeBytes = 2_700_000_000,
         ),
         LocalModelSeed(
@@ -144,7 +154,7 @@ object LocalModels {
                 "google/gemma-3-12b-it-qat-q4_0-gguf",
             ),
             paramsLabel = "12B · Q4",
-            note = "Заметно умнее 4B; на телефоне отвечает медленнее, но помещается.",
+            noteRes = R.string.note_gemma_3_12b,
             approxSizeBytes = 7_300_000_000,
         ),
         LocalModelSeed(
@@ -155,7 +165,7 @@ object LocalModels {
                 "bartowski/google_gemma-3-27b-it-GGUF",
             ),
             paramsLabel = "27B · Q4",
-            note = "Самая большая из Gemma. Нужно ~16 ГБ памяти и терпение к скорости.",
+            noteRes = R.string.note_gemma_3_27b,
             approxSizeBytes = 16_000_000_000,
         ),
         LocalModelSeed(
@@ -166,7 +176,7 @@ object LocalModels {
                 "bartowski/Qwen3.5-9B-GGUF",
             ),
             paramsLabel = "9B · Q4",
-            note = "Новейший Qwen; сильна в коде и языках.",
+            noteRes = R.string.note_qwen3_5_9b,
             approxSizeBytes = 5_500_000_000,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
         ),
@@ -178,7 +188,7 @@ object LocalModels {
                 "bartowski/Qwen3.5-4B-GGUF",
             ),
             paramsLabel = "4B · Q4",
-            note = "Новейший Qwen среднего размера.",
+            noteRes = R.string.note_qwen3_5_4b,
             approxSizeBytes = 2_500_000_000,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
         ),
@@ -189,7 +199,7 @@ object LocalModels {
                 "unsloth/Qwen3.5-0.8B-GGUF",
             ),
             paramsLabel = "0.8B · Q4",
-            note = "Совсем маленькая — для слабых устройств или быстрой проверки.",
+            noteRes = R.string.note_qwen3_5_0_8b,
             approxSizeBytes = 550_000_000,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
         ),
@@ -201,7 +211,7 @@ object LocalModels {
                 "unsloth/Meta-Llama-3.1-8B-Instruct-GGUF",
             ),
             paramsLabel = "8B · Q4",
-            note = "Классика; хорошо держит длинный диалог.",
+            noteRes = R.string.note_llama_3_1_8b,
             approxSizeBytes = 4_900_000_000,
         ),
     )
@@ -211,7 +221,7 @@ object LocalModels {
         id = "custom-" + repoId.replace('/', '_').lowercase(),
         title = repoId.substringAfterLast('/'),
         repoIds = listOf(repoId),
-        paramsLabel = "своя модель",
+        paramsLabel = "custom model",
         note = repoId,
         approxSizeBytes = 0,
     )

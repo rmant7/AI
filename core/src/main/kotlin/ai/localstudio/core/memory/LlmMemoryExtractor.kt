@@ -1,5 +1,6 @@
 package ai.localstudio.core.memory
 
+import ai.localstudio.core.runtime.ANSWERED_BY_LABEL
 import ai.localstudio.memory.MemoryExtractor
 import ai.localstudio.memory.MemoryItem
 import ai.localstudio.memory.MemoryScope
@@ -65,10 +66,10 @@ class LlmMemoryExtractor(
         val BULLET_MARKER = Regex("^[-*]\\s+")
 
         // Every answer through the fallback chain carries a trailing
-        // "Ответ от: <label>" line (FallbackTextModel.attributionFooter) —
+        // "Answer from: <label>" line (FallbackTextModel.attributionFooter) —
         // real, useful context for a chat bubble, and not itself a fact
         // worth remembering.
-        val ATTRIBUTION_LINE = Regex("^(-{3,}|⚠.*|Ответ от:.*)$")
+        val ATTRIBUTION_LINE = Regex("^(-{3,}|⚠.*|${Regex.escape(ANSWERED_BY_LABEL)}.*)$")
 
         val PROMPT_PREFIX = """
             Ниже — реплики одного разговора. Выпиши, по одной на строке, только то,

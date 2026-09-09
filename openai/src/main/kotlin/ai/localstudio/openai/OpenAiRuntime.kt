@@ -208,7 +208,7 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                 val keyEntry = rotator?.activeKey()
                 if (rotator != null && keyEntry == null) {
                     throw ModelLoadException(
-                        rotator.exhaustionMessage() ?: "Нет доступных ключей API для этого провайдера",
+                        rotator.exhaustionMessage() ?: "No available API keys for this provider",
                     )
                 }
                 try {

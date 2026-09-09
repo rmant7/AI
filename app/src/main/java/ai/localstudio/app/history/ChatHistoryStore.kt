@@ -95,9 +95,9 @@ class ChatHistoryStore(context: Context) {
     private fun file(id: String) = File(dir, "$id.json")
 
     companion object {
-        fun titleFor(messages: List<StoredMessage>): String =
-            messages.firstOrNull { it.role == "Вы" }?.body?.take(60)?.trim().orEmpty()
-                .ifBlank { "Новый чат" }
+        fun titleFor(messages: List<StoredMessage>, defaultTitle: String): String =
+            messages.firstOrNull { it.role == Message.ROLE_USER }?.body?.take(60)?.trim().orEmpty()
+                .ifBlank { defaultTitle }
     }
 }
 

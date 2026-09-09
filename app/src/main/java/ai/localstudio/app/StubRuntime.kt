@@ -1,5 +1,6 @@
 package ai.localstudio.app
 
+import android.content.Context
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.model.Transcript
@@ -25,7 +26,7 @@ import kotlinx.coroutines.flow.flow
  * have received. That makes the architecture visible instead of a blank screen
  * with a connection error.
  */
-class StubRuntime : ModelRuntime {
+class StubRuntime(private val context: Context) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.STUB
 
@@ -33,12 +34,12 @@ class StubRuntime : ModelRuntime {
         binding.runtime == RuntimeKind.STUB
 
     override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel = when {
-        Capability.SPEECH_TO_TEXT in model.capabilities -> StubSpeechModel(model.id)
-        Capability.TEXT_GENERATION in model.capabilities -> StubTextModel(model.id)
+        Capability.SPEECH_TO_TEXT in model.capabilities -> StubSpeechModel(model.id, context)
+        Capability.TEXT_GENERATION in model.capabilities -> StubTextModel(model.id, context)
         else -> throw ModelLoadException("The stub runtime has nothing for ${model.id}")
     }
 
-    private class StubTextModel(override val modelId: String) : TextModelHandle {
+    private class StubTextModel(override val modelId: String, private val context: Context) : TextModelHandle {
 
         override val ramBytes: Long = 0
 
@@ -47,13 +48,11 @@ class StubRuntime : ModelRuntime {
                 .filter { it.startsWith("## ") }
                 .map { it.removePrefix("## ") }
 
-            emit("Демонстрационный режим: модель не подключена.\n\n")
-            emit("Запрос прошёл всю систему. Секций в контексте: ${sections.size}")
+            emit(context.getString(R.string.stub_demo_intro))
+            emit(context.getString(R.string.stub_demo_sections, sections.size))
             if (sections.isNotEmpty()) emit(" (" + sections.joinToString(", ") + ")")
             emit(".\n\n")
-            emit("Подключите Ollama или llama-server в настройках — маршрут, ")
-            emit("сборка контекста и память останутся ровно теми же, изменится только ")
-            emit("то, кто генерирует ответ.")
+            emit(context.getString(R.string.stub_demo_hint))
         }
 
         override fun requestCancel() = Unit
@@ -61,12 +60,12 @@ class StubRuntime : ModelRuntime {
         override fun close() = Unit
     }
 
-    private class StubSpeechModel(override val modelId: String) : SpeechModelHandle {
+    private class StubSpeechModel(override val modelId: String, private val context: Context) : SpeechModelHandle {
 
         override val ramBytes: Long = 0
 
         override suspend fun transcribe(audio: AudioRef, language: String?): Transcript =
-            Transcript(text = "(демонстрационная расшифровка)", language = language ?: "ru", confidence = 0.0)
+            Transcript(text = context.getString(R.string.stub_demo_transcript), language = language ?: "en", confidence = 0.0)
 
         override fun requestCancel() = Unit
 

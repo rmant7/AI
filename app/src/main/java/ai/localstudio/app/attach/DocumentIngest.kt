@@ -1,5 +1,6 @@
 package ai.localstudio.app.attach
 
+import ai.localstudio.app.R
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -29,7 +30,7 @@ object DocumentIngest {
             mimeType.startsWith("text/") || name.endsWith(".txt", ignoreCase = true) ||
                 name.endsWith(".md", ignoreCase = true) -> extractPlainText(context, uri)
 
-            else -> throw UnsupportedFileException("Поддерживаются только .txt и .pdf")
+            else -> throw UnsupportedFileException(context.getString(R.string.error_unsupported_file_type))
         }
     }
 
@@ -43,14 +44,14 @@ object DocumentIngest {
 
     private fun extractPlainText(context: Context, uri: Uri): String =
         context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-            ?: throw IOException("Не удалось открыть файл")
+            ?: throw IOException(context.getString(R.string.error_could_not_open_file))
 
     private fun extractPdf(context: Context, uri: Uri): String {
         if (!pdfBoxReady) {
             PDFBoxResourceLoader.init(context.applicationContext)
             pdfBoxReady = true
         }
-        val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Не удалось открыть файл")
+        val input = context.contentResolver.openInputStream(uri) ?: throw IOException(context.getString(R.string.error_could_not_open_file))
         return input.use { stream ->
             PDDocument.load(stream).use { document -> PDFTextStripper().getText(document) }
         }

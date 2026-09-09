@@ -54,7 +54,7 @@ class ApiKeysActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         providerId = intent.getStringExtra(EXTRA_PROVIDER_ID) ?: CloudProviders.DEMO.id
-        title = CloudProviders.byId(providerId).title
+        title = getString(CloudProviders.byId(providerId).titleRes)
 
         container = AppContainer.get(this)
         binding.apiKeys.layoutManager = LinearLayoutManager(this)
