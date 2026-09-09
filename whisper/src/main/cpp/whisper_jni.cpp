@@ -45,6 +45,7 @@ extern "C" {
 
 JNIEXPORT jlong JNICALL
 Java_ai_localstudio_whisper_WhisperBridge_nativeLoad(JNIEnv *env, jobject, jstring modelPath) {
+  try {
     const std::string path = toStdString(env, modelPath);
 
     whisper_context_params params = whisper_context_default_params();
@@ -61,6 +62,18 @@ Java_ai_localstudio_whisper_WhisperBridge_nativeLoad(JNIEnv *env, jobject, jstri
     auto *session = new Session();
     session->ctx = ctx;
     return reinterpret_cast<jlong>(session);
+  } catch (const std::exception &e) {
+    // See llama_jni.cpp's nativeLoad for why this matters: an uncaught C++
+    // exception (std::bad_alloc, most plausibly, for one of the larger
+    // Whisper models under memory pressure) crossing back into JNI aborts
+    // the whole process via std::terminate() instead of surfacing as an
+    // ordinary "failed to load" Kotlin can show an error for.
+    LOGE("nativeLoad: exception: %s", e.what());
+    return 0;
+  } catch (...) {
+    LOGE("nativeLoad: unknown exception");
+    return 0;
+  }
 }
 
 JNIEXPORT void JNICALL
@@ -90,6 +103,8 @@ Java_ai_localstudio_whisper_WhisperBridge_nativeTranscribe(
     const jsize sampleCount = env->GetArrayLength(samples);
     jfloat *sampleData = env->GetFloatArrayElements(samples, nullptr);
 
+    int result = -1;
+  try {
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.language = "auto";
     params.translate = false;
@@ -107,7 +122,17 @@ Java_ai_localstudio_whisper_WhisperBridge_nativeTranscribe(
     params.suppress_blank = true;
     params.suppress_nst = true;
 
-    const int result = whisper_full(session->ctx, params, sampleData, (int) sampleCount);
+    result = whisper_full(session->ctx, params, sampleData, (int) sampleCount);
+  } catch (const std::exception &e) {
+    // whisper_full's internal buffers (mel spectrogram, decoder state) are
+    // exactly the kind of allocation that can throw std::bad_alloc under
+    // memory pressure — letting that cross back into JNI uncaught would
+    // abort the whole process instead of just failing this one
+    // transcription. See llama_jni.cpp's nativeLoad for the same reasoning.
+    LOGE("nativeTranscribe: exception: %s", e.what());
+  } catch (...) {
+    LOGE("nativeTranscribe: unknown exception");
+  }
     env->ReleaseFloatArrayElements(samples, sampleData, JNI_ABORT); // read-only access, nothing to write back
     if (result != 0) {
         LOGE("whisper_full failed with code %d", result);

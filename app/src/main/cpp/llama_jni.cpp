@@ -407,7 +407,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeChatTemplateInfo(JNIEnv *env, jo
 JNIEXPORT jlong JNICALL
 Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     JNIEnv *env, jobject, jstring modelPath, jint contextTokens, jint threads) {
-
+  try {
     static std::atomic<bool> backendReady{false};
     if (!backendReady.exchange(true)) {
         llama_backend_init();
@@ -459,6 +459,26 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     session->vocab = llama_model_get_vocab(model);
     LOGI("loaded %s, n_ctx=%u, threads=%d", path.c_str(), llama_n_ctx(ctx), threads);
     return reinterpret_cast<jlong>(session);
+  } catch (const std::exception &e) {
+    // A C++ exception (std::bad_alloc from an allocation failure during
+    // loading, most plausibly — a multi-GB GGUF is exactly where an OOM
+    // condition is likeliest to surface as an actual throw rather than the
+    // OS just killing the process outright) crossing back out into JNI is
+    // undefined behaviour and normally calls std::terminate(), aborting the
+    // whole app with no Kotlin-catchable exception and no log line at all.
+    // Catching it here at the boundary turns that into an ordinary "failed
+    // to load" (0), the same outcome nativeLoad already reports for a plain
+    // llama_model_load_from_file failure — this is not a fix for every
+    // native crash (a segfault or an assertion failure inside ggml itself
+    // still kills the process outright; neither is a C++ exception, and no
+    // amount of try/catch anywhere can intercept either one), just for the
+    // specific class of failure that actually is one.
+    LOGE("nativeLoad: exception: %s", e.what());
+    return 0;
+  } catch (...) {
+    LOGE("nativeLoad: unknown exception");
+    return 0;
+  }
 }
 
 JNIEXPORT void JNICALL
@@ -487,7 +507,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     if (session == nullptr) return -1;
     session->cancelled.store(false);
     raiseThreadPriority();
-
+  try {
     jclass callbackClass = env->GetObjectClass(callback);
     jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
     if (onToken == nullptr) return -2;
@@ -603,6 +623,18 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     session->cachedTokens.assign(tokens.begin(), tokens.begin() + count);
     session->cachedTokens.insert(session->cachedTokens.end(), result.generatedTokens.begin(), result.generatedTokens.end());
     return result.produced;
+  } catch (const std::exception &e) {
+    // Same reasoning as nativeLoad's catch: a thrown std::bad_alloc (a large
+    // prompt's token/KV-cache allocations are the likeliest source, under
+    // memory pressure) must not cross the JNI boundary uncaught — that
+    // aborts the whole process with std::terminate() rather than surfacing
+    // as a turn Kotlin can show an error for and let the user retry.
+    LOGE("nativeGenerate: exception: %s", e.what());
+    return -10;
+  } catch (...) {
+    LOGE("nativeGenerate: unknown exception");
+    return -10;
+  }
 }
 
 /**
@@ -618,7 +650,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadMmproj(
     auto *session = reinterpret_cast<Session *>(handle);
     if (session == nullptr || session->model == nullptr) return JNI_FALSE;
     if (session->mctx != nullptr) return JNI_TRUE; // already loaded for this session
-
+  try {
     const std::string path = toStdString(env, mmprojPath);
     mtmd_context_params params = mtmd_context_params_default();
     // Matches nativeLoad's n_gpu_layers = 0: this build is CPU-only, no
@@ -643,6 +675,13 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadMmproj(
     session->mctx = mctx;
     LOGI("mmproj loaded from %s", path.c_str());
     return JNI_TRUE;
+  } catch (const std::exception &e) {
+    LOGE("nativeLoadMmproj: exception: %s", e.what());
+    return JNI_FALSE;
+  } catch (...) {
+    LOGE("nativeLoadMmproj: unknown exception");
+    return JNI_FALSE;
+  }
 }
 
 /**
@@ -672,7 +711,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
     if (session->mctx == nullptr) return -6; // no projector loaded for this model
     session->cancelled.store(false);
     raiseThreadPriority();
-
+  try {
     jclass callbackClass = env->GetObjectClass(callback);
     jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
     if (onToken == nullptr) return -2;
@@ -766,6 +805,17 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
     // against, so there is nothing valid to record as a reusable prefix —
     // the next turn (image or plain text) redecodes from scratch either way.
     return result.produced;
+  } catch (const std::exception &e) {
+    // Same reasoning as nativeGenerate's catch — an unquantized vision
+    // encoder pass is one of the larger single allocations this app makes,
+    // exactly where a std::bad_alloc is most likely to actually be thrown
+    // rather than the process just being killed outright.
+    LOGE("nativeGenerateWithImage: exception: %s", e.what());
+    return -10;
+  } catch (...) {
+    LOGE("nativeGenerateWithImage: unknown exception");
+    return -10;
+  }
 }
 
 } // extern "C"
