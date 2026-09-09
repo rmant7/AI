@@ -11,6 +11,7 @@ pluginManagement {
 rootProject.name = "local-ai-studio"
 
 include(":memory")
+include(":commercial-memory")
 include(":core")
 include(":openai")
 

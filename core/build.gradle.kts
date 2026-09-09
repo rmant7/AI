@@ -12,6 +12,9 @@ dependencies {
     // module's own public surface (NodeExecutors, Orchestrator), so anything
     // that depends on :core needs to see :memory's types too.
     api(project(":memory"))
+    // Same reasoning: MemoryExperimentRunner/ExperimentMode are part of
+    // NodeExecutors' own constructor now (see memorySearch()).
+    api(project(":commercial-memory"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation(kotlin("test"))

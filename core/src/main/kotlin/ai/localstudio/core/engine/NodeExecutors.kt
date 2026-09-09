@@ -1,5 +1,7 @@
 package ai.localstudio.core.engine
 
+import ai.localstudio.commercialmemory.ExperimentMode
+import ai.localstudio.commercialmemory.MemoryExperimentRunner
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.context.ContextEngine
 import ai.localstudio.core.context.ContextFragment
@@ -35,6 +37,17 @@ class NodeExecutors(
     private val contextEngine: ContextEngine,
     private val memory: MemoryProvider? = null,
     private val knowledge: KnowledgeProvider? = null,
+    /**
+     * Stage 3's baseline architecture (see the `:commercial-memory` module),
+     * layered in additively: null (the default) preserves this class's
+     * original behavior exactly — [memory] queried directly, no ranking or
+     * budget beyond [MemoryQuery.limit] — so every existing caller is
+     * unaffected. Passing a runner switches MEMORY_SEARCH to run through
+     * retrieve→rank→budget→select (or skip retrieval entirely, for
+     * [ExperimentMode.MEMORY_OFF]) instead, per [memoryExperimentMode].
+     */
+    private val memoryExperiment: MemoryExperimentRunner? = null,
+    private val memoryExperimentMode: ExperimentMode = ExperimentMode.BASIC_MEMORY,
     private val systemPrompt: String? = null,
     // Kept in sync with LlamaBridge.DEFAULT_CONTEXT_TOKENS on purpose: this is
     // what gets assembled *before* textGeneration() picks a model, so the two
@@ -110,8 +123,16 @@ class NodeExecutors(
     }
 
     private fun memorySearch() = NodeExecutor { node, inputs, context ->
-        val provider = memory ?: return@NodeExecutor NodeValue.Empty
         val query = queryText(inputs, context) ?: return@NodeExecutor NodeValue.Empty
+        val runner = memoryExperiment
+        if (runner != null) {
+            val selection = runner.run(query, memoryExperimentMode)
+            return@NodeExecutor NodeValue.Fragments(
+                selection.items.map { item -> ContextFragment(memoryFragmentSource(item.scope), item.text, relevance = item.relevance ?: 0.0) },
+            )
+        }
+
+        val provider = memory ?: return@NodeExecutor NodeValue.Empty
         val scopes = node.params["scopes"]
             ?.split(',')
             ?.mapNotNull { name -> MemoryScope.entries.firstOrNull { it.name.equals(name.trim(), true) } }
@@ -126,19 +147,12 @@ class NodeExecutors(
             ),
         )
         NodeValue.Fragments(
-            items.map { item ->
-                ContextFragment(
-                    source = if (item.scope == MemoryScope.SEMANTIC) {
-                        FragmentSource.SEMANTIC_MEMORY
-                    } else {
-                        FragmentSource.EPISODIC_MEMORY
-                    },
-                    text = item.text,
-                    relevance = item.relevance ?: 0.0,
-                )
-            },
+            items.map { item -> ContextFragment(memoryFragmentSource(item.scope), item.text, relevance = item.relevance ?: 0.0) },
         )
     }
+
+    private fun memoryFragmentSource(scope: MemoryScope) =
+        if (scope == MemoryScope.SEMANTIC) FragmentSource.SEMANTIC_MEMORY else FragmentSource.EPISODIC_MEMORY
 
     private fun knowledgeSearch() = NodeExecutor { node, inputs, context ->
         val provider = knowledge ?: return@NodeExecutor NodeValue.Empty
