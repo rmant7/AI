@@ -11,7 +11,11 @@ import java.io.File
 private data class StoredBundledKey(val id: String, val key: String, val cooldownUntilEpochMs: Long = 0L)
 
 @Serializable
-private data class BundledKeyPools(val pools: Map<String, List<StoredBundledKey>> = emptyMap())
+private data class BundledKeyPools(
+    val pools: Map<String, List<StoredBundledKey>> = emptyMap(),
+    /** See [BundledApiKeyStore.clearStaleCooldownsOnce]. */
+    val staleCooldownsCleared: Boolean = false,
+)
 
 /**
  * Cooldown state for keys baked into the build itself (see [BundledApiKeys]),
@@ -29,17 +33,44 @@ class BundledApiKeyStore(context: Context) : ApiKeyStore {
         readPools()[providerId]?.map { ApiKeyEntry(it.id, it.key, it.cooldownUntilEpochMs) }.orEmpty()
 
     override fun save(providerId: String, entries: List<ApiKeyEntry>) {
-        val pools = readPools().toMutableMap()
+        val current = readAll()
+        val pools = current.pools.toMutableMap()
         pools[providerId] = entries.map { StoredBundledKey(it.id, it.key, it.cooldownUntilEpochMs) }
-        writePools(pools)
+        writeAll(current.copy(pools = pools))
     }
 
-    private fun readPools(): Map<String, List<StoredBundledKey>> = runCatching {
-        if (!file.isFile) return emptyMap()
-        json.decodeFromString(BundledKeyPools.serializer(), file.readText()).pools
-    }.getOrElse { emptyMap() }
+    /**
+     * One-time migration: every cooldown stored before this fix shipped was
+     * set by markExhausted()'s old unconditional 24h default, whether the
+     * 429 that triggered it was a real daily-quota exhaustion or (far more
+     * likely, on a free-tier pool with exactly one key) an ordinary
+     * per-minute burst — see OpenAiRuntime's retryAfterMs. An install that
+     * already hit that bug is stuck on an artificially long wait that this
+     * fix's improved logic would never have set in the first place, and
+     * with no user-facing way to clear it (bundled keys are deliberately
+     * invisible to ApiKeysActivity). Clearing every cooldown exactly once
+     * self-heals that: worst case, a key that really is still exhausted
+     * gets one wasted retry and a fresh, correctly-computed cooldown from
+     * the response that follows; best case, a key blocked for up to a day
+     * over a transient burst is usable again immediately. Guarded by a
+     * persisted flag so this never fires a second time and starts undoing
+     * legitimate cooldowns the fixed logic sets from here on.
+     */
+    fun clearStaleCooldownsOnce() {
+        val current = readAll()
+        if (current.staleCooldownsCleared) return
+        val cleared = current.pools.mapValues { (_, keys) -> keys.map { it.copy(cooldownUntilEpochMs = 0L) } }
+        writeAll(BundledKeyPools(pools = cleared, staleCooldownsCleared = true))
+    }
 
-    private fun writePools(pools: Map<String, List<StoredBundledKey>>) {
-        file.writeText(json.encodeToString(BundledKeyPools.serializer(), BundledKeyPools(pools)))
+    private fun readAll(): BundledKeyPools = runCatching {
+        if (!file.isFile) return BundledKeyPools()
+        json.decodeFromString(BundledKeyPools.serializer(), file.readText())
+    }.getOrElse { BundledKeyPools() }
+
+    private fun readPools(): Map<String, List<StoredBundledKey>> = readAll().pools
+
+    private fun writeAll(pools: BundledKeyPools) {
+        file.writeText(json.encodeToString(BundledKeyPools.serializer(), pools))
     }
 }
