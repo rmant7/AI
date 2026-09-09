@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     // Both versions are declared here so AGP and the Kotlin Android plugin land
     // in the same classpath — the Kotlin plugin needs AGP's classes to apply.
@@ -49,7 +51,7 @@ fun bundledKeys(envPrefix: String): String {
     val joined = (1..5)
         .mapNotNull { System.getenv("${envPrefix}_$it")?.trim()?.takeIf { key -> key.isNotEmpty() } }
         .joinToString(",")
-    return java.util.Base64.getEncoder().encodeToString(joined.toByteArray(Charsets.UTF_8))
+    return Base64.getEncoder().encodeToString(joined.toByteArray(Charsets.UTF_8))
 }
 
 android {
