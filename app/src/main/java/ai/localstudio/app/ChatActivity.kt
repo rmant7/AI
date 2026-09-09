@@ -823,27 +823,46 @@ class ChatActivity : AppCompatActivity() {
         updateStatus()
         val seed = container.whisperStore.installedSeed(container.settings.whisperModelId) ?: return
 
+        // WhisperEngine holds one native handle at a time with no locking of
+        // its own — it was never meant to be called from two coroutines at
+        // once. Nothing used to stop that: recorder.isRecording goes false
+        // the instant recorder.stop() returns above, well before this
+        // transcription actually finishes, so tapping the mic again while it
+        // was still running started a *second* recording that could reach
+        // its own finalizeRecording — and so its own transcribe() call on
+        // the very same engine — while the first one was still inside
+        // whisper_full() or, worse, right as its own release() below freed
+        // the handle the first call was still using. A used-after-freed
+        // native context is exactly a crash with no exception and no clean
+        // error, which is what tapping mic, mic again, then stop produced.
+        // Disabling the button for the duration closes that window outright
+        // rather than trying to make concurrent access to it safe.
+        binding.micButton.isEnabled = false
         lifecycleScope.launch {
-            binding.statusText.text = getString(R.string.chat_transcribing)
-            val result = withContext(Dispatchers.Default) {
-                runCatching { container.whisperEngine.transcribe(seed, audio) }
-            }
-            // Freed immediately after this one transcription, not kept warm
-            // for next time: the very next thing that happens is usually
-            // Send, which loads (or already has loaded) a local LLM — and a
-            // multi-hundred-MB-to-GB Whisper model sitting resident at the
-            // same time is exactly the kind of memory pressure a native
-            // crash in llama.cpp looks like from the outside, with no
-            // exception and no clean error to explain it. Costs a reload
-            // (from disk, a second or so for Turbo) on the next recording;
-            // worth it over risking that.
-            container.whisperEngine.release()
-            updateStatus()
-            result
-                .onSuccess { text -> if (text.isNotBlank()) setInputText(text) }
-                .onFailure { error ->
-                    Toast.makeText(this@ChatActivity, error.message ?: error.toString(), Toast.LENGTH_LONG).show()
+            try {
+                binding.statusText.text = getString(R.string.chat_transcribing)
+                val result = withContext(Dispatchers.Default) {
+                    runCatching { container.whisperEngine.transcribe(seed, audio) }
                 }
+                // Freed immediately after this one transcription, not kept
+                // warm for next time: the very next thing that happens is
+                // usually Send, which loads (or already has loaded) a local
+                // LLM, and a multi-hundred-MB-to-GB Whisper model sitting
+                // resident at the same time is exactly the kind of memory
+                // pressure a native crash looks like from the outside, with
+                // no exception and no clean error to explain it. Costs a
+                // reload (from disk, a second or so for Turbo) on the next
+                // recording; worth it over risking that.
+                container.whisperEngine.release()
+                updateStatus()
+                result
+                    .onSuccess { text -> if (text.isNotBlank()) setInputText(text) }
+                    .onFailure { error ->
+                        Toast.makeText(this@ChatActivity, error.message ?: error.toString(), Toast.LENGTH_LONG).show()
+                    }
+            } finally {
+                binding.micButton.isEnabled = true
+            }
         }
     }
 
