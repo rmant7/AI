@@ -239,7 +239,18 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                         continue
                     }
                     throw e
-                } catch (e: java.io.IOException) {
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Broader than java.io.IOException on purpose: a
+                    // connection blocked or intercepted by network-level
+                    // filtering (a DPI box resetting the connection, an ISP
+                    // returning a malformed response instead of actually
+                    // reaching the provider) does not reliably show up as one
+                    // specific exception type across every Android version —
+                    // whatever it throws, one retry then a normal, catchable
+                    // failure beats letting an unexpected exception type slip
+                    // past this loop uncaught.
                     if (emittedAny || cancelled.get() || ioRetries >= STREAM_RETRY_LIMIT) throw e
                     ioRetries++
                 }

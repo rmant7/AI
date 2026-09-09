@@ -491,7 +491,25 @@ class ChatActivity : AppCompatActivity() {
                         error.message ?: error.toString()
                     }
                     container.appLog.record("GENERATION_ERROR", "${error.javaClass.simpleName}: $body")
-                    adapter.update(placeholderIndex, Message.error(body = body, details = error.javaClass.simpleName))
+                    // A fallback chain (see FallbackTextRuntime) can stream
+                    // real, useful text from one candidate before a LATER
+                    // candidate's failure ends the whole turn — e.g. Groq
+                    // answers in full, then Gemini is tried as a second
+                    // opinion and its connection drops mid-stream. That text
+                    // already reached the screen; replacing the bubble with a
+                    // bare error message threw it away and left the user
+                    // looking at an answer that had visibly existed a moment
+                    // earlier. Whatever streamed is kept, with the failure
+                    // noted underneath instead of overwriting it.
+                    val partialText = partial.value
+                    if (!partialText.isNullOrBlank()) {
+                        adapter.update(
+                            placeholderIndex,
+                            Message.assistant(body = "$partialText\n\n---\n⚠ $body", details = error.javaClass.simpleName),
+                        )
+                    } else {
+                        adapter.update(placeholderIndex, Message.error(body = body, details = error.javaClass.simpleName))
+                    }
                 }
             binding.messages.scrollToPosition(adapter.itemCount - 1)
             persist()
@@ -595,6 +613,20 @@ class ChatActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             adapter.update(placeholderIndex, Message.assistant(body = "**$label:**\n$rendered", details = null).copy(timestamp = startedAt))
                             binding.messages.scrollToPosition(adapter.itemCount - 1)
+                            // Persisted the moment THIS source finishes, not
+                            // only once every source has: a native crash in
+                            // one candidate (llama.cpp, most often the local
+                            // one) kills the process outright and nothing
+                            // Kotlin-level runs afterward, including whatever
+                            // was waiting for jobs.awaitAll() below. Without
+                            // this, an already-successful Groq/Gemini answer
+                            // sitting only in the adapter's in-memory list —
+                            // never written to disk — was wiped on relaunch
+                            // and replaced with the generic "no reply"
+                            // placeholder (see the INTERRUPTED_TURN handling
+                            // in onCreate), even though it had already been
+                            // shown on screen before the crash.
+                            persist()
                         }
                     }
                 }
