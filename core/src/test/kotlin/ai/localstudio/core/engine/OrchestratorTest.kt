@@ -6,9 +6,9 @@ import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.context.ContextEngine
 import ai.localstudio.core.context.FragmentSource
 import ai.localstudio.core.device
-import ai.localstudio.core.memory.InMemoryMemoryProvider
-import ai.localstudio.core.memory.MemoryQuery
-import ai.localstudio.core.memory.MemoryScope
+import ai.localstudio.memory.FileMemoryStore
+import ai.localstudio.memory.MemoryQuery
+import ai.localstudio.memory.MemoryScope
 import ai.localstudio.core.model
 import ai.localstudio.core.pipeline.ConversationTurn
 import ai.localstudio.core.pipeline.NodeType
@@ -33,7 +33,7 @@ import kotlin.test.assertTrue
 class OrchestratorTest {
 
     private val runtime = FakeRuntime()
-    private val memory = InMemoryMemoryProvider()
+    private val memory = FileMemoryStore(java.io.File.createTempFile("orchestrator-test", ".json").apply { deleteOnExit() })
 
     private val registry = ModelRegistry(
         listOf(

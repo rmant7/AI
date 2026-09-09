@@ -59,7 +59,7 @@
 | Аудио | `UtteranceAccumulator`, `AudioAnalysis` | `core/src/main/kotlin/ai/localstudio/core/audio/VoiceActivity.kt` |
 | Подбор под устройство | `DeviceProfile`, `SuitabilityScorer` | `core/src/main/kotlin/ai/localstudio/core/registry/SuitabilityScorer.kt` |
 | Runtime | `ModelRuntime`, `RuntimeManager` | `core/src/main/kotlin/ai/localstudio/core/runtime/` |
-| Память | `MemoryProvider` | `core/src/main/kotlin/ai/localstudio/core/memory/MemoryProvider.kt` |
+| Память | `MemoryProvider`, `FileMemoryStore` | `memory/src/main/kotlin/ai/localstudio/memory/` (отдельный модуль — см. `docs/05-memory-knowledge.md`) |
 | Знания (RAG) | `KnowledgeProvider` | `core/src/main/kotlin/ai/localstudio/core/knowledge/KnowledgeProvider.kt` |
 | Сборка контекста | `ContextEngine` | `core/src/main/kotlin/ai/localstudio/core/context/ContextEngine.kt` |
 | Маршрутизация | `CapabilityRouter` | `core/src/main/kotlin/ai/localstudio/core/router/CapabilityRouter.kt` |

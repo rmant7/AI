@@ -28,7 +28,7 @@ data class KnowledgeQuery(
 /**
  * The user's documents: parse, chunk, embed, search, rerank.
  *
- * Kept separate from [ai.localstudio.core.memory.MemoryProvider] on purpose —
+ * Kept separate from [ai.localstudio.memory.MemoryProvider] on purpose —
  * knowledge is what the user gave the system, memory is what the system
  * concluded. They have different lifecycles, different deletion semantics and
  * different storage.

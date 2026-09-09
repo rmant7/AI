@@ -1,7 +1,14 @@
 # 5. Память и знания
 
-Код: `core/src/main/kotlin/ai/localstudio/core/memory/`,
-`core/src/main/kotlin/ai/localstudio/core/knowledge/`
+Код: `memory/src/main/kotlin/ai/localstudio/memory/` — интерфейс
+(`MemoryProvider`, `MemoryScope`, `MemoryExtractor`) и эталонная реализация
+(`FileMemoryStore`, персистентная), отдельный Gradle-модуль без зависимости
+от `core`/`app`/`openai` специально для того, чтобы его можно было вынести в
+свой репозиторий, ничего не распутывая. Модель-зависимая часть —
+`LlmMemoryExtractor` в `core/src/main/kotlin/ai/localstudio/core/memory/` —
+уже не может жить в том модуле: ей нужен `RuntimeManager`/`Orchestrator`.
+
+Знания: `core/src/main/kotlin/ai/localstudio/core/knowledge/`
 
 ## Четыре разных вещи, которые называют «памятью»
 
@@ -73,10 +80,16 @@ Mem0 — разумная первая реализация `MemoryProvider`: н
 Причины ровно две, и обе архитектурные:
 1. Память переживает не только модели, но и библиотеки. Переход на другое
    хранилище не должен затрагивать Context Engine.
-2. Извлечение фактов само по себе требует LLM и эмбеддера — то есть является
-   потребителем Model Registry, а не независимым слоем. На телефоне это надо
-   уметь откладывать, батчить и выполнять в моменты простоя; интерфейс
-   `consolidate(conversationId)` существует именно для этого.
+2. Извлечение фактов само по себе требует LLM — то есть является потребителем
+   Model Registry, а не независимым слоем. На телефоне это надо уметь
+   откладывать и выполнять в моменты простоя; интерфейс
+   `consolidate(conversationId)` существует именно для этого и реально
+   вызывается (`ChatActivity.consolidatePreviousConversation`, при выходе из
+   разговора — не после каждой реплики), а не только объявлен: рабочая
+   память (`MemoryScope.WORKING`) без этого росла бы вечно, а с переходом на
+   `FileMemoryStore` — вечно на диске, а не только в рамках одного запуска
+   процесса. `LlmMemoryExtractor` переиспользует тот же `Orchestrator`, что
+   и обычный чат, вместо отдельного выбора модели.
 
 ## RAG как отдельный сервис
 

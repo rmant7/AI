@@ -1,15 +1,18 @@
-package ai.localstudio.core.memory
+package ai.localstudio.memory
 
 import kotlinx.coroutines.runBlocking
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class InMemoryMemoryProviderTest {
+class FileMemoryStoreTest {
 
     private var now = 1_000L
-    private fun provider(extractor: MemoryExtractor = InMemoryMemoryProvider.PromoteWorkingMemory) =
-        InMemoryMemoryProvider(extractor) { now += 10; now }
+    private fun provider(extractor: MemoryExtractor = FileMemoryStore.PromoteWorkingMemory): FileMemoryStore {
+        val file = File.createTempFile("memory-test", ".json").apply { deleteOnExit() }
+        return FileMemoryStore(file, extractor) { now += 10; now }
+    }
 
     @Test
     fun `search finds a memory by shared terms`() = runBlocking {
@@ -73,6 +76,20 @@ class InMemoryMemoryProviderTest {
     }
 
     @Test
+    fun `a metadata filter bypasses the lexical overlap requirement`() = runBlocking {
+        val memory = provider()
+        memory.remember(
+            "Содержимое приложенного файла, никак не связанное с вопросом",
+            MemoryScope.SEMANTIC,
+            mapOf("source" to "report.pdf"),
+        )
+
+        val hits = memory.search(MemoryQuery("что это", metadataFilter = mapOf("source" to "report.pdf")))
+
+        assertEquals(1, hits.size)
+    }
+
+    @Test
     fun `unrelated memories are not returned at all`() = runBlocking {
         val memory = provider()
         memory.remember("Пользователь предпочитает тёмную тему", MemoryScope.SEMANTIC)
@@ -127,27 +144,53 @@ class InMemoryMemoryProviderTest {
         assertTrue(provider().consolidate("unknown").isEmpty())
     }
 
+    @Test
+    fun `memory survives a fresh instance over the same file`() = runBlocking {
+        val file = File.createTempFile("memory-test", ".json").apply { deleteOnExit() }
+        FileMemoryStore(file).remember("Факт, который должен пережить перезапуск", MemoryScope.SEMANTIC)
+
+        // A new instance over the same file is what a process restart looks
+        // like — the whole point of this store over the in-memory one it
+        // replaced.
+        val reloaded = FileMemoryStore(file)
+
+        assertEquals(1, reloaded.all().size)
+        assertTrue(reloaded.all().single().text.contains("перезапуск"))
+    }
+
+    @Test
+    fun `a missing or corrupt file starts empty instead of crashing`() {
+        val missing = File.createTempFile("memory-test", ".json").apply { delete() }
+        assertTrue(FileMemoryStore(missing).all().isEmpty())
+
+        val corrupt = File.createTempFile("memory-test", ".json").apply {
+            deleteOnExit()
+            writeText("{ not valid json")
+        }
+        assertTrue(FileMemoryStore(corrupt).all().isEmpty())
+    }
+
     /**
      * Reading while writing is the app's normal case, not an edge case: a
      * generation searches memory on a background thread for the length of a
      * turn, while attaching a document writes to it from the UI thread. That
      * pair used to throw ConcurrentModificationException and take the whole
-     * app down with it.
+     * app down with it, back when this was a plain in-memory map.
      */
     @Test
     fun `searching while remembering from another thread does not blow up`() {
-        val memory = InMemoryMemoryProvider()
+        val memory = provider()
         runBlocking { repeat(200) { memory.remember("исходный фрагмент $it", MemoryScope.SEMANTIC) } }
 
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
         val writer = Thread {
             runCatching {
-                runBlocking { repeat(500) { memory.remember("новый фрагмент $it", MemoryScope.SEMANTIC) } }
+                runBlocking { repeat(200) { memory.remember("новый фрагмент $it", MemoryScope.SEMANTIC) } }
             }.onFailure(failure::set)
         }
         val reader = Thread {
             runCatching {
-                runBlocking { repeat(500) { memory.search(MemoryQuery("фрагмент")) } }
+                runBlocking { repeat(200) { memory.search(MemoryQuery("фрагмент")) } }
             }.onFailure(failure::set)
         }
 

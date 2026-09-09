@@ -6,9 +6,9 @@ import ai.localstudio.core.context.ContextFragment
 import ai.localstudio.core.context.FragmentSource
 import ai.localstudio.core.knowledge.KnowledgeProvider
 import ai.localstudio.core.knowledge.KnowledgeQuery
-import ai.localstudio.core.memory.MemoryProvider
-import ai.localstudio.core.memory.MemoryQuery
-import ai.localstudio.core.memory.MemoryScope
+import ai.localstudio.memory.MemoryProvider
+import ai.localstudio.memory.MemoryQuery
+import ai.localstudio.memory.MemoryScope
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.pipeline.NodeExecutor

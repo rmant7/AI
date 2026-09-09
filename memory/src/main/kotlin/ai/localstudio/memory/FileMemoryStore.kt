@@ -1,45 +1,81 @@
-package ai.localstudio.core.memory
+package ai.localstudio.memory
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
+
+@Serializable
+private data class StoredItem(
+    val id: String,
+    val text: String,
+    val scope: MemoryScope,
+    val createdAt: Long,
+    val metadata: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+private data class StoredState(val items: List<StoredItem> = emptyList(), val counter: Long = 0L)
 
 /**
- * Decides what from a finished exchange is worth keeping.
+ * A persistent [MemoryProvider] — the one thing an in-memory map fundamentally
+ * cannot be: every memory here survives the process dying, not just the
+ * conversation that produced it. The whole file is read once at construction
+ * and rewritten whole on every mutation; for a personal local memory store
+ * (hundreds to low thousands of items, not a shared multi-user backend) that
+ * is simple and correct, and it is the same pattern this app already uses
+ * for chat history and attached documents — proven, not novel.
  *
- * Extraction is a model call in any serious implementation, which is why it is
- * an interface: on a phone that call is background work, not something that
- * runs synchronously after every answer.
+ * Retrieval is lexical: shared-term overlap, weighted by scope and recency.
+ * It is not as good as embeddings, and it is not meant to be — swapping in a
+ * real embedding-backed implementation later is exactly the kind of change
+ * this module's own [MemoryProvider] interface exists to make painless.
  */
-fun interface MemoryExtractor {
-    suspend fun extract(conversationId: String, workingMemory: List<MemoryItem>): List<MemoryItem>
-}
-
-/**
- * A memory store with no external dependencies.
- *
- * Retrieval is lexical: shared-term overlap, weighted by scope and recency. It
- * is not as good as embeddings, and it is not meant to be — it exists so the
- * rest of the system can be built, tested and demonstrated before any memory
- * backend is chosen, and so that swapping one in later is an implementation
- * change behind [MemoryProvider] rather than a rewrite.
- */
-class InMemoryMemoryProvider(
+class FileMemoryStore(
+    private val file: File,
     private val extractor: MemoryExtractor = PromoteWorkingMemory,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : MemoryProvider {
 
+    private val json = Json { ignoreUnknownKeys = true }
+
+    // Same reasoning as the in-memory version this replaced: a generation
+    // reads this from a background thread for the whole length of a turn
+    // while attaching a document writes to it from the UI thread, and
+    // without a lock that pair is a ConcurrentModificationException waiting
+    // to happen. Every read and write — including the file I/O itself —
+    // goes through this.
+    private val lock = Any()
     private val items = LinkedHashMap<String, MemoryItem>()
     private var counter = 0L
 
-    /**
-     * Every read and write goes through this.
-     *
-     * Memory is genuinely concurrent in this app: a generation reads it from
-     * a background thread for the whole length of a turn, while attaching a
-     * document writes to it from the UI thread. Without a lock, that pair is
-     * a `ConcurrentModificationException` waiting to happen — and it did,
-     * reliably, as "started a prompt, attached a PDF, app died". Reads take a
-     * snapshot rather than iterating the live map, so a write during a long
-     * search cannot invalidate the iteration either.
-     */
-    private val lock = Any()
+    init {
+        synchronized(lock) { load() }
+    }
+
+    private fun load() {
+        if (!file.isFile) return
+        runCatching {
+            val state = json.decodeFromString(StoredState.serializer(), file.readText())
+            state.items.forEach { stored ->
+                items[stored.id] = MemoryItem(stored.id, stored.text, stored.scope, stored.createdAt, metadata = stored.metadata)
+            }
+            counter = state.counter
+        }
+        // A corrupt or unreadable file degrades to "starts empty," same as a
+        // fresh install — not a crash on every future launch over one bad write.
+    }
+
+    /** Caller must already hold [lock]. */
+    private fun persist() {
+        val state = StoredState(
+            items = items.values.map { StoredItem(it.id, it.text, it.scope, it.createdAt, it.metadata) },
+            counter = counter,
+        )
+        runCatching { file.writeText(json.encodeToString(StoredState.serializer(), state)) }
+    }
+
+    /** Caller must already hold [lock]. */
+    private fun nextId(): String = "mem-%010d".format(++counter)
 
     private fun snapshot(): List<MemoryItem> = synchronized(lock) { items.values.toList() }
 
@@ -83,26 +119,23 @@ class InMemoryMemoryProvider(
 
     override suspend fun remember(text: String, scope: MemoryScope, metadata: Map<String, String>): String =
         synchronized(lock) {
-            // Zero-padded so id order is also lexical order: search()'s tie
-            // break (equal relevance, which every chunk of the same
-            // metadata-filtered document now has — see search()'s own
-            // comment) sorts by this string, and an unpadded counter puts
-            // "mem-10" before "mem-2" — a document past its 9th chunk would
-            // come back with its later paragraphs spliced in before earlier
-            // ones instead of in reading order.
-            val id = "mem-%010d".format(++counter)
+            val id = nextId()
             items[id] = MemoryItem(id, text.trim(), scope, clock(), metadata = metadata)
+            persist()
             id
         }
 
     override suspend fun forget(id: String) {
-        synchronized(lock) { items.remove(id) }
+        synchronized(lock) {
+            items.remove(id)
+            persist()
+        }
     }
 
     /**
-     * Turns this conversation's working memory into durable memories and clears
-     * the working set — working memory that outlives its conversation is just a
-     * leak with a nicer name.
+     * Turns this conversation's working memory into durable memories and
+     * clears the working set — working memory that outlives its
+     * conversation is just a leak with a nicer name.
      */
     override suspend fun consolidate(conversationId: String): List<MemoryItem> {
         val working = snapshot().filter {
@@ -117,12 +150,13 @@ class InMemoryMemoryProvider(
 
         return synchronized(lock) {
             working.forEach { items.remove(it.id) }
-            extracted.map { item ->
-                val id = "mem-${++counter}"
-                val stored = item.copy(id = id, createdAt = clock())
-                items[id] = stored
+            val result = extracted.map { item ->
+                val stored = item.copy(id = nextId(), createdAt = clock())
+                items[stored.id] = stored
                 stored
             }
+            persist()
+            result
         }
     }
 

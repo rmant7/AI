@@ -253,7 +253,27 @@ class ChatActivity : AppCompatActivity() {
         openHistory.launch(HistoryActivity.intent(this))
     }
 
+    /**
+     * Fire-and-forget, and only when leaving a conversation rather than
+     * after every turn: MEMORY_UPDATE already writes each turn's exchange
+     * as WORKING memory (see NodeExecutors) whenever memory is on, and
+     * nothing ever turned that into anything durable or cleared it —
+     * consolidate() existed but nothing called it, so working memory just
+     * grew forever, unbounded, for the life of the process. Now that memory
+     * persists across restarts too (FileMemoryStore), leaving that
+     * unconsolidated would mean it grows forever on disk instead — this is
+     * what actually distills a finished conversation into durable memories
+     * and clears its working set, using whichever model this app would
+     * otherwise answer with (see AppContainer's own comment on why).
+     */
+    private fun consolidatePreviousConversation(id: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { container.memory.consolidate(id) }
+        }
+    }
+
     private fun startNewConversation() {
+        consolidatePreviousConversation(conversationId)
         adapter.clear()
         conversationId = "chat-" + System.currentTimeMillis()
         sessionDocumentNames.clear()
@@ -261,6 +281,7 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun openConversation(conversation: Conversation) {
+        consolidatePreviousConversation(conversationId)
         conversationId = conversation.id
         adapter.clear()
         conversation.messages.forEach { adapter.add(it.toMessage()) }

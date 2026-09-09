@@ -9,9 +9,12 @@ import ai.localstudio.core.engine.ModelSelector
 import ai.localstudio.core.engine.NodeExecutors
 import ai.localstudio.core.engine.Orchestrator
 import ai.localstudio.core.engine.SelectedModel
-import ai.localstudio.core.memory.InMemoryMemoryProvider
-import ai.localstudio.core.memory.MemoryScope
+import ai.localstudio.core.engine.UserRequest
+import ai.localstudio.core.memory.LlmMemoryExtractor
+import ai.localstudio.core.pipeline.NodeValue
 import ai.localstudio.core.pipeline.PipelineCodec
+import ai.localstudio.memory.FileMemoryStore
+import ai.localstudio.memory.MemoryScope
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.InstallState
 import ai.localstudio.core.registry.ModelCatalog
@@ -63,8 +66,25 @@ class AppContainer private constructor(private val context: Context) {
 
     val settings = Settings(context)
 
-    /** Memory lives above the models, so it survives switching between runtimes. */
-    val memory = InMemoryMemoryProvider()
+    /**
+     * Memory lives above the models, so it survives switching between
+     * runtimes — and, via [FileMemoryStore], the process dying too. The
+     * extractor reuses [orchestrator] itself for consolidation's one model
+     * call rather than re-deriving "which model should answer this" from
+     * scratch — local-vs-cloud, fallback chains and cooldowns already work,
+     * and a second, independent selection path here would just be a second
+     * place for those to drift out of sync with the one everything else uses.
+     * memoryEnabled = false: consolidation must not recursively search or
+     * write memory for its own extraction call.
+     */
+    val memory = FileMemoryStore(
+        File(context.filesDir, "memory.json"),
+        extractor = LlmMemoryExtractor { prompt ->
+            orchestrator().handle(
+                UserRequest(conversationId = "memory-consolidation", text = prompt, memoryEnabled = false),
+            ).text
+        },
+    )
 
     val documents = DocumentStore(context)
 

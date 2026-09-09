@@ -11,7 +11,7 @@ import java.io.IOException
 /**
  * Turns an attached file into plain-text chunks the memory provider can hold.
  *
- * There is no vector store here — [ai.localstudio.core.memory.InMemoryMemoryProvider]
+ * There is no vector store here — [ai.localstudio.memory.FileMemoryStore]
  * already does lexical retrieval over whatever text it is given, so ingestion's
  * only job is to get clean text out of the file the user picked.
  */

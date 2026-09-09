@@ -8,7 +8,7 @@ import ai.localstudio.core.engine.NodeExecutors
 import ai.localstudio.core.engine.Orchestrator
 import ai.localstudio.core.engine.UserRequest
 import ai.localstudio.core.engine.audioInput
-import ai.localstudio.core.memory.InMemoryMemoryProvider
+import ai.localstudio.memory.FileMemoryStore
 import ai.localstudio.core.pipeline.NodeType
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.InstallState
@@ -38,7 +38,7 @@ import kotlin.test.assertTrue
 class EndToEndTest {
 
     private val server = FakeOpenAiServer()
-    private val memory = InMemoryMemoryProvider()
+    private val memory = FileMemoryStore(java.io.File.createTempFile("end-to-end-test", ".json").apply { deleteOnExit() })
 
     @AfterTest
     fun stop() = server.close()
