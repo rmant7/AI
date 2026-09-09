@@ -109,14 +109,22 @@ class ApiKeyRotator(
      * usable (null) — an empty pool means "no pool configured yet", which the
      * caller is expected to handle by falling back to some other key source,
      * not by treating it as exhaustion.
+     *
+     * Considers both pools, same as [activeKey] and [hasAnyKey] — checking
+     * only [pool] here made this report nothing useful for the exact case
+     * [hasAnyKey] exists for: a user with no key of their own, running
+     * entirely on a bundled one. That combination produced the single most
+     * confusing failure this app can show — "No available API keys for this
+     * provider" while a bundled key visibly existed and was simply cooling
+     * down from a rate limit — instead of the real reason and an ETA.
      */
     fun exhaustionMessage(): String? {
-        val pool = pool()
-        if (pool.isEmpty()) return null
+        val combined = pool() + bundledStore?.load(providerId).orEmpty()
+        if (combined.isEmpty()) return null
         val now = clock()
-        if (pool.any { it.cooldownUntilEpochMs <= now }) return null
-        val minutesLeft = ((pool.minOf { it.cooldownUntilEpochMs } - now) / 60_000L).coerceAtLeast(0)
-        return "all ${pool.size} key(s) have hit the daily limit; the next one frees up in ~$minutesLeft min"
+        if (combined.any { it.cooldownUntilEpochMs <= now }) return null
+        val minutesLeft = ((combined.minOf { it.cooldownUntilEpochMs } - now) / 60_000L).coerceAtLeast(0)
+        return "all ${combined.size} key(s) have hit the daily limit; the next one frees up in ~$minutesLeft min"
     }
 
     companion object {
