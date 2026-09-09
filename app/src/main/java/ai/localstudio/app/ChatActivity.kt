@@ -52,6 +52,11 @@ class ChatActivity : AppCompatActivity() {
     private val recorder = AudioRecorder()
     private var isGenerating = false
     private var generationJob: kotlinx.coroutines.Job? = null
+    // Set for the duration of finalizeRecording()'s async transcribe() call —
+    // both a guard against pressing Send while it's running (see send()) and
+    // part of why the mic button alone isn't enough to tell "busy" from
+    // "idle" for that check.
+    private var isTranscribing = false
     // Distinguishes "user tapped stop" from every other way generate() can
     // fail, so cancelling shows a plain "stopped" line instead of an error.
     private var stoppedByUser = false
@@ -342,6 +347,21 @@ class ChatActivity : AppCompatActivity() {
         // exactly what "sent three messages, got zero replies, no error
         // either" looks like from the outside.
         if (isGenerating) return
+        if (recorder.isRecording || isTranscribing) {
+            // Reproduced on a real device: starting a local generation while
+            // Whisper is still recording or transcribing pits two heavy CPU-
+            // bound native calls against each other on the same cores —
+            // measured as high as a 30x generation slowdown (1.1 tok/s
+            // against this device's normal rate) and, more visibly, the
+            // silence-based auto-stop and the transcription itself both
+            // stretching out to minutes because the coroutines driving them
+            // barely get scheduled. Blocking Send here is the mirror of mic
+            // already being disabled during an active generation below —
+            // the two heavy paths are now mutually exclusive by construction
+            // instead of relying on either one finishing "fast enough".
+            Toast.makeText(this, R.string.chat_busy_recording, Toast.LENGTH_SHORT).show()
+            return
+        }
         val text = binding.input.text?.toString()?.trim().orEmpty()
         // An attached image or document is itself the message for anyone
         // who just wants "look at this" answered — every other chat app
@@ -877,7 +897,16 @@ class ChatActivity : AppCompatActivity() {
         // error, which is what tapping mic, mic again, then stop produced.
         // Disabling the button for the duration closes that window outright
         // rather than trying to make concurrent access to it safe.
+        // Whatever the field holds the instant recording stops — the preview
+        // loop's last update, ordinarily. This transcription can take far
+        // longer than usual (CPU contention with an active local generation
+        // stretches it from seconds to over a minute — see send()'s own
+        // guard against that), long enough that a user who gets impatient
+        // and types their own message in the meantime must not have it
+        // clobbered the moment the real transcription finally lands.
+        val textBeforeTranscribing = binding.input.text?.toString().orEmpty()
         binding.micButton.isEnabled = false
+        isTranscribing = true
         lifecycleScope.launch {
             try {
                 binding.statusText.text = getString(R.string.chat_transcribing)
@@ -896,12 +925,20 @@ class ChatActivity : AppCompatActivity() {
                 container.whisperEngine.release()
                 updateStatus()
                 result
-                    .onSuccess { text -> if (text.isNotBlank()) setInputText(text) }
+                    .onSuccess { text ->
+                        val untouchedSinceStop = binding.input.text?.toString().orEmpty() == textBeforeTranscribing
+                        if (text.isNotBlank() && untouchedSinceStop) setInputText(text)
+                        // else: the user already typed their own message
+                        // while this ran — trusting their edit over a
+                        // transcription that arrived a minute late is the
+                        // whole point of textBeforeTranscribing above.
+                    }
                     .onFailure { error ->
                         Toast.makeText(this@ChatActivity, error.message ?: error.toString(), Toast.LENGTH_LONG).show()
                     }
             } finally {
                 binding.micButton.isEnabled = true
+                isTranscribing = false
             }
         }
     }
@@ -980,6 +1017,12 @@ class ChatActivity : AppCompatActivity() {
             this, if (busy) R.drawable.ic_stop else R.drawable.ic_send,
         )
         binding.sendButton.contentDescription = getString(if (busy) R.string.chat_stop else R.string.send)
+        // The mic has no "stop the other thing" role generation's own button
+        // already covers, so it is disabled outright rather than doubling as
+        // anything — see send()'s own guard for why starting a recording
+        // during an active generation must not be possible at all, not just
+        // discouraged.
+        binding.micButton.isEnabled = !busy
     }
 
     private companion object {

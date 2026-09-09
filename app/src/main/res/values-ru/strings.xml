@@ -56,6 +56,7 @@
     <string name="chat_recording">Идёт запись… остановится сама после паузы, или нажмите ещё раз</string>
     <string name="chat_transcribing">Распознаю…</string>
     <string name="chat_mic_no_model">Модель распознавания речи не установлена. Откройте «Модели» → «Голос» и скачайте любую.</string>
+    <string name="chat_busy_recording">Сначала завершите запись или дождитесь транскрибации — отправка сейчас замедлит обе задачи.</string>
     <string name="chat_mic_permission">Нужен доступ к микрофону</string>
 
     <string name="menu_files">Файлы</string>

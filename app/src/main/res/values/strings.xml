@@ -54,6 +54,7 @@
     <string name="chat_recording">Recording… stops on its own after a pause, or tap again</string>
     <string name="chat_transcribing">Transcribing…</string>
     <string name="chat_mic_no_model">No speech recognition model installed. Open "Models" → "Voice" and download one.</string>
+    <string name="chat_busy_recording">Finish recording or wait for transcription to finish first — sending now would slow both down.</string>
     <string name="chat_mic_permission">Microphone access is needed</string>
 
     <string name="menu_files">Files</string>
