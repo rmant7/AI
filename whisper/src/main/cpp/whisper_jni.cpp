@@ -89,24 +89,33 @@ Java_ai_localstudio_whisper_WhisperBridge_nativeFree(JNIEnv *, jobject, jlong ha
  * format whisper.cpp's own examples all feed it, so nothing in this bridge
  * needs to know the original recording was 16-bit integer PCM at all.
  *
- * Language left as "auto": this app has no language-selection UI for speech
- * input, and whisper's own language detection runs on the same encoder pass
- * transcription needs anyway, so there is no separate cost to skip.
+ * [language] is an ISO-639-1 code ("ru", "en", ...) or "auto". Passing the
+ * actual language whenever it's known beats "auto" on more than just
+ * pedantic grounds: "auto" makes whisper.cpp re-run language ID from
+ * scratch on whatever audio this one call was given, no memory of any
+ * earlier call — and the live preview loop calls this repeatedly on a
+ * still-growing, still-short buffer, which is exactly the regime language
+ * ID is least reliable in. That is what a live preview flashing the wrong
+ * language for the first several seconds of an utterance before settling
+ * on the right one is — not a bug in how the buffer is built, but "auto"
+ * re-guessing on too little audio every single call. A caller that already
+ * knows the spoken language skips that guesswork entirely.
  */
 JNIEXPORT jstring JNICALL
 Java_ai_localstudio_whisper_WhisperBridge_nativeTranscribe(
-    JNIEnv *env, jobject, jlong handle, jfloatArray samples, jint threads) {
+    JNIEnv *env, jobject, jlong handle, jfloatArray samples, jint threads, jstring language) {
 
     auto *session = reinterpret_cast<Session *>(handle);
     if (session == nullptr || session->ctx == nullptr) return env->NewStringUTF("");
 
     const jsize sampleCount = env->GetArrayLength(samples);
     jfloat *sampleData = env->GetFloatArrayElements(samples, nullptr);
+    const std::string lang = toStdString(env, language);
 
     int result = -1;
   try {
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    params.language = "auto";
+    params.language = lang.empty() ? "auto" : lang.c_str();
     params.translate = false;
     params.n_threads = threads;
     // Each call here is an independent utterance (either the live preview's

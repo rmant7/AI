@@ -32,14 +32,28 @@ class WhisperTranscriber(private val modelFile: File) {
         if (handle == 0L) throw IllegalStateException("Failed to load model: ${modelFile.name}")
     }
 
-    /** [audioData] is 16-bit PCM, mono, 16kHz, little-endian. */
-    suspend fun transcribe(audioData: ByteArray): String = withContext(Dispatchers.Default) {
+    /**
+     * [audioData] is 16-bit PCM, mono, 16kHz, little-endian. [language] is an
+     * ISO-639-1 code ("ru", "en", ...) or "auto".
+     *
+     * "auto" makes whisper.cpp re-run language identification from scratch
+     * on whatever audio one call happens to have — reliable once an
+     * utterance is fully recorded, much less so for the live preview loop,
+     * which calls this repeatedly on a still-growing, still-short buffer
+     * with no memory of an earlier call's guess. That mismatch is what a
+     * live preview flashing the wrong language for the first several
+     * seconds before settling on the right one actually is. The caller
+     * (ChatActivity.detectSpokenLanguage) is what decides the actual hint —
+     * from the conversation itself, not a device-wide setting — this class
+     * only forwards whatever it's given.
+     */
+    suspend fun transcribe(audioData: ByteArray, language: String = "auto"): String = withContext(Dispatchers.Default) {
         if (handle == 0L) throw IllegalStateException("Model not initialized")
 
         val audioFloats = decodePcmToFloat(audioData)
         if (rmsEnergy(audioFloats) < SILENCE_THRESHOLD) return@withContext ""
 
-        bridge.nativeTranscribe(handle, audioFloats, WhisperBridge.defaultThreads())
+        bridge.nativeTranscribe(handle, audioFloats, WhisperBridge.defaultThreads(), language)
     }
 
     fun release() {

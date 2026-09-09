@@ -14,8 +14,13 @@ class WhisperBridge {
 
     external fun nativeFree(handle: Long)
 
-    /** [samples] is mono 16kHz PCM as float32 in [-1, 1]. Returns the transcribed text, or "" on failure. */
-    external fun nativeTranscribe(handle: Long, samples: FloatArray, threads: Int): String
+    /**
+     * [samples] is mono 16kHz PCM as float32 in [-1, 1]. [language] is an
+     * ISO-639-1 code ("ru", "en", ...) or "auto" — see the native side's own
+     * doc comment for why passing the actual language beats "auto" whenever
+     * it's known. Returns the transcribed text, or "" on failure.
+     */
+    external fun nativeTranscribe(handle: Long, samples: FloatArray, threads: Int, language: String): String
 
     companion object {
         /**

@@ -57,6 +57,11 @@ class ChatActivity : AppCompatActivity() {
     // part of why the mic button alone isn't enough to tell "busy" from
     // "idle" for that check.
     private var isTranscribing = false
+    // Computed once when a recording starts (see toggleRecording()) and
+    // reused by both the preview loop and the final pass — see
+    // detectSpokenLanguage()'s own comment for why this is read from the
+    // conversation rather than the device's system language.
+    private var micLanguageHint = "auto"
     // Distinguishes "user tapped stop" from every other way generate() can
     // fail, so cancelling shows a plain "stopped" line instead of an error.
     private var stoppedByUser = false
@@ -854,6 +859,7 @@ class ChatActivity : AppCompatActivity() {
             // though evictIdle() itself would just no-op on it either way.
             if (!isGenerating) lifecycleScope.launch { container.releaseLocalModels() }
             recordingPrefix = binding.input.text?.toString().orEmpty()
+            micLanguageHint = detectSpokenLanguage()
             recorder.start()
             binding.micButton.setIconResource(R.drawable.ic_stop)
             binding.statusText.text = getString(R.string.chat_recording)
@@ -862,6 +868,33 @@ class ChatActivity : AppCompatActivity() {
         }
 
         finalizeRecording()
+    }
+
+    /**
+     * What language whisper.cpp is told to expect, instead of "auto" — see
+     * WhisperTranscriber's own doc comment for why "auto" specifically hurts
+     * the live preview loop. The device's system language was the first
+     * thing tried here, but that is which language Android's own menus are
+     * in, not which language is actually being typed and spoken in THIS
+     * chat — someone can easily run a phone in English and mostly write
+     * Russian, or vice versa, or simply be having a Russian conversation
+     * with a model on an English-language device. The conversation already
+     * sitting on screen says directly what's being spoken far more
+     * reliably than a device-wide setting ever could: any Cyrillic already
+     * typed or answered in this chat means Russian, any other conversation
+     * text at all means English (the two languages this app's own UI is
+     * localized into and the only ones worth risking a wrong guess over),
+     * and a chat with nothing typed yet at all falls back to "auto" — there
+     * is simply no evidence yet to go on.
+     */
+    private fun detectSpokenLanguage(): String {
+        val text = buildString {
+            append(binding.input.text ?: "")
+            adapter.messages().takeLast(6).forEach { append(' ').append(it.body) }
+        }
+        if (text.any { it in 'Ѐ'..'ӿ' }) return "ru"
+        if (text.any { it.isLetter() }) return "en"
+        return "auto"
     }
 
     /**
@@ -911,7 +944,7 @@ class ChatActivity : AppCompatActivity() {
             try {
                 binding.statusText.text = getString(R.string.chat_transcribing)
                 val result = withContext(Dispatchers.Default) {
-                    runCatching { container.whisperEngine.transcribe(seed, audio) }
+                    runCatching { container.whisperEngine.transcribe(seed, audio, micLanguageHint) }
                 }
                 // Freed immediately after this one transcription, not kept
                 // warm for next time: the very next thing that happens is
@@ -973,8 +1006,9 @@ class ChatActivity : AppCompatActivity() {
                 if (previewAvailable) {
                     val snapshot = recorder.snapshot()
                     if (snapshot.isNotEmpty()) {
-                        val partial = runCatching { container.whisperPreviewEngine.transcribe(previewSeed, snapshot) }
-                            .getOrNull()
+                        val partial = runCatching {
+                            container.whisperPreviewEngine.transcribe(previewSeed, snapshot, micLanguageHint)
+                        }.getOrNull()
                         if (!partial.isNullOrBlank()) setInputText(partial)
                     }
                 }
