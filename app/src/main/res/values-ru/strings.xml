@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Local AI Studio</string>
+
+    <!--
+        How many documents are attached to *this* chat — see
+        ChatActivity.sessionDocumentNames. Answers "which files, in which
+        chat": before this there was no on-screen sign a document was in
+        play at all, cloud-shared across every conversation with no way to
+        tell whether the current one saw it.
+    -->
+    <plurals name="chat_status_files">
+        <item quantity="one">%d файл</item>
+        <item quantity="few">%d файла</item>
+        <item quantity="many">%d файлов</item>
+        <item quantity="other">%d файла</item>
+    </plurals>
+
+    <string name="chat_hint">Спросите что-нибудь…</string>
+    <string name="send">Отправить</string>
+    <string name="chat_stop">Остановить</string>
+    <string name="chat_stopped">Остановлено пользователем.</string>
+    <string name="settings_compare_mode">Сравнивать ответы (параллельно)</string>
+    <string name="settings_compare_mode_hint">Если включено несколько источников — запрос отправляется сразу во все, ответы показываются по мере готовности. Обычно (выключено) — сначала локальная модель, облако только при её ошибке.</string>
+    <string name="chat_compare_waiting">Ожидание ответов…</string>
+    <string name="menu_settings">Настройки</string>
+    <string name="menu_models">Модели</string>
+    <string name="menu_clear">Новый чат</string>
+    <string name="menu_history">История чатов</string>
+    <string name="menu_share_chat">Поделиться чатом</string>
+    <string name="message_copy">Скопировать сообщение</string>
+    <string name="message_copied">Скопировано</string>
+    <string name="message_attached_image">Прикреплённое изображение</string>
+    <string name="chat_share_empty">Чат пуст — нечем делиться</string>
+    <string name="chat_interrupted">Ответ не получен — генерация не завершилась (сбой приложения или его закрытие до ответа). Подробности могут быть в Настройки → Журнал ошибок. Попробуйте отправить сообщение ещё раз.</string>
+    <string name="history_empty">Пока нет сохранённых чатов</string>
+    <string name="history_delete">Удалить</string>
+    <string name="history_rename">Переименовать</string>
+    <string name="history_rename_hint">Название чата</string>
+    <string name="history_delete_confirm">Удалить «%1$s»? Сообщения этого чата будут стёрты.</string>
+    <string name="history_save">Сохранить</string>
+    <string name="history_subtitle">%1$d сообщ. · %2$s</string>
+    <string name="memory_on">Память: вкл</string>
+    <string name="memory_off">Память: выкл</string>
+
+    <string name="chat_attach">Файл</string>
+    <string name="chat_mic">Голос</string>
+    <string name="chat_attach_added">Добавлено в память: %1$s (%2$d фрагм.)</string>
+    <string name="chat_attach_failed">Не удалось прочитать файл: %1$s</string>
+    <string name="chat_attach_image_clear">Убрать картинку</string>
+    <string name="chat_attach_image_pending">Картинка: %1$s — будет отправлена со следующим сообщением</string>
+    <string name="chat_attach_image_too_large">Картинка слишком большая (%1$s), максимум 20 МБ</string>
+    <string name="chat_attach_image_no_vision_title">Изображения не поддерживаются</string>
+    <string name="chat_attach_image_no_vision">Ни одна из включённых моделей сейчас не понимает изображения.\n\nЧтобы отправлять картинки, либо включите Google Gemini в настройках, либо используйте локальную модель с поддержкой изображений (например, Gemma 4 E4B) — на экране «Модели» она отмечена как понимающая прикреплённые изображения, и для неё должен быть загружен файл распознавания (mmproj); если он ещё скачивается или не скачался — попробуйте ещё раз чуть позже.</string>
+    <string name="chat_attach_image_read_failed">Не удалось прочитать картинку: %1$s</string>
+    <string name="chat_recording">Идёт запись… остановится сама после паузы, или нажмите ещё раз</string>
+    <string name="chat_transcribing">Распознаю…</string>
+    <string name="chat_mic_no_model">Модель распознавания речи не установлена. Откройте «Модели» → «Голос» и скачайте любую.</string>
+    <string name="chat_mic_permission">Нужен доступ к микрофону</string>
+
+    <string name="menu_files">Файлы</string>
+    <string name="files_hint">Файлы сгруппированы по чату, в котором были загружены, — их содержимое подключается к ответам именно в этом чате. Найти текст можно и из других чатов (обычный поиск по памяти), но не так надёжно. Нажмите на файл, чтобы увидеть распознанный текст.</string>
+    <string name="files_empty">Пока ничего не загружено. Прикрепите файл кнопкой «Файл» в чате.</string>
+    <string name="files_subtitle">%1$d фрагм. · %2$s</string>
+    <string name="files_unknown_chat">Другие файлы (без привязки к чату)</string>
+    <string name="files_deleted_chat">Удалённый чат</string>
+    <string name="files_view_title">%1$s — распознанный текст</string>
+
+    <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
+    <string name="settings_whisper_manage">Открыть модели → Голос</string>
+    <string name="settings_whisper_installed">Установлена: %1$s</string>
+    <string name="settings_whisper_none">Не установлена</string>
+    <string name="settings_whisper_error">Ошибка: %1$s</string>
+    <string name="settings_whisper_note">Распознавание работает офлайн через TensorFlow Lite. Один словарь подходит для всех размеров и всех языков — скачивается один раз вместе с первой моделью, отдельно ничего загружать не нужно.</string>
+
+    <string name="settings_title">Настройки</string>
+    <string name="settings_language">Язык</string>
+    <string name="settings_language_system">Как в системе</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_language_ru">Русский</string>
+    <string name="settings_provider">Провайдер модели</string>
+    <string name="settings_provider_enabled">Включить как источник ответов</string>
+    <string name="settings_provider_enabled_help">Можно включить несколько сразу — например, локальную модель и Gemini. Раутер сначала обращается к локальной модели (если включена); если та не отвечает или падает, автоматически пробует следующий включённый источник, а не показывает ошибку.</string>
+    <string name="settings_active_sources">Активные источники: %1$s</string>
+    <string name="settings_no_sources">Источники не выбраны — используется демо-режим</string>
+    <string name="settings_endpoint">Адрес сервера</string>
+    <string name="settings_endpoint_hint">http://192.168.1.10:11434/v1</string>
+    <string name="settings_api_key">API-ключ</string>
+    <string name="settings_chat_model">Модель для текста</string>
+    <string name="settings_chat_model_hint">Нажмите на поле, чтобы увидеть модели этого провайдера — можно также ввести своё название вручную.</string>
+    <string name="settings_system_prompt">Системный промпт</string>
+    <string name="settings_system_prompt_help">Необязательно. По умолчанию пусто — это осознанный выбор: небольшие модели плохо следуют абстрактным инструкциям вроде «отвечай на языке пользователя» и отвечают естественнее без них. Заполните поле, только если нужна конкретная роль или постоянное правило — оно будет действовать во всех чатах.</string>
+    <string name="settings_api_keys_manage">Управление ключами</string>
+    <string name="settings_log">Журнал ошибок</string>
+    <string name="log_hint">Ошибки генерации, сбоя вложений и — если приложение упало целиком (в том числе из-за нативного крэша llama.cpp) — причина последнего завершения процесса, которую сообщает сама система. Скопируйте и пришлите, если что-то пошло не так и непонятно почему.</string>
+    <string name="log_empty">Журнал пуст</string>
+    <string name="log_copy">Скопировать</string>
+    <string name="log_clear">Очистить</string>
+    <string name="log_clear_confirm">Удалить весь журнал ошибок? Это нельзя отменить.</string>
+    <string name="api_keys_summary_none">Ключей в пуле нет — используется поле выше</string>
+    <string name="api_keys_summary_ready">Ключей в пуле: %1$d</string>
+    <string name="api_keys_summary_partial">Ключей в пуле: %1$d, на паузе: %2$d</string>
+    <string name="settings_save">Сохранить</string>
+    <string name="settings_explainer">Выберите, кто генерирует ответ. Для облачных провайдеров нужен только API-ключ — никаких серверов поднимать не надо. Маршрутизация, сборка контекста и память от выбора не зависят.</string>
+    <string name="settings_saved">Сохранено</string>
+
+    <string name="models_title">Модели</string>
+    <string name="models_category_text">Чат</string>
+    <string name="models_category_voice">Голос</string>
+    <string name="models_local_header">Локальные модели — работают без сети</string>
+    <string name="models_catalog_header">Каталог (справочно)</string>
+    <string name="model_download">Скачать</string>
+    <string name="model_delete">Удалить</string>
+    <string name="model_cancel">Отменить</string>
+    <string name="model_use">Использовать</string>
+    <string name="model_installed">Установлена</string>
+    <string name="model_native_missing">Локальный runtime недоступен для этого устройства</string>
+    <string name="model_details">Подробности</string>
+    <string name="model_retry">Повторить</string>
+    <string name="models_custom_title">Своя модель с Hugging Face</string>
+    <string name="models_custom_hint">Укажите репозиторий вида owner/repo, содержащий файл .gguf — приложение само выберет подходящее квантование.</string>
+    <string name="models_custom_add">Добавить</string>
+    <string name="models_custom_input_hint">owner/repo с GGUF-файлом</string>
+    <string name="models_custom_bad_format">Нужен формат owner/repo</string>
+    <string name="models_orphans_title">Неизвестные файлы</string>
+    <string name="models_orphans_subtitle">Найдено файлов: %1$d, общий размер ~%2$s. Текущая версия приложения их не использует — вероятно, остались от другой версии или ветки разработки.</string>
+    <string name="models_orphans_delete">Удалить (%1$s)</string>
+    <string name="models_voice_header">Модели распознавания речи — работают офлайн</string>
+    <string name="models_switched_chat">Чат переключён на %1$s</string>
+    <string name="models_switched_voice">Голосовой ввод переключён на %1$s</string>
+    <string name="model_state_installed">Установлена</string>
+    <string name="model_state_resolving">Ищу файл: %1$s…</string>
+    <string name="model_state_error">Ошибка: %1$s</string>
+    <string name="model_state_wait_other">Дождитесь окончания текущей загрузки</string>
+    <string name="model_fit_light">лёгкая</string>
+    <string name="model_fit_recommended">рекомендуется</string>
+    <string name="model_fit_heavy">тяжёлая, но пойдёт</string>
+    <string name="model_fit_too_large">очень большая</string>
+    <string name="model_catalog_stale">⚠ источник недоступен (проверено при запуске)</string>
+    <string name="model_ram_warning">Эта модель превышает бюджет памяти для вашего устройства. Скорее всего система принудительно закроет приложение во время генерации ответа — без сообщения об ошибке, просто закроется. Продолжить всё равно?</string>
+    <string name="model_ram_warning_continue">Всё равно использовать</string>
+    <string name="dialog_ok">Понятно</string>
+    <string name="settings_about">О сборке</string>
+    <string name="settings_about_body">Версия: %1$s (код %2$d)\nКоммит: %3$s\nCI-сборка: %4$s\n\nСравните коммит с тем, что было отправлено в чате, чтобы убедиться, что это именно та сборка.</string>
+    <string name="settings_about_cpu">Проверено llama.cpp на этом устройстве:\n%1$s</string>
+    <string name="settings_about_cpu_unavailable">llama.cpp недоступен на этом устройстве (не та архитектура процессора).</string>
+    <string name="dialog_cancel">Отмена</string>
+    <string name="settings_ram">Бюджет памяти на модель, % от общей RAM</string>
+    <string name="settings_ram_hint">60</string>
+    <string name="settings_hf_token">Токен Hugging Face (для закрытых репозиториев)</string>
+    <string name="models_device">Устройство</string>
+
+    <string name="settings_generation_header">Параметры генерации</string>
+    <string name="settings_generation_open">Параметры генерации</string>
+    <string name="settings_generation_hint">Влияют на то, как модель выбирает следующее слово: связность, разнообразие, склонность к повторам.</string>
+    <string name="settings_generation_intro">Модель на каждом шаге выбирает следующее слово из списка вариантов. Эти параметры управляют тем, насколько широко она смотрит и насколько охотно рискует. Если что-то испортилось — кнопка «Сбросить» внизу вернёт значения по умолчанию.</string>
+    <string name="settings_generation_reset">Сбросить к значениям по умолчанию</string>
+    <string name="settings_generation_reset_done">Значения по умолчанию восстановлены</string>
+
+    <string name="settings_temperature">Температура</string>
+    <string name="settings_temperature_hint">0.7</string>
+    <string name="settings_temperature_help">Диапазон: 0–2. По умолчанию 0.7.\nНасколько модель рискует при выборе слова. Ниже 0.5 — ответы точные и предсказуемые, но суховатые и повторяющиеся; выше 1.0 — живее и разнообразнее, но растёт риск выдумок и бессвязности. 0 — всегда самый вероятный вариант.\nЕсли ответы скучные и однообразные — поднимите до 0.8–1.0. Если модель «уплывает» и несёт чушь — опустите до 0.5–0.6.</string>
+
+    <string name="settings_top_p">Top-p (nucleus sampling)</string>
+    <string name="settings_top_p_hint">0.95</string>
+    <string name="settings_top_p_help">Диапазон: 0–1. По умолчанию 0.95.\nМодель рассматривает только самые вероятные слова, суммарная вероятность которых не превышает это значение. 0.95 — отбрасывается длинный «хвост» маловероятной чепухи, но выбор остаётся широким. 0.5 — только самые очевидные варианты.\nОбычно менять не нужно. Если ответы всё ещё странные при низкой температуре — попробуйте 0.9.</string>
+
+    <string name="settings_top_k">Top-k</string>
+    <string name="settings_top_k_hint">40</string>
+    <string name="settings_top_k_help">Диапазон: 0–200. По умолчанию 40. 0 — выключено.\nЖёсткое ограничение: сколько лучших вариантов вообще рассматривать. 40 означает «выбирай из 40 самых вероятных слов». Работает вместе с top-p — применяется то ограничение, которое строже.\nМеньше (10–20) — строже и предсказуемее, больше (80–100) — разнообразнее.</string>
+
+    <string name="settings_repeat_penalty">Штраф за повтор</string>
+    <string name="settings_repeat_penalty_hint">1.2</string>
+    <string name="settings_repeat_penalty_help">Диапазон: 1–2. По умолчанию 1.2. 1 — выключено.\nНасколько сильно модель избегает слов, которые уже недавно произносила. Без штрафа маленькие модели любят зацикливаться и повторять одну фразу до конца лимита.\nЕсли видите повторы или зацикливание — поднимите до 1.3–1.4. Слишком высокое значение (выше 1.5) ломает нормальную речь: модель начинает избегать даже нужных слов вроде предлогов.</string>
+
+    <string name="settings_context_tokens">Размер контекста, токенов</string>
+    <string name="settings_context_tokens_hint">4096</string>
+    <string name="settings_context_tokens_help">Обычные значения: 2048–8192. По умолчанию 4096. Только для локальных моделей.\nСколько текста модель держит «в голове»: история чата, фрагменты из файлов, системная инструкция. Примерно 1 токен ≈ 3–4 символа русского текста.\nБольше — модель помнит более длинный разговор, но каждая модель занимает заметно больше оперативной памяти, и на телефоне это прямой путь к вылету. Поднимайте только если памяти с запасом, и уменьшайте до 2048, если приложение падает на больших моделях.</string>
+
+    <string name="settings_max_tokens">Максимальная длина ответа, токенов</string>
+    <string name="settings_max_tokens_hint">1024</string>
+    <string name="settings_max_tokens_help">Диапазон: 64–4096. По умолчанию 1024.\nПотолок длины одного ответа — модель останавливается либо здесь, либо раньше, если сама сочла ответ законченным. Не влияет на то, сколько модель помнит, только на то, сколько может сказать за раз.\nУменьшите, если ответы слишком длинные или генерация ощутимо медленная. Увеличьте для задач, которым нужен долгий связный текст — но чем больше лимит, тем больше шанс, что маленькая модель к концу собьётся или зациклится.</string>
+
+    <string name="api_keys_hint">Несколько ключей для одного провайдера образуют пул. Приложение всегда использует первый ключ, который сейчас не на паузе. Если провайдер отвечает «дневная квота исчерпана», этот ключ автоматически ставится на паузу на 24 часа и приложение переходит к следующему ключу в списке — вместо того чтобы просто показать ошибку.</string>
+    <string name="api_keys_empty">Ключей пока нет — добавьте хотя бы один ниже.</string>
+    <string name="api_keys_new_hint">Новый ключ</string>
+    <string name="api_keys_add">Добавить</string>
+    <string name="api_keys_validate">Проверить</string>
+    <string name="api_keys_cooldown">на паузе до %1$s</string>
+    <string name="api_keys_not_checked">Не проверялся</string>
+    <string name="api_keys_checking">Проверяю…</string>
+    <string name="api_keys_valid">✓ Ключ рабочий</string>
+    <string name="api_keys_invalid">✗ Ключ отклонён провайдером</string>
+    <string name="api_keys_rate_limited">Провайдер ограничил частоту запросов — ключ может быть рабочим</string>
+    <string name="api_keys_unknown">Не удалось проверить (сеть или провайдер ответили неожиданно)</string>
+</resources>
