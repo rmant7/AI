@@ -108,6 +108,7 @@ android {
 dependencies {
     implementation(project(":core"))
     implementation(project(":openai"))
+    implementation(project(":whisper"))
 
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
@@ -127,9 +128,6 @@ dependencies {
     // Renders the assistant's markdown (lists, **bold**, code) as formatted
     // text instead of the raw asterisks and hashes an LLM's output is full of.
     implementation("io.noties.markwon:core:4.6.2")
-
-    // On-device speech-to-text (Whisper, TFLite).
-    implementation("org.tensorflow:tensorflow-lite:2.16.1")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")

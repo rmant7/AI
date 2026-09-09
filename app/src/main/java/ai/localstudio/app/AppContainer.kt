@@ -44,6 +44,7 @@ import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
+import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiException
@@ -231,13 +232,21 @@ class AppContainer private constructor(private val context: Context) {
      */
     val whisperPreviewEngine = WhisperEngine(whisperStore)
 
-    // The auto-download-Tiny-on-first-launch init block that used to live
-    // here is gone along with the mic button: Whisper's transcription
-    // quality wasn't good enough to justify a speech model competing for RAM
-    // with the local LLM it sits next to. Nothing in WhisperEngine loads a
-    // model until something actually calls transcribe(), so with the mic
-    // button hidden and no auto-download, Whisper now costs nothing at
-    // runtime unless it's re-enabled.
+    init {
+        // Restores voice input to something that works out of the box: with
+        // the old TFLite backend this auto-download was removed because
+        // transcription quality wasn't good enough to justify a speech model
+        // competing for RAM with the local LLM it sits next to. Now that
+        // transcription runs through whisper.cpp instead (see WhisperBridge),
+        // that's no longer true, and Tiny is small enough (75 MB) that
+        // fetching it automatically costs nothing worth gating behind a
+        // manual visit to Models. Nothing in WhisperEngine loads a model into
+        // RAM until something actually calls transcribe(), so this only ever
+        // costs disk space up front, never memory.
+        if (WhisperModels.SEEDS.none { whisperStore.isInstalled(it) }) {
+            whisperDownloads.start(WhisperModels.byId(WhisperModels.TINY_ID)!!)
+        }
+    }
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

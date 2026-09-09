@@ -9,7 +9,7 @@ class WhisperEngine(private val store: WhisperStore) {
     suspend fun transcribe(seed: WhisperModelSeed, audio: ByteArray): String {
         if (loadedSeedId != seed.id || transcriber == null) {
             transcriber?.release()
-            val loaded = WhisperTranscriber(store.modelFile(seed), store.vocabFile())
+            val loaded = WhisperTranscriber(store.modelFile(seed))
             loaded.initialize()
             transcriber = loaded
             loadedSeedId = seed.id

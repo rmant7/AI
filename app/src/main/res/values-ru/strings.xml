@@ -71,7 +71,7 @@
     <string name="settings_whisper_installed">Установлена: %1$s</string>
     <string name="settings_whisper_none">Не установлена</string>
     <string name="settings_whisper_error">Ошибка: %1$s</string>
-    <string name="settings_whisper_note">Распознавание работает офлайн через TensorFlow Lite. Один словарь подходит для всех размеров и всех языков — скачивается один раз вместе с первой моделью, отдельно ничего загружать не нужно.</string>
+    <string name="settings_whisper_note">Распознавание работает полностью офлайн через whisper.cpp. Каждая модель — один самодостаточный файл, ничего отдельно загружать не нужно, язык определяется автоматически.</string>
 
     <string name="settings_title">Настройки</string>
     <string name="settings_language">Язык</string>

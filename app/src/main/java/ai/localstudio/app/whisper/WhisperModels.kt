@@ -8,18 +8,21 @@ data class WhisperModelSeed(
 )
 
 /**
- * Sizes and URLs match VirtualClone's `Whisper_Sizes` branch — the same
- * community TFLite conversion of Whisper it used, hosted on the same host
- * every other model in this app is already fetched from.
+ * Official ggml conversions from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
+ * — the canonical source whisper.cpp's own download script points at, not a
+ * third party's one-off conversion. Each file is fully self-contained
+ * (weights, tokenizer and mel filters together), unlike the old TFLite path
+ * this replaced, which needed a separately-downloaded shared vocab.json.
+ *
+ * Medium and up use the q5_0-quantized release rather than the full fp16
+ * one: quantization is what makes "large" actually installable on a phone
+ * (2.9 GB fp16 vs 1.1 GB q5_0 for large-v3) rather than a menu entry nobody
+ * can afford to download. Tiny/base/small stay fp16 — already small enough
+ * that quantizing them buys little.
  */
 object WhisperModels {
 
-    /**
-     * Every multilingual Whisper checkpoint through large-v2 shares one
-     * tokenizer; there is exactly one vocabulary to fetch regardless of
-     * which size the user picks.
-     */
-    const val VOCAB_URL = "https://huggingface.co/openai/whisper-base/resolve/main/vocab.json"
+    private const val REPO = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
     /** Fast enough to re-run every second or two during recording for a live preview; also the auto-downloaded first-launch default. */
     const val TINY_ID = "whisper-tiny"
@@ -28,32 +31,41 @@ object WhisperModels {
         WhisperModelSeed(
             id = TINY_ID,
             title = "Whisper Tiny",
-            modelUrl = "https://huggingface.co/cik009/whisper/resolve/main/whisper-tiny.tflite",
+            modelUrl = "$REPO/ggml-tiny.bin",
             approxSizeBytes = 75_000_000,
         ),
         WhisperModelSeed(
             id = "whisper-base",
             title = "Whisper Base",
-            modelUrl = "https://huggingface.co/cik009/whisper/resolve/main/whisper-base.tflite",
-            approxSizeBytes = 145_000_000,
+            modelUrl = "$REPO/ggml-base.bin",
+            approxSizeBytes = 142_000_000,
         ),
         WhisperModelSeed(
             id = "whisper-small",
             title = "Whisper Small",
-            modelUrl = "https://huggingface.co/cik009/whisper/resolve/main/whisper-small.tflite",
-            approxSizeBytes = 480_000_000,
+            modelUrl = "$REPO/ggml-small.bin",
+            approxSizeBytes = 466_000_000,
         ),
         WhisperModelSeed(
             id = "whisper-medium",
             title = "Whisper Medium",
-            modelUrl = "https://huggingface.co/cik009/whisper/resolve/main/whisper-medium.tflite",
-            approxSizeBytes = 1_500_000_000,
+            modelUrl = "$REPO/ggml-medium-q5_0.bin",
+            approxSizeBytes = 539_000_000,
+        ),
+        // The distilled-decoder large: most of large-v3's accuracy, several
+        // times faster — the practical way to get "large" quality on a phone
+        // without also accepting large-v3's own decode speed.
+        WhisperModelSeed(
+            id = "whisper-large-turbo",
+            title = "Whisper Large v3 Turbo",
+            modelUrl = "$REPO/ggml-large-v3-turbo-q5_0.bin",
+            approxSizeBytes = 574_000_000,
         ),
         WhisperModelSeed(
             id = "whisper-large",
-            title = "Whisper Large",
-            modelUrl = "https://huggingface.co/cik009/whisper/resolve/main/whisper-large.tflite",
-            approxSizeBytes = 3_000_000_000,
+            title = "Whisper Large v3",
+            modelUrl = "$REPO/ggml-large-v3-q5_0.bin",
+            approxSizeBytes = 1_181_000_000,
         ),
     )
 

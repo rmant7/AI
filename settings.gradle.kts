@@ -24,4 +24,5 @@ val hasAndroidSdk = System.getenv("ANDROID_HOME") != null ||
 
 if (hasAndroidSdk) {
     include(":app")
+    include(":whisper")
 }

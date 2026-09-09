@@ -69,7 +69,7 @@
     <string name="settings_whisper_installed">Installed: %1$s</string>
     <string name="settings_whisper_none">Not installed</string>
     <string name="settings_whisper_error">Error: %1$s</string>
-    <string name="settings_whisper_note">Recognition works offline via TensorFlow Lite. One vocabulary works for every size and every language — it downloads once with the first model, nothing separate to download.</string>
+    <string name="settings_whisper_note">Recognition works fully offline via whisper.cpp. Each model is a single self-contained download — no separate files needed, and it detects the spoken language automatically.</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_language">Language</string>
