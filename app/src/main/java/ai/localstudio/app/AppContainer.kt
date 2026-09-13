@@ -219,6 +219,26 @@ class AppContainer private constructor(private val context: Context) {
     // rather than guess by matching text.
     private val documentMemoryIds = mutableMapOf<String, List<String>>()
 
+    /**
+     * Backs [ExperimentalEmbeddingsActivity] — a phone-only (no adb) way to
+     * download and sanity-check a candidate [ai.localstudio.memory.MemoryEmbedder]
+     * model. Entirely separate from [downloads]/[modelStore]: nothing here
+     * ever feeds [LocalModels] or the chat-model registry, see
+     * ExperimentalEmbeddingModels' own doc comment for why that stays true
+     * until a candidate is actually verified.
+     *
+     * Declared here, before [init] rather than in its more natural spot
+     * further down near [modelStore] — [init]'s own background task reads
+     * this from a coroutine dispatched on Dispatchers.IO, which can start
+     * running concurrently with the rest of this very constructor, on a
+     * different thread, before construction finishes. A property declared
+     * *after* [init] in the source is not guaranteed initialized by the time
+     * such a coroutine runs; this crashed with a real
+     * NullPointerException on `experimentalEmbeddingStore.isInstalled(...)`
+     * for exactly that reason before this property moved up here.
+     */
+    val experimentalEmbeddingStore = ExperimentalEmbeddingStore(context)
+
     init {
         // Must run before sync() below: a cooldown sync() would otherwise
         // preserve as "unchanged" is exactly what this clears. One-time
@@ -444,15 +464,6 @@ class AppContainer private constructor(private val context: Context) {
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
 
-    /**
-     * Backs [ExperimentalEmbeddingsActivity] — a phone-only (no adb) way to
-     * download and sanity-check a candidate [ai.localstudio.memory.MemoryEmbedder]
-     * model. Entirely separate from [downloads]/[modelStore]: nothing here
-     * ever feeds [LocalModels] or the chat-model registry, see
-     * ExperimentalEmbeddingModels' own doc comment for why that stays true
-     * until a candidate is actually verified.
-     */
-    val experimentalEmbeddingStore = ExperimentalEmbeddingStore(context)
     val experimentalEmbeddingDownloads = ExperimentalEmbeddingDownloads(
         experimentalEmbeddingStore,
         tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
