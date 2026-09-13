@@ -1,6 +1,7 @@
 package ai.localstudio.core.memory
 
 import ai.localstudio.core.runtime.ANSWERED_BY_LABEL
+import ai.localstudio.memory.FileMemoryStore
 import ai.localstudio.memory.MemoryExtractor
 import ai.localstudio.memory.MemoryItem
 import ai.localstudio.memory.MemoryScope
@@ -56,10 +57,28 @@ class LlmMemoryExtractor(
             .filter { it.isNotBlank() && !ATTRIBUTION_LINE.matches(it) }
             .map { it.replaceFirst(BULLET_MARKER, "").replace(LIST_MARKER, "").trim() }
             .filter { it.isNotBlank() && !it.equals(NOTHING_MARKER, ignoreCase = true) }
-            .map { fact -> MemoryItem(id = "", text = fact, scope = MemoryScope.EPISODIC, createdAt = 0L) }
+            .map { fact ->
+                MemoryItem(
+                    id = "",
+                    text = fact,
+                    scope = MemoryScope.EPISODIC,
+                    createdAt = 0L,
+                    // Lets a deleted conversation's own consolidated memory be
+                    // found and forgotten too (see AppContainer.forgetConversationMemory) —
+                    // without this, deleting a chat from history left whatever
+                    // it had already been distilled into permanently behind.
+                    metadata = mapOf(FileMemoryStore.CONVERSATION_KEY to conversationId),
+                )
+            }
             .toList()
 
-        log("conversation=$conversationId working=${workingMemory.size} response=${response.length}chars facts=${facts.size}")
+        // The raw response, not just its length: a length alone was already
+        // ambiguous once (a legitimate "НЕТ" + attribution footer looks the
+        // same length-wise as plenty of other short-but-wrong outputs), and
+        // guessing the model's actual words after the fact wastes a whole
+        // round trip that logging them directly avoids.
+        val preview = response.replace("\n", "\\n").take(300)
+        log("conversation=$conversationId working=${workingMemory.size} facts=${facts.size} response=\"$preview\"")
         return facts
     }
 
@@ -80,15 +99,24 @@ class LlmMemoryExtractor(
         val PROMPT_PREFIX = """
             Ниже — реплики одного разговора. Выпиши, по одной на строке, то,
             что стоит запомнить для будущих разговоров: факты, решения,
-            предпочтения пользователя, а также — если разговор был
-            содержательным — краткую суть темы и уже данного ответа
-            (например: "Пользователь просил рецепты низкокалорийных
-            десертов; было предложено: желе, фруктовый салат, запечённые
-            яблоки"), чтобы в новом разговоре не переспрашивать то же самое
-            и не повторяться. Не придумывай ничего, чего не было сказано, и
-            не пересказывай длинные ответы дословно — только суть в одной
-            строке на пункт. Если разговор был совсем пустым и запоминать
-            точно нечего, выведи ровно одну строку: НЕТ.
+            предпочтения пользователя.
+
+            Дополнительно, обязательно, даже если пользователь просто о
+            чём-то спросил или что-то попросил (например, рецепты,
+            инструкцию, список, объяснение) и получил обычный ответ по
+            существу — выпиши отдельной строкой краткую суть: что именно
+            просили и что было предложено (например: "Пользователь просил
+            рецепты низкокалорийных десертов; было предложено: желе,
+            фруктовый салат, запечённые яблоки"). Это нужно, чтобы в новом
+            разговоре не переспрашивать то же самое и не повторяться — не
+            пропускай эту строку просто потому, что запрос выглядит
+            рутинным или не содержит новых "фактов".
+
+            Не придумывай ничего, чего не было сказано, и не пересказывай
+            длинные ответы дословно — только суть в одной строке на пункт.
+            Выведи ровно одну строку "НЕТ" только если разговор был чистым
+            приветствием/благодарностью/светской репликой без единого
+            реального вопроса или просьбы.
 
             Реплики:
 

@@ -10,12 +10,15 @@ import android.view.ViewGroup
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import ai.localstudio.app.databinding.ActivityHistoryBinding
 import ai.localstudio.app.databinding.ItemConversationBinding
 import ai.localstudio.app.history.ChatHistoryStore
 import ai.localstudio.app.history.Conversation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -34,6 +37,7 @@ class HistoryActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityHistoryBinding
     private lateinit var history: ChatHistoryStore
+    private lateinit var container: AppContainer
     private val adapter = ConversationAdapter(::open, ::rename, ::confirmDelete)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,6 +49,7 @@ class HistoryActivity : AppCompatActivity() {
         setTitle(R.string.menu_history)
 
         history = ChatHistoryStore(this)
+        container = AppContainer.get(this)
         binding.conversations.layoutManager = LinearLayoutManager(this)
         binding.conversations.adapter = adapter
 
@@ -95,6 +100,15 @@ class HistoryActivity : AppCompatActivity() {
             .setMessage(getString(R.string.history_delete_confirm, conversation.displayTitle))
             .setPositiveButton(R.string.history_delete) { _, _ ->
                 history.delete(conversation.id)
+                // The transcript is gone, but anything this conversation had
+                // already been consolidated into (or raw working-memory turns
+                // that never got consolidated at all) lives in a separate
+                // store and does not go away on its own — without this, a
+                // "deleted" conversation could keep surfacing in later chats
+                // via memory search.
+                lifecycleScope.launch(Dispatchers.IO) {
+                    container.forgetConversationMemory(conversation.id)
+                }
                 // Told about it even when it is not the chat on screen: the
                 // chat screen has to drop the conversation it is holding if
                 // this was it, rather than carry on writing to a file that

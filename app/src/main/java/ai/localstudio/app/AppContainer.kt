@@ -20,6 +20,7 @@ import ai.localstudio.core.memory.LlmMemoryExtractor
 import ai.localstudio.core.pipeline.NodeValue
 import ai.localstudio.core.pipeline.PipelineCodec
 import ai.localstudio.memory.FileMemoryStore
+import ai.localstudio.memory.MemoryQuery
 import ai.localstudio.memory.MemoryScope
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.InstallState
@@ -262,6 +263,28 @@ class AppContainer private constructor(private val context: Context) {
         val ids = synchronized(documentMemoryIds) { documentMemoryIds.remove(id) }
         ids?.forEach { memoryId -> memory.forget(memoryId) }
         documents.remove(id)
+    }
+
+    /**
+     * Deleting a conversation from history only ever removed its transcript
+     * file (see ChatHistoryStore.delete) — anything already consolidated
+     * into durable memory (LlmMemoryExtractor tags every fact it produces
+     * with this same conversationId) survived that deletion untouched and
+     * kept surfacing in later, unrelated chats. Every scope is searched, not
+     * just EPISODIC/SEMANTIC: an un-consolidated conversation's raw WORKING
+     * turns should go with it too, not linger forever as an unreachable
+     * orphan (search()'s default scopes already exclude WORKING, so it was
+     * never visible, just never cleaned up either).
+     */
+    suspend fun forgetConversationMemory(conversationId: String) = withContext(Dispatchers.IO) {
+        memory.search(
+            MemoryQuery(
+                text = "",
+                scopes = MemoryScope.entries.toSet(),
+                metadataFilter = mapOf(FileMemoryStore.CONVERSATION_KEY to conversationId),
+                limit = CONVERSATION_MEMORY_FORGET_LIMIT,
+            ),
+        ).forEach { item -> memory.forget(item.id) }
     }
 
     /** Recomputed on demand: free memory moves, and the budget is user-settable. */
@@ -970,6 +993,11 @@ class AppContainer private constructor(private val context: Context) {
         // A local model's own output length, capped independently of
         // settings.maxResponseTokens — see its call site in buildOrchestrator().
         private const val LOCAL_MAX_OUTPUT_TOKENS = 512
+
+        // Not a real ceiling, just "large enough that a single conversation's
+        // worth of memory items is never left behind" — see
+        // forgetConversationMemory().
+        private const val CONVERSATION_MEMORY_FORGET_LIMIT = 10_000
 
         @Volatile
         private var instance: AppContainer? = null
