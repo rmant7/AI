@@ -69,6 +69,10 @@ android {
         buildConfigField("String", "CI_RUN", "\"$ciRun\"")
         buildConfigField("String", "GROQ_BUNDLED_KEYS", "\"${bundledKeys("GROQ_API_KEY")}\"")
         buildConfigField("String", "GEMINI_BUNDLED_KEYS", "\"${bundledKeys("GEMINI_API_KEY")}\"")
+        // The "key" bundled here is GigaChat's OAuth "authorization key"
+        // (base64 client_id:client_secret), not a bearer token — see
+        // GigaChatTokenProvider for why that distinction matters.
+        buildConfigField("String", "GIGACHAT_BUNDLED_KEYS", "\"${bundledKeys("GIGACHAT_API_KEY")}\"")
 
         ndk {
             // arm64 is every phone worth running a model on; x86_64 exists so

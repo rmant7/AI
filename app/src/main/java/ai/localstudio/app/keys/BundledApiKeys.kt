@@ -18,6 +18,7 @@ object BundledApiKeys {
     private fun encodedFor(providerId: String): String = when (providerId) {
         "groq" -> BuildConfig.GROQ_BUNDLED_KEYS
         "gemini" -> BuildConfig.GEMINI_BUNDLED_KEYS
+        "gigachat" -> BuildConfig.GIGACHAT_BUNDLED_KEYS
         else -> ""
     }
 

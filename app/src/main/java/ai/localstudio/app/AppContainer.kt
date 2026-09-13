@@ -48,6 +48,7 @@ import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
+import ai.localstudio.openai.GigaChatTokenProvider
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiException
 import ai.localstudio.openai.OpenAiRuntime
@@ -130,6 +131,7 @@ class AppContainer private constructor(private val context: Context) {
         // later build ever reaches an existing install.
         BundledApiKeys.sync(bundledApiKeyStore, "groq")
         BundledApiKeys.sync(bundledApiKeyStore, "gemini")
+        BundledApiKeys.sync(bundledApiKeyStore, "gigachat")
 
         // Checked once per process, before anything else has a chance to
         // throw: this is the one place a *native* crash (a segfault in
@@ -450,7 +452,16 @@ class AppContainer private constructor(private val context: Context) {
     private val compareOrchestrators = mutableMapOf<String, Orchestrator>()
     private val compareSignatures = mutableMapOf<String, String>()
 
-    fun compareCandidates(): List<Pair<String, Orchestrator>> =
+    /**
+     * One Compare-mode bubble's source. [isLocal] drives whether
+     * [ai.localstudio.app.ChatActivity] streams this source's answer token by
+     * token or waits for the full response — a cloud call is fast enough
+     * end-to-end that progressive rendering only adds visual noise, while a
+     * local model can take minutes and needs the incremental feedback.
+     */
+    data class CompareSource(val label: String, val orchestrator: Orchestrator, val isLocal: Boolean)
+
+    fun compareCandidates(): List<CompareSource> =
         enabledProviders().mapNotNull { provider ->
             val candidates = if (provider.id == CloudProviders.LOCAL.id) {
                 listOfNotNull(localCandidate())
@@ -458,7 +469,10 @@ class AppContainer private constructor(private val context: Context) {
                 cloudCandidates(provider)
             }
             if (candidates.isEmpty()) return@mapNotNull null
-            val runtime: ModelRuntime = candidates.singleOrNull()?.runtime ?: FallbackTextRuntime(candidates)
+            // Always wrapped, even for a single candidate: this is what gives
+            // every Compare-mode bubble the "Ответ от: <model> · <elapsed>"
+            // footer, not just chains with a fallback to name.
+            val runtime: ModelRuntime = FallbackTextRuntime(candidates)
             // The specific model that answered is still named, by
             // FallbackTextRuntime's own "Ответ от:" footer — this is just the
             // bubble's heading, which should stay the provider for a chain
@@ -500,7 +514,7 @@ class AppContainer private constructor(private val context: Context) {
                 compareOrchestrators[provider.id] = it
                 compareSignatures[provider.id] = signature
             }
-            label to orchestrator
+            CompareSource(label, orchestrator, isLocalOnly)
         }
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
@@ -615,6 +629,9 @@ class AppContainer private constructor(private val context: Context) {
      * every single message, which is what turned "one model is down" into
      * "every reply takes 20+ seconds".
      */
+    /** Shared so its token cache (keyed by authorization key) survives across turns — see its own doc comment. */
+    private val gigaChatTokenProvider = GigaChatTokenProvider()
+
     private fun cloudCandidates(provider: CloudProvider): List<FallbackCandidate> {
         val endpoint = if (provider.editableUrl) settings.customEndpoint else provider.baseUrl
         if (endpoint.isBlank()) return emptyList()
@@ -623,6 +640,7 @@ class AppContainer private constructor(private val context: Context) {
                 baseUrl = endpoint,
                 apiKey = settings.apiKeyFor(provider.id).ifBlank { null },
                 keyRotator = apiKeyRotator(provider.id),
+                transformKey = if (provider.id == "gigachat") gigaChatTokenProvider::token else null,
             ),
         )
         val primaryModel = settings.chatModelFor(provider.id)
@@ -632,7 +650,13 @@ class AppContainer private constructor(private val context: Context) {
             val model = servedModel(modelName, RuntimeKind.REMOTE_OPENAI, Capability.TEXT_GENERATION, Capability.REASONING)
             val providerTitle = context.getString(provider.titleRes)
             FallbackCandidate(
-                label = if (modelName == primaryModel) providerTitle else "$providerTitle ($modelName)",
+                // Always the specific model, even for the primary one: the
+                // attribution footer this label ends up in (see
+                // FallbackTextRuntime) is the only place the user can tell
+                // *which* of a provider's free-tier models actually
+                // answered, and "Groq" alone answers a different question
+                // than "which Groq model" does.
+                label = "$providerTitle ($modelName)",
                 runtime = runtime,
                 model = model,
                 binding = model.bindings.first(),
@@ -761,6 +785,19 @@ class AppContainer private constructor(private val context: Context) {
         get() = enabledProviders().takeIf { it.isNotEmpty() }
             ?.joinToString(" → ") { context.getString(it.titleRes) }
             ?: context.getString(CloudProviders.DEMO.titleRes)
+
+    /**
+     * Whether the route [orchestrator] last built is local-only — every
+     * candidate in it runs on-device, with no cloud fallback configured.
+     * [ChatActivity] uses this to decide whether a turn's answer should
+     * stream in as it's produced: worth it for a local model that can take
+     * minutes, but a cloud candidate answers in seconds, so live partial
+     * renders there add redraw churn without buying anything. Reads
+     * [lastCandidates] rather than rebuilding — call [orchestrator] first so
+     * this reflects the route about to actually run.
+     */
+    val isLocalOnlyRoute: Boolean
+        get() = lastCandidates.isNotEmpty() && lastCandidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP }
 
     private fun servedModel(
         id: String,

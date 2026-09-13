@@ -42,6 +42,17 @@ data class OpenAiConfig(
      * configured, and for embeddings/transcription, which this does not cover.
      */
     val keyRotator: ApiKeyRotator? = null,
+    /**
+     * Applied to whatever key [keyRotator]/[apiKey] resolved to, right before
+     * it goes in the Authorization header — the seam a provider whose
+     * "key" isn't directly usable as a bearer token hooks into. GigaChat is
+     * the one provider this app targets that needs it: what the user has is
+     * an OAuth client-credentials "authorization key," not a bearer token,
+     * and exchanging it for one is exactly this function's job (see
+     * GigaChatTokenProvider). Every other provider leaves this null and the
+     * resolved key is used as-is, unchanged from before this existed.
+     */
+    val transformKey: (suspend (String) -> String)? = null,
     val connectTimeoutMs: Int = 15_000,
     /**
      * Generous on purpose: a large model on modest hardware can take minutes to
@@ -231,7 +242,9 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                     )
                 }
                 try {
-                    http.postJsonStreaming(url("/chat/completions"), body, keyEntry?.key ?: config.apiKey).use { response ->
+                    val rawKey = keyEntry?.key ?: config.apiKey
+                    val authKey = config.transformKey?.let { transform -> rawKey?.let { transform(it) } } ?: rawKey
+                    http.postJsonStreaming(url("/chat/completions"), body, authKey).use { response ->
                         val reader = response.reader()
                         while (true) {
                             if (cancelled.get()) return@use

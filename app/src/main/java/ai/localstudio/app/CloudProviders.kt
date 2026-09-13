@@ -64,6 +64,20 @@ object CloudProviders {
         LOCAL,
         DEMO,
         CloudProvider(
+            id = "groq",
+            titleRes = R.string.provider_title_groq,
+            baseUrl = "https://api.groq.com/openai/v1",
+            defaultModel = "openai/gpt-oss-120b",
+            keyHintRes = R.string.provider_keyhint_groq,
+            freeModels = listOf(
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.6-27b",
+                "meta-llama/llama-4-scout-17b-16e-instruct",
+                "meta-llama/llama-4-maverick-17b-128e-instruct",
+            ),
+        ),
+        CloudProvider(
             id = "gemini",
             titleRes = R.string.provider_title_gemini,
             baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -82,6 +96,25 @@ object CloudProviders {
             visionCapable = true,
         ),
         CloudProvider(
+            id = "gigachat",
+            titleRes = R.string.provider_title_gigachat,
+            baseUrl = "https://gigachat.devices.sberbank.ru/api/v1",
+            defaultModel = "GigaChat-2",
+            keyHintRes = R.string.provider_keyhint_gigachat,
+            // Model names and free-tier availability are unverified against
+            // a live account — GigaChat's own endpoints are unreachable from
+            // this app's build/dev environment (blocked at the network
+            // level there), so this list is taken from GigaChat's published
+            // catalogue rather than confirmed by an actual successful call.
+            // The model field stays editable, same as every other provider
+            // here, for exactly this kind of drift.
+            freeModels = listOf(
+                "GigaChat-2",
+                "GigaChat-2-Pro",
+                "GigaChat-2-Max",
+            ),
+        ),
+        CloudProvider(
             id = "mistral",
             titleRes = R.string.provider_title_mistral,
             baseUrl = "https://api.mistral.ai/v1",
@@ -93,20 +126,6 @@ object CloudProviders {
                 "ministral-8b-latest",
                 "mistral-large-latest",
                 "codestral-latest",
-            ),
-        ),
-        CloudProvider(
-            id = "groq",
-            titleRes = R.string.provider_title_groq,
-            baseUrl = "https://api.groq.com/openai/v1",
-            defaultModel = "openai/gpt-oss-120b",
-            keyHintRes = R.string.provider_keyhint_groq,
-            freeModels = listOf(
-                "openai/gpt-oss-120b",
-                "openai/gpt-oss-20b",
-                "qwen/qwen3.6-27b",
-                "meta-llama/llama-4-scout-17b-16e-instruct",
-                "meta-llama/llama-4-maverick-17b-128e-instruct",
             ),
         ),
         CloudProvider(

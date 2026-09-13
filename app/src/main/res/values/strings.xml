@@ -203,6 +203,8 @@
     <string name="provider_keyhint_mistral">Key: console.mistral.ai → API keys. The free Experiment tier gives rate-limited access to every model.</string>
     <string name="provider_title_groq">Groq</string>
     <string name="provider_keyhint_groq">Key: console.groq.com → API keys. Free, no card — limited to a daily request quota.</string>
+    <string name="provider_title_gigachat">GigaChat (Sber)</string>
+    <string name="provider_keyhint_gigachat">Key: developers.sber.ru/studio → your project → API Settings → Get Key. Paste the \"Authorization key\" field shown there — NOT the Client ID or Client Secret next to it, those won\'t work here. Also requires installing the Russian Trusted Root CA certificate on this device (Settings → Security → Install a certificate) — GigaChat\'s servers won\'t connect without it.</string>
     <string name="provider_title_xai">xAI Grok</string>
     <string name="provider_keyhint_xai">Key: console.x.ai. No free models — sign-up grants $25 of credit, then it\'s paid.</string>
     <string name="provider_title_openrouter">OpenRouter</string>
