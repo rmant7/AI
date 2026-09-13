@@ -47,6 +47,34 @@ data class FallbackCandidate(
      * class needing to know what that failure type even is.
      */
     val onFailure: ((Throwable) -> Unit)? = null,
+    /**
+     * Consulted right before this candidate would be attempted; returning
+     * true skips it — recorded as an ordinary failure, so the chain still
+     * moves on to whatever comes after it — without ever calling [load] or
+     * [runtime]'s generate. The caller's own escape hatch for "this
+     * candidate's failure means every other candidate sharing something
+     * with it will fail identically": an HTTP 413 (request too large) from
+     * one of a provider's free-tier models means every sibling model on
+     * that same provider will reject the same oversized prompt too, so
+     * trying each of them in turn before finally reaching a different
+     * provider wastes a full round trip per sibling for a failure that's
+     * already certain.
+     */
+    val shouldSkip: (() -> Boolean)? = null,
+    /**
+     * Whether this candidate accepts an attached image at all. Checked only
+     * when [GenerationRequest.images] is non-empty for a given turn — a
+     * text-only turn against a text-only candidate is unaffected either way
+     * — so unlike [shouldSkip] this needs no per-candidate closure: it is a
+     * static fact about the model, known at construction time, not something
+     * that changes turn to turn. True by default, preserving this class's
+     * original behavior for every candidate that predates this field: send
+     * the image and let an unsupported model reject it with its own error.
+     * Set to false only where that rejection was confirmed to actually
+     * happen — see the caller that builds this candidate (CloudProviders'
+     * own visionModels, in the app module) for which ones and why.
+     */
+    val supportsImages: Boolean = true,
 )
 
 /**
@@ -109,6 +137,14 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
         val turnStart = System.currentTimeMillis()
         val failures = mutableListOf<String>()
         for ((index, candidate) in candidates.withIndex()) {
+            if (candidate.shouldSkip?.invoke() == true) {
+                failures += "${candidate.label}: skipped"
+                continue
+            }
+            if (request.images.isNotEmpty() && !candidate.supportsImages) {
+                failures += "${candidate.label}: doesn't support images"
+                continue
+            }
             val handle = try {
                 loaded.getOrPut(index) {
                     candidate.runtime.load(candidate.model, candidate.binding) as? TextModelHandle

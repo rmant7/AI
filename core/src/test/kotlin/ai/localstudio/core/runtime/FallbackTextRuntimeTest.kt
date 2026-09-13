@@ -2,6 +2,7 @@ package ai.localstudio.core.runtime
 
 import ai.localstudio.core.binding
 import ai.localstudio.core.model
+import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import kotlinx.coroutines.CancellationException
@@ -242,5 +243,71 @@ class FallbackTextRuntimeTest {
             !cloudWasTried,
             "cancelling generation must stop the chain, not silently move on to the next candidate",
         )
+    }
+
+    @Test
+    fun `a candidate whose shouldSkip returns true is never loaded or generated from`() = runBlocking {
+        var loadedSkipped = false
+        val skippable = FakeTextRuntime { succeeding("should never be reached") }
+        val runtime = FallbackTextRuntime(
+            listOf(
+                FallbackCandidate(
+                    label = "groq-sibling",
+                    runtime = object : ModelRuntime by skippable {
+                        override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel {
+                            loadedSkipped = true
+                            return skippable.load(model, binding)
+                        }
+                    },
+                    model = model("groq-sibling"),
+                    binding = binding(),
+                    shouldSkip = { true },
+                ),
+                candidate("cloud") { succeeding("a different provider answered") },
+            ),
+        )
+
+        val handle = runtime.load(model("m"), binding()) as TextModelHandle
+        val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
+
+        assertTrue(!loadedSkipped, "a skipped candidate must never be loaded")
+        assertTrue(text.startsWith("a different provider answered"))
+        assertTrue(text.contains("groq-sibling: skipped"), "the skip should still show up in the failure trail: $text")
+    }
+
+    @Test
+    fun `a candidate without image support is skipped only when the request actually has an image`() = runBlocking {
+        var textOnlyWasTried = false
+        val runtime = FallbackTextRuntime(
+            listOf(
+                FallbackCandidate(
+                    label = "text-only",
+                    runtime = FakeTextRuntime {
+                        textOnlyWasTried = true
+                        succeeding("text-only answered")
+                    },
+                    model = model("text-only"),
+                    binding = binding(),
+                    supportsImages = false,
+                ),
+                candidate("vision") { succeeding("vision model answered") },
+            ),
+        )
+        val handle = runtime.load(model("m"), binding()) as TextModelHandle
+
+        // No image attached: the text-only candidate is perfectly usable and
+        // must still win, same as if this field didn't exist.
+        val plainText = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
+        assertTrue(plainText.startsWith("text-only answered"))
+        assertTrue(textOnlyWasTried)
+
+        // An image attached: the same candidate must now be skipped in favor
+        // of the one that actually supports it.
+        textOnlyWasTried = false
+        val imageText = handle.generate(GenerationRequest(prompt = "hi", images = listOf(ImageRef(uri = "data:image/png;base64,abc"))))
+            .toList().joinToString("")
+        assertTrue(!textOnlyWasTried, "a candidate without image support must not be attempted when an image is attached")
+        assertTrue(imageText.startsWith("vision model answered"))
+        assertTrue(imageText.contains("text-only: doesn't support images"), "the skip reason should show up in the failure trail: $imageText")
     }
 }
