@@ -11,7 +11,8 @@ lives, published separately, as
 suite was added and `consolidate()` was hardened against a throwing
 extractor, duplicate/WORKING-scoped extractor output, and concurrent
 `consolidate()` calls for the same conversation — see that repo's own commit
-history for the detail. Both `:core` and `:commercial-memory` now depend on:
+history for the detail. `:core` and `:commercial-memory` depend on it
+directly:
 
 ```kotlin
 repositories {
@@ -23,6 +24,16 @@ dependencies {
     api("com.github.rmant7:Mobile_mem0:v0.1.0")             // :core
 }
 ```
+
+`:openai` and `:app` also declare the same `jitpack.io` repository even
+though neither depends on Mobile_mem0 directly — each depends on `:core`
+(`:openai` via `api(project(":core"))`, `:app` via `implementation`), and
+Gradle resolves every module's own `compileClasspath` against *that
+module's own* `repositories {}` block, not whatever a `project()`
+dependency's build script declared. Skipping this on either one fails with
+`Could not find com.github.rmant7:Mobile_mem0:v0.1.0` at compile time — not
+a hypothetical, this is exactly what the first CI run against this branch's
+switch to the artifact hit.
 
 **Both must depend on the exact same artifact/version, not just similar
 ones.** `NodeExecutors` (in `:core`) passes its own `MemoryProvider` instance
@@ -51,9 +62,14 @@ this repo entirely is a separate decision, deliberately not made here.
 
 ## What this means for `main`
 
-This switch was made on `commercial-memory-layer-v1` only. `main` (and
-`:app`/`:core` as shipped) still depend on `:memory` in-tree — moving the
-rest of the app onto the published artifact too is the same "bigger
-decision" this document flagged before the tag existed, and still isn't
-made here. Do not assume this branch's `build.gradle.kts` state reflects
-what should ship from `main`.
+This switch was made on `mem0` (formerly `commercial-memory-layer-v1`) only.
+`main` (and `:app`/`:core` as shipped) still depend on `:memory` in-tree —
+moving the rest of the app onto the published artifact too is the same
+"bigger decision" this document flagged before the tag existed, and still
+isn't made here. Do not assume this branch's `build.gradle.kts` state
+reflects what should ship from `main`.
+
+This branch also builds under a different `applicationId`
+(`ai.localstudio.app.mem0`, vs. main's `ai.localstudio.app`) specifically so
+it can be installed on the same device as a build from `main` at the same
+time, without one overwriting the other.

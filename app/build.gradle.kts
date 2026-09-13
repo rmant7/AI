@@ -63,7 +63,13 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "ai.localstudio.app"
+        // Deliberately different from :app's own namespace (which stays
+        // "ai.localstudio.app" — that's the source package, unrelated to
+        // installability) and from main's own applicationId: this is what
+        // actually lets Android treat this build as a separate app, so it
+        // installs and runs alongside a build from main rather than
+        // overwriting it.
+        applicationId = "ai.localstudio.app.mem0"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
