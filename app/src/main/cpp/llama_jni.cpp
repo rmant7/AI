@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -492,6 +493,189 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     LOGE("nativeLoad: unknown exception");
     return 0;
   }
+}
+
+/**
+ * Loads a GGUF as an embedding model rather than a chat model: the context is
+ * configured with embeddings enabled and mean pooling — what encoder-style
+ * text-embedding checkpoints (e5, bge, and similar) are trained to produce —
+ * instead of nativeLoad's causal-generation setup. A separate function
+ * rather than a parameter added to nativeLoad: this repo's chat-generation
+ * path and a one-shot embedding session share nothing beyond both loading a
+ * GGUF, and every existing nativeLoad call site is untouched by adding this
+ * instead of changing it.
+ *
+ * The batch/context size is deliberately capped far below nativeLoad's chat
+ * ceiling: embedding inputs here are one memory fact or one query, never a
+ * resent multi-turn conversation, and llama.cpp requires n_batch == n_ubatch
+ * for a non-causal model (see the upstream embedding example) — both sized
+ * to n_ctx up front, so every call in nativeEmbed fits in one llama_decode
+ * with no chunking logic to get wrong.
+ */
+JNIEXPORT jlong JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadEmbeddingModel(
+    JNIEnv *env, jobject, jstring modelPath, jint contextTokens, jint threads) {
+  try {
+    static std::atomic<bool> backendReady{false};
+    if (!backendReady.exchange(true)) {
+        llama_backend_init();
+        llama_log_set([](ggml_log_level level, const char *text, void *) {
+            if (level >= GGML_LOG_LEVEL_ERROR) LOGE("%s", text);
+        }, nullptr);
+    }
+
+    const std::string path = toStdString(env, modelPath);
+
+    llama_model_params modelParams = llama_model_default_params();
+    modelParams.n_gpu_layers = 0;
+    modelParams.load_mode = LLAMA_LOAD_MODE_MMAP;
+
+    llama_model *model = llama_model_load_from_file(path.c_str(), modelParams);
+    if (model == nullptr) {
+        LOGE("nativeLoadEmbeddingModel: failed to load model from %s", path.c_str());
+        return 0;
+    }
+
+    llama_context_params contextParams = llama_context_default_params();
+    const int32_t clampedContextTokens = std::min(std::max(contextTokens, 128), 2048);
+    contextParams.n_ctx = (uint32_t) clampedContextTokens;
+    // Must equal n_ubatch for a non-causal model, and cover the whole input
+    // in one call — see this function's own doc comment.
+    contextParams.n_batch = (uint32_t) clampedContextTokens;
+    contextParams.n_ubatch = (uint32_t) clampedContextTokens;
+    contextParams.n_threads = threads;
+    contextParams.n_threads_batch = threads;
+    contextParams.embeddings = true;
+    // The standard choice for sentence/passage embedding models. llama.cpp
+    // otherwise falls back to whatever the GGUF's own metadata specifies,
+    // which for some checkpoints is NONE (per-token, not pooled) — that
+    // would make llama_get_embeddings_seq in nativeEmbed always return null.
+    contextParams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+
+    llama_context *ctx = llama_init_from_model(model, contextParams);
+    if (ctx == nullptr) {
+        LOGE("nativeLoadEmbeddingModel: failed to create context");
+        llama_model_free(model);
+        return 0;
+    }
+
+    auto *session = new Session();
+    session->model = model;
+    session->ctx = ctx;
+    session->vocab = llama_model_get_vocab(model);
+    LOGI("loaded embedding model %s, n_ctx=%u, n_embd=%d, threads=%d",
+         path.c_str(), llama_n_ctx(ctx), llama_model_n_embd(model), threads);
+    return reinterpret_cast<jlong>(session);
+  } catch (const std::exception &e) {
+    // Same reasoning as nativeLoad's own catch.
+    LOGE("nativeLoadEmbeddingModel: exception: %s", e.what());
+    return 0;
+  } catch (...) {
+    LOGE("nativeLoadEmbeddingModel: unknown exception");
+    return 0;
+  }
+}
+
+/**
+ * Embeds one text into a fixed-size vector using [handle]'s pooled (mean)
+ * embedding output — [handle] must come from nativeLoadEmbeddingModel, not
+ * nativeLoad. Batch construction follows llama.cpp's own embedding example
+ * exactly (see common_batch_add/batch_decode in that project's common.cpp
+ * and tools/embedding): every token in the same sequence (id 0), every
+ * token's logits flag set so mean pooling has all of them to average, one
+ * llama_decode, then llama_get_embeddings_seq for that sequence.
+ *
+ * L2-normalized before returning (llama.cpp's own default normalization in
+ * that same example) — this is the normalization e5-family models expect
+ * downstream, and it is what makes a plain dot product on the Kotlin side
+ * equivalent to cosine similarity.
+ *
+ * Returns an empty array on any failure (no such session, blank input,
+ * decode failure, or no pooled embeddings available) rather than throwing:
+ * this is a background retrieval-quality signal, not something that should
+ * ever crash a caller.
+ */
+JNIEXPORT jfloatArray JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeEmbed(
+    JNIEnv *env, jobject, jlong handle, jstring text) {
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr) return env->NewFloatArray(0);
+  try {
+    const std::string input = toStdString(env, text);
+    if (input.empty()) return env->NewFloatArray(0);
+
+    std::vector<llama_token> tokens(input.size() + 64);
+    int32_t count = llama_tokenize(
+        session->vocab, input.c_str(), (int32_t) input.size(),
+        tokens.data(), (int32_t) tokens.size(), true, true);
+    if (count < 0) {
+        tokens.resize(-count);
+        count = llama_tokenize(
+            session->vocab, input.c_str(), (int32_t) input.size(),
+            tokens.data(), (int32_t) tokens.size(), true, true);
+    }
+    if (count <= 0) return env->NewFloatArray(0);
+
+    const uint32_t contextSize = llama_n_ctx(session->ctx);
+    if ((uint32_t) count > contextSize) count = (int32_t) contextSize;
+    tokens.resize(count);
+
+    // A fresh sequence every call: this context only ever does one-shot
+    // embedding, so unlike nativeGenerate there is no shared prefix across
+    // calls worth keeping in the KV cache.
+    llama_memory_seq_rm(llama_get_memory(session->ctx), 0, -1, -1);
+
+    llama_batch batch = llama_batch_init(count, 0, 1);
+    for (int32_t i = 0; i < count; i++) {
+        batch.token[i] = tokens[i];
+        batch.pos[i] = i;
+        batch.n_seq_id[i] = 1;
+        batch.seq_id[i][0] = 0;
+        batch.logits[i] = true; // every token contributes to mean pooling
+    }
+    batch.n_tokens = count;
+
+    const int32_t decodeResult = llama_decode(session->ctx, batch);
+    llama_batch_free(batch);
+    if (decodeResult != 0) {
+        LOGE("nativeEmbed: decode failed (%d)", decodeResult);
+        return env->NewFloatArray(0);
+    }
+
+    const float *raw = llama_get_embeddings_seq(session->ctx, 0);
+    if (raw == nullptr) {
+        LOGE("nativeEmbed: no pooled embeddings for this context (check pooling_type)");
+        return env->NewFloatArray(0);
+    }
+
+    const int32_t dimension = llama_model_n_embd(session->model);
+    double sumSquares = 0.0;
+    for (int32_t i = 0; i < dimension; i++) sumSquares += (double) raw[i] * raw[i];
+    const double norm = std::sqrt(sumSquares);
+
+    std::vector<float> normalized(dimension);
+    for (int32_t i = 0; i < dimension; i++) {
+        normalized[i] = norm > 0.0 ? (float) (raw[i] / norm) : raw[i];
+    }
+
+    jfloatArray result = env->NewFloatArray(dimension);
+    env->SetFloatArrayRegion(result, 0, dimension, normalized.data());
+    return result;
+  } catch (const std::exception &e) {
+    LOGE("nativeEmbed: exception: %s", e.what());
+    return env->NewFloatArray(0);
+  } catch (...) {
+    LOGE("nativeEmbed: unknown exception");
+    return env->NewFloatArray(0);
+  }
+}
+
+/** The fixed length of every vector nativeEmbed returns for this handle — read from the model, never assumed by a caller. */
+JNIEXPORT jint JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeEmbeddingDimension(JNIEnv *, jobject, jlong handle) {
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr || session->model == nullptr) return 0;
+    return llama_model_n_embd(session->model);
 }
 
 JNIEXPORT void JNICALL

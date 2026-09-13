@@ -36,6 +36,27 @@ class LlamaBridge {
     /** Returns a handle, or 0 when the model could not be loaded. */
     external fun nativeLoad(modelPath: String, contextTokens: Int, threads: Int): Long
 
+    /**
+     * Loads a GGUF for [nativeEmbed] rather than [nativeGenerate] — a
+     * separate context configuration (embeddings enabled, mean pooling), not
+     * interchangeable with a handle from [nativeLoad]. Returns a handle, or 0
+     * when the model could not be loaded, same contract as [nativeLoad].
+     */
+    external fun nativeLoadEmbeddingModel(modelPath: String, contextTokens: Int, threads: Int): Long
+
+    /**
+     * The pooled, L2-normalized embedding of [text] — a plain dot product
+     * between two results is then equivalent to cosine similarity. [handle]
+     * must come from [nativeLoadEmbeddingModel]. An empty array on any
+     * failure (blank text, decode failure) rather than an exception: this
+     * feeds a background retrieval-quality signal, not something a caller
+     * should have to guard a whole turn against.
+     */
+    external fun nativeEmbed(handle: Long, text: String): FloatArray
+
+    /** The fixed length of every [nativeEmbed] vector for this [handle] — read from the model, never assumed by a caller. */
+    external fun nativeEmbeddingDimension(handle: Long): Int
+
     external fun nativeFree(handle: Long)
 
     /** Asks generation to stop; takes effect at the next token, not instantly. */
