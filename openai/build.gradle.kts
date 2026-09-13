@@ -5,6 +5,13 @@ plugins {
 
 repositories {
     mavenCentral()
+    // Gradle resolves each module's own compileClasspath against its own
+    // repositories block, not against whatever a project() dependency
+    // declared — :core resolving com.github.rmant7:Mobile_mem0 for its own
+    // compilation does not make it resolvable here too, even though this
+    // module depends on :core (api(project(":core"))) and so needs the same
+    // artifact on its own classpath. See MOBILE_MEM0_DEPENDENCY.md.
+    maven { url = uri("https://jitpack.io") }
 }
 
 dependencies {

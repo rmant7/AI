@@ -11,6 +11,10 @@ plugins {
 repositories {
     google()
     mavenCentral()
+    // Same reasoning as :openai's own copy of this line — see
+    // MOBILE_MEM0_DEPENDENCY.md. Needed here too since this module depends
+    // on :core/:openai/:commercial-memory directly.
+    maven { url = uri("https://jitpack.io") }
 }
 
 // versionName/versionCode are static and near-useless for "is this actually
