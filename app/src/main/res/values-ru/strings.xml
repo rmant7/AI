@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Local AI Studio</string>
+    <string name="app_name">Local AI Studio (mem0)</string>
 
     <!--
         How many documents are attached to *this* chat — see
