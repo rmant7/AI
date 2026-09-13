@@ -11,6 +11,11 @@ import java.util.concurrent.ConcurrentHashMap
 @Serializable
 private data class GigaChatTokenResponse(val access_token: String)
 
+/** See the doc comment where this is thrown, in [GigaChatTokenProvider.fetchToken]. */
+class GigaChatOAuthException(val status: Int, val body: String) : Exception(
+    "GigaChat OAuth token request failed (HTTP $status): ${body.take(500)}",
+)
+
 /**
  * GigaChat is the one provider this app targets that does not take a static
  * bearer key directly — what a user (or a bundled build-time secret) actually
@@ -81,6 +86,11 @@ class GigaChatTokenProvider(
             doOutput = true
             setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
             setRequestProperty("Accept", "application/json")
+            // The reference SDK (ai-forever/gigachat) sends this on every
+            // OAuth request; absent here before, on the theory that
+            // GigaChat's gateway may be pickier about a missing/unrecognized
+            // User-Agent than a typical REST API would be.
+            setRequestProperty("User-Agent", "LocalAiStudio-Android")
             // Required by GigaChat's own API — a fresh uuid4 per request,
             // not a stable per-device or per-key id.
             setRequestProperty("RqUID", UUID.randomUUID().toString())
@@ -93,7 +103,16 @@ class GigaChatTokenProvider(
             ?.bufferedReader(Charsets.UTF_8)?.readText().orEmpty()
         connection.disconnect()
 
-        if (status !in 200..299) throw OpenAiException(status, body)
+        // A distinct exception/message from OpenAiException's — deliberately
+        // not reused here even though the shape is identical (status + body)
+        // — because a failure at this step (OAuth token exchange) and a
+        // failure at the actual /chat/completions call are two completely
+        // different problems (wrong Authorization key vs. wrong/expired
+        // access token, different host, different fix), and both throwing
+        // the same "OpenAI-compatible endpoint returned HTTP ..." message
+        // made a real GigaChat error report ambiguous about which request
+        // had actually failed.
+        if (status !in 200..299) throw GigaChatOAuthException(status, body)
         openAiJson.decodeFromString(GigaChatTokenResponse.serializer(), body).access_token
     }
 
