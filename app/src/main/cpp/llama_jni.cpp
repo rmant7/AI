@@ -559,7 +559,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadEmbeddingModel(
         case LLAMA_POOLING_TYPE_MEAN:
         case LLAMA_POOLING_TYPE_CLS:
         case LLAMA_POOLING_TYPE_LAST:
-            contextParams.pooling_type = static_cast<llama_pooling_type>(pooling);
+            contextParams.pooling_type = static_cast<enum llama_pooling_type>(pooling);
             break;
         default:
             LOGE("nativeLoadEmbeddingModel: unrecognized pooling %d, falling back to MEAN", pooling);
