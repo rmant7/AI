@@ -61,6 +61,20 @@ data class FallbackCandidate(
      * already certain.
      */
     val shouldSkip: (() -> Boolean)? = null,
+    /**
+     * Whether this candidate accepts an attached image at all. Checked only
+     * when [GenerationRequest.images] is non-empty for a given turn — a
+     * text-only turn against a text-only candidate is unaffected either way
+     * — so unlike [shouldSkip] this needs no per-candidate closure: it is a
+     * static fact about the model, known at construction time, not something
+     * that changes turn to turn. True by default, preserving this class's
+     * original behavior for every candidate that predates this field: send
+     * the image and let an unsupported model reject it with its own error.
+     * Set to false only where that rejection was confirmed to actually
+     * happen — see the caller that builds this candidate (CloudProviders'
+     * own visionModels, in the app module) for which ones and why.
+     */
+    val supportsImages: Boolean = true,
 )
 
 /**
@@ -125,6 +139,10 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
         for ((index, candidate) in candidates.withIndex()) {
             if (candidate.shouldSkip?.invoke() == true) {
                 failures += "${candidate.label}: skipped"
+                continue
+            }
+            if (request.images.isNotEmpty() && !candidate.supportsImages) {
+                failures += "${candidate.label}: doesn't support images"
                 continue
             }
             val handle = try {

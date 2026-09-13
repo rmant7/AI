@@ -710,6 +710,10 @@ class AppContainer private constructor(private val context: Context) {
                 model = model,
                 binding = model.bindings.first(),
                 shouldSkip = { requestTooLargeForProvider.get() },
+                // null (unverified) defaults to true, same as before this
+                // field existed — see CloudProvider.visionModels' own doc
+                // comment for which providers have an actual confirmed list.
+                supportsImages = provider.visionModels?.contains(modelName) ?: true,
                 onFailure = { error ->
                     when {
                         error is OpenAiException && error.status == 503 -> {
