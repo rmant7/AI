@@ -295,7 +295,7 @@ class ModelsActivity : AppCompatActivity() {
                 primaryLabel = getString(R.string.models_experimental_embeddings_open),
                 primaryEnabled = true,
                 secondaryLabel = null,
-                onPrimary = { startActivity(android.content.Intent(this, ExperimentalEmbeddingsActivity::class.java)) },
+                onPrimary = { startActivity(android.content.Intent(this@ModelsActivity, ExperimentalEmbeddingsActivity::class.java)) },
                 onSecondary = {},
             ),
         )
