@@ -19,6 +19,20 @@ import kotlinx.coroutines.flow.flow
  */
 const val ANSWERED_BY_LABEL = "Answer from: "
 
+/**
+ * How long the winning candidate actually took, appended after
+ * [ANSWERED_BY_LABEL] — on a local model, "which model answered" alone
+ * hides the one number that actually explains a slow reply: 5 tok/s and a
+ * 2000-token prompt is a 400-second wait no amount of routing logic fixes,
+ * and without a number on screen that reads as "the app hung," not "the
+ * model is just this slow on this device."
+ */
+private fun formatElapsed(ms: Long): String = when {
+    ms < 1_000 -> "${ms}ms"
+    ms < 60_000 -> "%.1fs".format(ms / 1000.0)
+    else -> "%dm %02ds".format(ms / 60_000, (ms % 60_000) / 1000)
+}
+
 /** One provider this chain can fall through to, tried in the order the list is built in. */
 data class FallbackCandidate(
     val label: String,
@@ -92,6 +106,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
     private val loaded = mutableMapOf<Int, TextModelHandle>()
 
     override fun generate(request: GenerationRequest): Flow<String> = flow {
+        val turnStart = System.currentTimeMillis()
         val failures = mutableListOf<String>()
         for ((index, candidate) in candidates.withIndex()) {
             val handle = try {
@@ -141,7 +156,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
                     // needed to tell whether "local doesn't really work yet"
                     // is a real problem or a one-off, which silently
                     // discarding it once something else answers would lose.
-                    emit(attributionFooter(candidate.label, failures))
+                    emit(attributionFooter(candidate.label, failures, System.currentTimeMillis() - turnStart))
                     return@flow
                 }
                 failures += "${candidate.label}: empty response"
@@ -171,7 +186,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
         throw ModelLoadException("No source answered:\n" + failures.joinToString("\n"))
     }
 
-    private fun attributionFooter(answeredBy: String, failures: List<String>) = buildString {
+    private fun attributionFooter(answeredBy: String, failures: List<String>, elapsedMs: Long) = buildString {
         append("\n\n---\n")
         if (failures.isNotEmpty()) {
             append("⚠ ")
@@ -180,6 +195,8 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
         }
         append(ANSWERED_BY_LABEL)
         append(answeredBy)
+        append(" · ")
+        append(formatElapsed(elapsedMs))
     }
 
     override fun requestCancel() {

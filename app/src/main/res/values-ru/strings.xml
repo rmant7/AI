@@ -205,6 +205,8 @@
     <string name="provider_keyhint_mistral">Ключ: console.mistral.ai → API keys. Бесплатный уровень Experiment даёт доступ ко всем моделям с ограничением по скорости.</string>
     <string name="provider_title_groq">Groq</string>
     <string name="provider_keyhint_groq">Ключ: console.groq.com → API keys. Бесплатно, без карты — лимит по запросам в день.</string>
+    <string name="provider_title_gigachat">GigaChat (Сбер)</string>
+    <string name="provider_keyhint_gigachat">Ключ: developers.sber.ru/studio → ваш проект → API Settings → Get Key («Authorization key»). Также нужно установить на устройство сертификат «Российский доверенный корневой УЦ» (Настройки → Безопасность → Установить сертификат) — без него серверы GigaChat не подключатся.</string>
     <string name="provider_title_xai">xAI Grok</string>
     <string name="provider_keyhint_xai">Ключ: console.x.ai. Бесплатных моделей нет — при регистрации дают $25 кредита, дальше платно.</string>
     <string name="provider_title_openrouter">OpenRouter</string>
