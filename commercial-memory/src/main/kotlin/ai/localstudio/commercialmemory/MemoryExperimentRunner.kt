@@ -24,6 +24,8 @@ class MemoryExperimentRunner(
         query: String,
         mode: ExperimentMode,
         retrievalLimit: Int = DEFAULT_RETRIEVAL_LIMIT,
+        /** See [AppMemory.candidates]'s own `matchAll` parameter. */
+        matchAll: Boolean = false,
     ): ContextSelection {
         val start = clock()
 
@@ -32,7 +34,7 @@ class MemoryExperimentRunner(
                 0 to ContextSelection(emptyList(), emptyMap(), 0)
 
             ExperimentMode.BASIC_MEMORY -> {
-                val items = appMemory.candidates(query, limit = retrievalLimit)
+                val items = appMemory.candidates(query, limit = retrievalLimit, matchAll = matchAll)
                 val candidates = buildCandidates(query, items)
                 // Budget-packed, same as COMMERCIAL_MEMORY, but with ranking
                 // switched off (NoRanking) — see that object's own comment
@@ -42,7 +44,7 @@ class MemoryExperimentRunner(
             }
 
             ExperimentMode.COMMERCIAL_MEMORY -> {
-                val items = appMemory.candidates(query, limit = retrievalLimit)
+                val items = appMemory.candidates(query, limit = retrievalLimit, matchAll = matchAll)
                 val candidates = buildCandidates(query, items)
                 items.size to selector.select(query, candidates, budget)
             }

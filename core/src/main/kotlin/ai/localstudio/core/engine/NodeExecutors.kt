@@ -124,9 +124,14 @@ class NodeExecutors(
 
     private fun memorySearch() = NodeExecutor { node, inputs, context ->
         val query = queryText(inputs, context) ?: return@NodeExecutor NodeValue.Empty
+        // Set by PipelineBuilder when CapabilityRouter.isMemoryInspectionQuery
+        // matched — a question about memory itself shares no vocabulary with
+        // what's actually stored, so it needs MemoryQuery.matchAll instead of
+        // a literal search for its own wording.
+        val matchAll = node.params["matchAll"]?.toBoolean() ?: false
         val runner = memoryExperiment
         if (runner != null) {
-            val selection = runner.run(query, memoryExperimentMode)
+            val selection = runner.run(query, memoryExperimentMode, matchAll = matchAll)
             return@NodeExecutor NodeValue.Fragments(
                 selection.items.map { item -> ContextFragment(memoryFragmentSource(item.scope), item.text, relevance = item.relevance ?: 0.0) },
             )
@@ -144,6 +149,7 @@ class NodeExecutors(
                 text = query,
                 scopes = scopes,
                 limit = node.params["limit"]?.toIntOrNull() ?: 8,
+                matchAll = matchAll,
             ),
         )
         NodeValue.Fragments(

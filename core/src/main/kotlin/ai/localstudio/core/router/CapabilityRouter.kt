@@ -71,10 +71,13 @@ class CapabilityRouter(
             // returns nothing; this only removes the keyword as a second gate
             // on top of that.
             stages += NodeType.MEMORY_SEARCH
-            why += if (recallKeywords.any { it in text }) {
-                "request refers to earlier work: memory retrieval"
-            } else {
-                "memory retrieval: surface anything relevant already known"
+            why += when {
+                isMemoryInspectionQuery(text) ->
+                    "request asks about memory itself: broad retrieval, not keyword search"
+                recallKeywords.any { it in text } ->
+                    "request refers to earlier work: memory retrieval"
+                else ->
+                    "memory retrieval: surface anything relevant already known"
             }
         }
 
@@ -108,6 +111,25 @@ class CapabilityRouter(
     }
 
     companion object {
+        /**
+         * A question about memory itself ("what do you know about me?")
+         * shares no vocabulary with whatever is actually stored, by
+         * definition — no rephrasing of a lexical query fixes that, the
+         * query itself is the wrong tool. [NodeExecutors][ai.localstudio.core.engine.NodeExecutors]
+         * uses this same detection to switch retrieval to
+         * [ai.localstudio.memory.MemoryQuery.matchAll] instead of a literal
+         * text search, so this lives here — the one place request-shape
+         * decisions are made — rather than a second, possibly-drifting copy.
+         */
+        fun isMemoryInspectionQuery(lowercaseText: String, keywords: Set<String> = DEFAULT_MEMORY_INSPECTION_KEYWORDS): Boolean =
+            keywords.any { it in lowercaseText }
+
+        val DEFAULT_MEMORY_INSPECTION_KEYWORDS = setOf(
+            "обо мне", "про меня", "что ты помнишь", "что ты знаешь", "что тебе известно",
+            "какую информацию", "что запомнил", "из контекста",
+            "about me", "what do you know", "what do you remember", "what have i told you",
+        )
+
         val DEFAULT_CODING_KEYWORDS = setOf(
             "код", "функци", "багу", "баг", "скрипт", "приложение", "рефактор", "стектрейс",
             "code", "function", "bug", "refactor", "stacktrace", "compile",

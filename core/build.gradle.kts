@@ -22,7 +22,7 @@ dependencies {
     // structurally-identical classes from two different jars as two
     // different types: a mismatch here is a real compile error in :app, not
     // a style inconsistency.
-    api("com.github.rmant7:Mobile_mem0:v0.1.0")
+    api("com.github.rmant7:Mobile_mem0:v0.2.0")
     // Same reasoning: MemoryExperimentRunner/ExperimentMode are part of
     // NodeExecutors' own constructor now (see memorySearch()).
     api(project(":commercial-memory"))

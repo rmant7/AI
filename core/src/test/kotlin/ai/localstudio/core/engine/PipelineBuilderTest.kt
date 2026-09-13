@@ -79,6 +79,15 @@ class PipelineBuilderTest {
     }
 
     @Test
+    fun `a question about memory itself gets matchAll on its MEMORY_SEARCH node`() {
+        val inspection = build(RequestSignals(text = "Что тебе известно обо мне?"))
+        val plain = build(RequestSignals(text = "какая погода в Москве?"))
+
+        assertEquals("true", inspection.nodes.first { it.type == NodeType.MEMORY_SEARCH }.params["matchAll"])
+        assertEquals(null, plain.nodes.first { it.type == NodeType.MEMORY_SEARCH }.params["matchAll"])
+    }
+
+    @Test
     fun `memory writing is omitted when memory is off`() {
         val withMemory = build(RequestSignals(text = "привет", memoryEnabled = true))
         val without = build(RequestSignals(text = "привет", memoryEnabled = false))

@@ -56,6 +56,18 @@ class CapabilityRouterTest {
     }
 
     @Test
+    fun `a question about memory itself is flagged distinctly from a plain recall`() {
+        val plan = router.route(RequestSignals(text = "Что тебе известно обо мне?"))
+
+        assertTrue(NodeType.MEMORY_SEARCH in plan.stages)
+        assertTrue(
+            plan.explanation.any { "memory itself" in it },
+            "a meta-question about memory needs broad retrieval (matchAll), not a literal keyword search " +
+                "for its own wording — see CapabilityRouter.isMemoryInspectionQuery",
+        )
+    }
+
+    @Test
     fun `memory retrieval is skipped when memory is off`() {
         val plan = router.route(RequestSignals(text = "продолжи вчерашнее", memoryEnabled = false))
 

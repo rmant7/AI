@@ -32,6 +32,18 @@ class AppMemoryTest {
     }
 
     @Test
+    fun `matchAll finds candidates a plain lexical query about memory itself would miss`() = runBlocking {
+        val memory = appMemory()
+        memory.remember("Пользователь строит локальный AI runtime", MemoryScope.SEMANTIC)
+
+        assertTrue(
+            memory.candidates("что тебе известно обо мне?").isEmpty(),
+            "sanity check: this meta-question really shares no vocabulary with what's stored",
+        )
+        assertEquals(1, memory.candidates("что тебе известно обо мне?", matchAll = true).size)
+    }
+
+    @Test
     fun `forget removes it from future candidates`() = runBlocking {
         val memory = appMemory()
         val id = memory.remember("временный факт", MemoryScope.SEMANTIC)

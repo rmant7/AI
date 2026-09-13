@@ -4,6 +4,7 @@ import ai.localstudio.core.pipeline.EdgeSpec
 import ai.localstudio.core.pipeline.NodeSpec
 import ai.localstudio.core.pipeline.NodeType
 import ai.localstudio.core.pipeline.PipelineSpec
+import ai.localstudio.core.router.CapabilityRouter
 import ai.localstudio.core.router.RequestSignals
 import ai.localstudio.core.router.RoutePlan
 
@@ -49,7 +50,20 @@ object PipelineBuilder {
         // Retrieval stages run against the preprocessed input, in parallel.
         for (stage in plan.stages.filter { it in RETRIEVAL }) {
             val nodeId = stage.id
-            nodes += NodeSpec(nodeId, stage)
+            // A question about memory itself ("what do you know about me?")
+            // needs matchAll (see CapabilityRouter.isMemoryInspectionQuery's
+            // own comment) rather than a literal lexical search against its
+            // own wording — this is the one place a RoutePlan's stage list
+            // turns into an actual node, so it is also the one place that
+            // decision can reach MEMORY_SEARCH's executor.
+            val params = if (stage == NodeType.MEMORY_SEARCH &&
+                CapabilityRouter.isMemoryInspectionQuery(signals.text?.lowercase().orEmpty())
+            ) {
+                mapOf("matchAll" to "true")
+            } else {
+                emptyMap()
+            }
+            nodes += NodeSpec(nodeId, stage, params = params)
             edges += EdgeSpec(upstream, nodeId)
             edges += EdgeSpec(nodeId, CONTEXT_ID)
         }

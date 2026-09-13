@@ -51,6 +51,17 @@ class MemoryExperimentRunnerTest {
     }
 
     @Test
+    fun `matchAll surfaces candidates for a query sharing no vocabulary with what is stored`() = runBlocking {
+        val runner = MemoryExperimentRunner(memoryWithData())
+
+        val withoutMatchAll = runner.run("что тебе известно обо мне?", ExperimentMode.COMMERCIAL_MEMORY)
+        val withMatchAll = runner.run("что тебе известно обо мне?", ExperimentMode.COMMERCIAL_MEMORY, matchAll = true)
+
+        assertTrue(withoutMatchAll.items.isEmpty(), "sanity check: this meta-question really finds nothing by default")
+        assertTrue(withMatchAll.items.isNotEmpty())
+    }
+
+    @Test
     fun `every mode is logged, and the three modes are distinguishable in the log`() = runBlocking {
         val logger = InMemoryExperimentLogger()
         val runner = MemoryExperimentRunner(memoryWithData(), logger = logger)

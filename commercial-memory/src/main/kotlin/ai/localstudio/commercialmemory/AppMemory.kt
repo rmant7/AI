@@ -41,7 +41,15 @@ class AppMemory(private val provider: MemoryProvider) {
         query: String,
         scopes: Set<MemoryScope> = setOf(MemoryScope.EPISODIC, MemoryScope.SEMANTIC),
         limit: Int = DEFAULT_CANDIDATE_LIMIT,
-    ): List<MemoryItem> = provider.search(MemoryQuery(text = query, scopes = scopes, limit = limit))
+        /**
+         * For a question about memory itself ("what do you know about me?"),
+         * which shares no vocabulary with what's actually stored, by
+         * definition — see [ai.localstudio.memory.MemoryQuery.matchAll]'s own
+         * comment. [query] is still passed through for ranking; this only
+         * removes it as a requirement for a result to appear at all.
+         */
+        matchAll: Boolean = false,
+    ): List<MemoryItem> = provider.search(MemoryQuery(text = query, scopes = scopes, limit = limit, matchAll = matchAll))
 
     suspend fun forget(id: String) = provider.forget(id)
 
