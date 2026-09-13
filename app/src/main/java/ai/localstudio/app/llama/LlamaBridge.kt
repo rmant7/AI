@@ -1,6 +1,22 @@
 package ai.localstudio.app.llama
 
 /**
+ * Which token(s) of an embedding model's output become the sentence vector —
+ * `llama_pooling_type`'s ordinal values, as defined in llama.h at this app's
+ * pinned commit (`MEAN=1, CLS=2, LAST=3`). Not every embedding checkpoint
+ * agrees on this: e5-family models are trained for [MEAN]; others expect the
+ * [CLS] token instead. Using the wrong one for a given model does not
+ * error — it produces vectors that still look valid (right dimension, right
+ * rough magnitude) while retrieval quality quietly degrades, which is why
+ * this is a real, per-model choice rather than a hardcoded default.
+ */
+enum class EmbeddingPooling(internal val nativeValue: Int) {
+    MEAN(1),
+    CLS(2),
+    LAST(3),
+}
+
+/**
  * The JNI surface of llama.cpp. One instance owns one loaded model.
  *
  * Kept as thin as possible: everything that can be decided in Kotlin is decided
@@ -38,11 +54,14 @@ class LlamaBridge {
 
     /**
      * Loads a GGUF for [nativeEmbed] rather than [nativeGenerate] — a
-     * separate context configuration (embeddings enabled, mean pooling), not
+     * separate context configuration (embeddings enabled, [pooling]), not
      * interchangeable with a handle from [nativeLoad]. Returns a handle, or 0
      * when the model could not be loaded, same contract as [nativeLoad].
      */
-    external fun nativeLoadEmbeddingModel(modelPath: String, contextTokens: Int, threads: Int): Long
+    fun nativeLoadEmbeddingModel(modelPath: String, contextTokens: Int, threads: Int, pooling: EmbeddingPooling): Long =
+        nativeLoadEmbeddingModel(modelPath, contextTokens, threads, pooling.nativeValue)
+
+    private external fun nativeLoadEmbeddingModel(modelPath: String, contextTokens: Int, threads: Int, pooling: Int): Long
 
     /**
      * The pooled, L2-normalized embedding of [text] — a plain dot product

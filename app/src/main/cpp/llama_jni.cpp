@@ -497,13 +497,22 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
 
 /**
  * Loads a GGUF as an embedding model rather than a chat model: the context is
- * configured with embeddings enabled and mean pooling — what encoder-style
- * text-embedding checkpoints (e5, bge, and similar) are trained to produce —
- * instead of nativeLoad's causal-generation setup. A separate function
- * rather than a parameter added to nativeLoad: this repo's chat-generation
- * path and a one-shot embedding session share nothing beyond both loading a
- * GGUF, and every existing nativeLoad call site is untouched by adding this
- * instead of changing it.
+ * configured with embeddings enabled and [pooling] — instead of nativeLoad's
+ * causal-generation setup. A separate function rather than a parameter added
+ * to nativeLoad: this repo's chat-generation path and a one-shot embedding
+ * session share nothing beyond both loading a GGUF, and every existing
+ * nativeLoad call site is untouched by adding this instead of changing it.
+ *
+ * [pooling] is a caller-supplied `llama_pooling_type` ordinal (1=MEAN,
+ * 2=CLS, 3=LAST — matching llama.h's own enum values) rather than hardcoded:
+ * different embedding checkpoints are trained expecting different pooling
+ * (e5-family models want mean pooling; others want the CLS token), and
+ * using the wrong one for a given model does not error — it silently
+ * produces vectors that still look valid while retrieval quality quietly
+ * degrades, exactly the failure mode hardest to notice without a real model
+ * to test against. An unrecognized value falls back to MEAN rather than
+ * failing the whole load, since it is far more likely to be a caller bug
+ * (or a not-yet-updated caller) than a deliberate, unsupported choice.
  *
  * The batch/context size is deliberately capped far below nativeLoad's chat
  * ceiling: embedding inputs here are one memory fact or one query, never a
@@ -514,7 +523,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
  */
 JNIEXPORT jlong JNICALL
 Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadEmbeddingModel(
-    JNIEnv *env, jobject, jstring modelPath, jint contextTokens, jint threads) {
+    JNIEnv *env, jobject, jstring modelPath, jint contextTokens, jint threads, jint pooling) {
   try {
     static std::atomic<bool> backendReady{false};
     if (!backendReady.exchange(true)) {
@@ -546,11 +555,17 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadEmbeddingModel(
     contextParams.n_threads = threads;
     contextParams.n_threads_batch = threads;
     contextParams.embeddings = true;
-    // The standard choice for sentence/passage embedding models. llama.cpp
-    // otherwise falls back to whatever the GGUF's own metadata specifies,
-    // which for some checkpoints is NONE (per-token, not pooled) — that
-    // would make llama_get_embeddings_seq in nativeEmbed always return null.
-    contextParams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+    switch (pooling) {
+        case LLAMA_POOLING_TYPE_MEAN:
+        case LLAMA_POOLING_TYPE_CLS:
+        case LLAMA_POOLING_TYPE_LAST:
+            contextParams.pooling_type = static_cast<llama_pooling_type>(pooling);
+            break;
+        default:
+            LOGE("nativeLoadEmbeddingModel: unrecognized pooling %d, falling back to MEAN", pooling);
+            contextParams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+            break;
+    }
 
     llama_context *ctx = llama_init_from_model(model, contextParams);
     if (ctx == nullptr) {
@@ -563,8 +578,8 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadEmbeddingModel(
     session->model = model;
     session->ctx = ctx;
     session->vocab = llama_model_get_vocab(model);
-    LOGI("loaded embedding model %s, n_ctx=%u, n_embd=%d, threads=%d",
-         path.c_str(), llama_n_ctx(ctx), llama_model_n_embd(model), threads);
+    LOGI("loaded embedding model %s, n_ctx=%u, n_embd=%d, threads=%d, pooling=%d",
+         path.c_str(), llama_n_ctx(ctx), llama_model_n_embd(model), threads, (int) contextParams.pooling_type);
     return reinterpret_cast<jlong>(session);
   } catch (const std::exception &e) {
     // Same reasoning as nativeLoad's own catch.

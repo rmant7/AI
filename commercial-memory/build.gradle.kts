@@ -18,7 +18,7 @@ dependencies {
     // module depends on nothing from :core or :app either way: it must stay
     // swappable for a stronger private ranker without the rest of the
     // application, or Mobile_mem0 itself, ever noticing.
-    implementation("com.github.rmant7:Mobile_mem0:v0.3.0-alpha2")
+    implementation("com.github.rmant7:Mobile_mem0:v0.3.0-alpha3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation(kotlin("test"))

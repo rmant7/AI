@@ -17,16 +17,29 @@ import kotlinx.coroutines.withContext
  * which could silently mismatch the actual model and only surface later as a
  * confusing dimension-mismatch failure somewhere downstream in
  * [ai.localstudio.memory.MemorySemanticIndex].
+ *
+ * [queryPrefix]/[passagePrefix] exist for asymmetric dual encoders — e5's own
+ * convention is a literal `"query: "` versus `"passage: "` text prefix ahead
+ * of the actual content, and [MemoryEmbedder.embedForQuery]/
+ * [MemoryEmbedder.embedForStorage] are exactly the seam that distinction
+ * needs. Both default to null (no prefix) for a symmetric model that has no
+ * such convention.
  */
 class LlamaCppMemoryEmbedder private constructor(
     private val bridge: LlamaBridge,
     private val handle: Long,
     override val modelId: String,
     override val dimension: Int,
+    private val queryPrefix: String?,
+    private val passagePrefix: String?,
 ) : MemoryEmbedder {
 
-    override suspend fun embed(texts: List<String>): List<FloatArray> = withContext(Dispatchers.Default) {
-        texts.map { text -> bridge.nativeEmbed(handle, text) }
+    override suspend fun embedForStorage(texts: List<String>): List<FloatArray> = withContext(Dispatchers.Default) {
+        texts.map { text -> bridge.nativeEmbed(handle, passagePrefix?.plus(text) ?: text) }
+    }
+
+    override suspend fun embedForQuery(query: String): FloatArray = withContext(Dispatchers.Default) {
+        bridge.nativeEmbed(handle, queryPrefix?.plus(query) ?: query)
     }
 
     /** Releases the native context. Not part of [MemoryEmbedder] — that interface has no lifecycle of its own. */
@@ -45,22 +58,33 @@ class LlamaCppMemoryEmbedder private constructor(
          * [MemoryEmbedder.modelId]'s own contract) — pass something derived
          * from the model catalog entry (its id and version), not a constant
          * a future model swap would silently keep reporting.
+         *
+         * [pooling] has no safe default deliberately: unlike [queryPrefix]/
+         * [passagePrefix] (where "no prefix" is a real, valid choice for a
+         * symmetric model), guessing a pooling mode wrong doesn't fail
+         * loudly — see [LlamaBridge.nativeLoadEmbeddingModel]'s own doc
+         * comment — so the caller must look this up for the specific model
+         * being loaded, not inherit a value that happened to work for a
+         * different one.
          */
         fun load(
             bridge: LlamaBridge,
             modelPath: String,
             modelId: String,
+            pooling: EmbeddingPooling,
+            queryPrefix: String? = null,
+            passagePrefix: String? = null,
             contextTokens: Int = DEFAULT_CONTEXT_TOKENS,
             threads: Int = LlamaBridge.defaultThreads(),
         ): LlamaCppMemoryEmbedder? {
-            val handle = bridge.nativeLoadEmbeddingModel(modelPath, contextTokens, threads)
+            val handle = bridge.nativeLoadEmbeddingModel(modelPath, contextTokens, threads, pooling)
             if (handle == 0L) return null
             val dimension = bridge.nativeEmbeddingDimension(handle)
             if (dimension <= 0) {
                 bridge.nativeFree(handle)
                 return null
             }
-            return LlamaCppMemoryEmbedder(bridge, handle, modelId, dimension)
+            return LlamaCppMemoryEmbedder(bridge, handle, modelId, dimension, queryPrefix, passagePrefix)
         }
 
         // Memory facts and queries are short (one sentence to a short
