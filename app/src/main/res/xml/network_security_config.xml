@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     GigaChat's own endpoints (both the OAuth token host and the chat API
+     host) serve a certificate chain issued by the Russian Trusted Root CA —
+     not present in Android's default system trust store, so a plain
+     HttpsURLConnection to them fails TLS validation outright regardless of
+     whether the API key/token is correct.
+
+     Trusting a user-installed CA is scoped to exactly these hosts, not the
+     whole app: every other domain this app talks to (Groq, Gemini, GigaChat
+     is the one exception) keeps Android's default system-only trust, so an
+     unrelated user-installed certificate someone else set up on the device
+     cannot intercept traffic to any other provider.
+
+     For GigaChat to actually connect, the user must install the Russian
+     Trusted Root CA as a user CA certificate on their device themselves —
+     this app does not (and should not) bundle or auto-trust a certificate
+     file on their behalf. See gosuslugi.ru/crt or the GigaChat developer
+     docs for the certificate download, then Android Settings -> Security ->
+     Encryption & credentials -> Install a certificate -> CA certificate.
+-->
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="true">devices.sberbank.ru</domain>
+        <domain includeSubdomains="true">giga.chat</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

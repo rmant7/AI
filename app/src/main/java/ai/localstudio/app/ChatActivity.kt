@@ -412,7 +412,7 @@ class ChatActivity : AppCompatActivity() {
         if (container.settings.compareMode) {
             val sources = container.compareCandidates()
             if (sources.size >= 2) {
-                container.appLog.record("SEND_COMPARE", "sources=${sources.map { it.first }}")
+                container.appLog.record("SEND_COMPARE", "sources=${sources.map { it.label }}")
                 sendCompare(text, history, attachedDocuments, attachment, sources)
                 return
             }
@@ -431,6 +431,13 @@ class ChatActivity : AppCompatActivity() {
             binding.messages.scrollToPosition(placeholderIndex)
 
             val partial = MutableStateFlow<String?>(null)
+            // Building the orchestrator here (rather than only inside the IO
+            // block below, where it's called again — cheaply, via the same
+            // signature cache) is what lets isLocalOnlyRoute reflect the
+            // route this exact turn is about to run, before deciding whether
+            // to bother sampling partial text below at all.
+            container.orchestrator()
+            val isLocalOnlyRoute = container.isLocalOnlyRoute
             // Sampled on a timer, not one render per chunk: a model can
             // produce several tokens per hundred milliseconds, and each
             // render re-parses the whole accumulated answer as markdown
@@ -439,17 +446,23 @@ class ChatActivity : AppCompatActivity() {
             // button's own click, which is exactly the kind of contention
             // that can make Stop feel unresponsive during a fast stream.
             // Sampling bounds that load to a fixed rate regardless of how
-            // fast the model actually streams.
-            val renderJob = launch {
-                var lastRendered: String? = null
-                while (isActive) {
-                    val text = partial.value
-                    if (text != null && text != lastRendered) {
-                        adapter.update(placeholderIndex, Message.assistant(body = text, details = null).copy(timestamp = startedAt))
-                        lastRendered = text
+            // fast the model actually streams. Only worth doing at all for a
+            // local-only route — a cloud call answers in seconds, so this
+            // just waits for the finished result below and renders it once.
+            val renderJob = if (isLocalOnlyRoute) {
+                launch {
+                    var lastRendered: String? = null
+                    while (isActive) {
+                        val text = partial.value
+                        if (text != null && text != lastRendered) {
+                            adapter.update(placeholderIndex, Message.assistant(body = text, details = null).copy(timestamp = startedAt))
+                            lastRendered = text
+                        }
+                        delay(RENDER_INTERVAL_MS)
                     }
-                    delay(RENDER_INTERVAL_MS)
                 }
+            } else {
+                null
             }
 
             val result = withContext(Dispatchers.IO) {
@@ -473,7 +486,7 @@ class ChatActivity : AppCompatActivity() {
                     }
                 }
             }
-            renderJob.cancel()
+            renderJob?.cancel()
             isGenerating = false
             generationJob = null
             setBusy(false)
@@ -555,7 +568,7 @@ class ChatActivity : AppCompatActivity() {
         history: List<ConversationTurn>,
         attachedDocuments: List<String>,
         attachment: NodeValue,
-        sources: List<Pair<String, ai.localstudio.core.engine.Orchestrator>>,
+        sources: List<AppContainer.CompareSource>,
     ) {
         generationJob = lifecycleScope.launch {
             try {
@@ -567,13 +580,13 @@ class ChatActivity : AppCompatActivity() {
                 // several candidates, so an answer streaming in as it's
                 // produced matters even more here than in the ordinary path.
                 val startedAt = System.currentTimeMillis()
-                val placeholderIndexes = sources.map { (label, _) ->
+                val placeholderIndexes = sources.map { (label, _, _) ->
                     adapter.add(Message.assistant(body = "**$label:**\n…", details = null).copy(timestamp = startedAt))
                     adapter.lastIndex()
                 }
                 binding.messages.scrollToPosition(adapter.itemCount - 1)
 
-                val jobs = sources.mapIndexed { index, (label, orchestrator) ->
+                val jobs = sources.mapIndexed { index, (label, orchestrator, isLocal) ->
                     val placeholderIndex = placeholderIndexes[index]
                     async(Dispatchers.IO) {
                         val partial = MutableStateFlow<String?>(null)
@@ -581,20 +594,28 @@ class ChatActivity : AppCompatActivity() {
                         // renderJob: a per-chunk markdown re-render on the
                         // main thread competes with the Stop button's click
                         // for the same queue, and compare mode runs several
-                        // of these at once.
-                        val renderJob = launch(Dispatchers.Main) {
-                            var lastRendered: String? = null
-                            while (isActive) {
-                                val text = partial.value
-                                if (text != null && text != lastRendered) {
-                                    adapter.update(
-                                        placeholderIndex,
-                                        Message.assistant(body = "**$label:**\n$text", details = null).copy(timestamp = startedAt),
-                                    )
-                                    lastRendered = text
+                        // of these at once. Only worth doing at all for a
+                        // local source — a cloud call is fast enough end to
+                        // end that streaming it in adds nothing but redraw
+                        // churn, so a non-local source just waits for the
+                        // finished answer below and renders it once.
+                        val renderJob = if (isLocal) {
+                            launch(Dispatchers.Main) {
+                                var lastRendered: String? = null
+                                while (isActive) {
+                                    val text = partial.value
+                                    if (text != null && text != lastRendered) {
+                                        adapter.update(
+                                            placeholderIndex,
+                                            Message.assistant(body = "**$label:**\n$text", details = null).copy(timestamp = startedAt),
+                                        )
+                                        lastRendered = text
+                                    }
+                                    delay(RENDER_INTERVAL_MS)
                                 }
-                                delay(RENDER_INTERVAL_MS)
                             }
+                        } else {
+                            null
                         }
                         // Deliberately not a blanket runCatching: a per-source
                         // timeout must render as this source's own error while
@@ -633,7 +654,7 @@ class ChatActivity : AppCompatActivity() {
                             // rather than falling through to the line after
                             // this block, and that render collector must
                             // still stop either way.
-                            renderJob.cancel()
+                            renderJob?.cancel()
                         }
                         withContext(Dispatchers.Main) {
                             adapter.update(placeholderIndex, Message.assistant(body = "**$label:**\n$rendered", details = null).copy(timestamp = startedAt))

@@ -68,6 +68,11 @@ jobs:
           GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
           GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
           GEMINI_API_KEY_5: ${{ secrets.GEMINI_API_KEY_5 }}
+          GIGACHAT_API_KEY_1: ${{ secrets.GIGACHAT_API_KEY_1 }}
+          GIGACHAT_API_KEY_2: ${{ secrets.GIGACHAT_API_KEY_2 }}
+          GIGACHAT_API_KEY_3: ${{ secrets.GIGACHAT_API_KEY_3 }}
+          GIGACHAT_API_KEY_4: ${{ secrets.GIGACHAT_API_KEY_4 }}
+          GIGACHAT_API_KEY_5: ${{ secrets.GIGACHAT_API_KEY_5 }}
         run: ./gradlew --no-daemon --max-workers=1 :app:assembleDebug 2>&1 | tee -a build.log
 
       - name: Name the APK after the build

@@ -19,6 +19,20 @@ import kotlinx.coroutines.flow.flow
  */
 const val ANSWERED_BY_LABEL = "Answer from: "
 
+/**
+ * How long the winning candidate actually took, appended after
+ * [ANSWERED_BY_LABEL] — on a local model, "which model answered" alone
+ * hides the one number that actually explains a slow reply: 5 tok/s and a
+ * 2000-token prompt is a 400-second wait no amount of routing logic fixes,
+ * and without a number on screen that reads as "the app hung," not "the
+ * model is just this slow on this device."
+ */
+private fun formatElapsed(ms: Long): String = when {
+    ms < 1_000 -> "${ms}ms"
+    ms < 60_000 -> "%.1fs".format(ms / 1000.0)
+    else -> "%dm %02ds".format(ms / 60_000, (ms % 60_000) / 1000)
+}
+
 /** One provider this chain can fall through to, tried in the order the list is built in. */
 data class FallbackCandidate(
     val label: String,
@@ -33,6 +47,34 @@ data class FallbackCandidate(
      * class needing to know what that failure type even is.
      */
     val onFailure: ((Throwable) -> Unit)? = null,
+    /**
+     * Consulted right before this candidate would be attempted; returning
+     * true skips it — recorded as an ordinary failure, so the chain still
+     * moves on to whatever comes after it — without ever calling [load] or
+     * [runtime]'s generate. The caller's own escape hatch for "this
+     * candidate's failure means every other candidate sharing something
+     * with it will fail identically": an HTTP 413 (request too large) from
+     * one of a provider's free-tier models means every sibling model on
+     * that same provider will reject the same oversized prompt too, so
+     * trying each of them in turn before finally reaching a different
+     * provider wastes a full round trip per sibling for a failure that's
+     * already certain.
+     */
+    val shouldSkip: (() -> Boolean)? = null,
+    /**
+     * Whether this candidate accepts an attached image at all. Checked only
+     * when [GenerationRequest.images] is non-empty for a given turn — a
+     * text-only turn against a text-only candidate is unaffected either way
+     * — so unlike [shouldSkip] this needs no per-candidate closure: it is a
+     * static fact about the model, known at construction time, not something
+     * that changes turn to turn. True by default, preserving this class's
+     * original behavior for every candidate that predates this field: send
+     * the image and let an unsupported model reject it with its own error.
+     * Set to false only where that rejection was confirmed to actually
+     * happen — see the caller that builds this candidate (CloudProviders'
+     * own visionModels, in the app module) for which ones and why.
+     */
+    val supportsImages: Boolean = true,
 )
 
 /**
@@ -92,8 +134,17 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
     private val loaded = mutableMapOf<Int, TextModelHandle>()
 
     override fun generate(request: GenerationRequest): Flow<String> = flow {
+        val turnStart = System.currentTimeMillis()
         val failures = mutableListOf<String>()
         for ((index, candidate) in candidates.withIndex()) {
+            if (candidate.shouldSkip?.invoke() == true) {
+                failures += "${candidate.label}: skipped"
+                continue
+            }
+            if (request.images.isNotEmpty() && !candidate.supportsImages) {
+                failures += "${candidate.label}: doesn't support images"
+                continue
+            }
             val handle = try {
                 loaded.getOrPut(index) {
                     candidate.runtime.load(candidate.model, candidate.binding) as? TextModelHandle
@@ -141,7 +192,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
                     // needed to tell whether "local doesn't really work yet"
                     // is a real problem or a one-off, which silently
                     // discarding it once something else answers would lose.
-                    emit(attributionFooter(candidate.label, failures))
+                    emit(attributionFooter(candidate.label, failures, System.currentTimeMillis() - turnStart))
                     return@flow
                 }
                 failures += "${candidate.label}: empty response"
@@ -171,7 +222,7 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
         throw ModelLoadException("No source answered:\n" + failures.joinToString("\n"))
     }
 
-    private fun attributionFooter(answeredBy: String, failures: List<String>) = buildString {
+    private fun attributionFooter(answeredBy: String, failures: List<String>, elapsedMs: Long) = buildString {
         append("\n\n---\n")
         if (failures.isNotEmpty()) {
             append("⚠ ")
@@ -180,6 +231,8 @@ private class FallbackTextModel(private val candidates: List<FallbackCandidate>)
         }
         append(ANSWERED_BY_LABEL)
         append(answeredBy)
+        append(" · ")
+        append(formatElapsed(elapsedMs))
     }
 
     override fun requestCancel() {

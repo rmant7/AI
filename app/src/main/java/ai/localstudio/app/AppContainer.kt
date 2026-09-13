@@ -52,6 +52,7 @@ import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
+import ai.localstudio.openai.GigaChatTokenProvider
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiException
 import ai.localstudio.openai.OpenAiRuntime
@@ -146,6 +147,7 @@ class AppContainer private constructor(private val context: Context) {
         // later build ever reaches an existing install.
         BundledApiKeys.sync(bundledApiKeyStore, "groq")
         BundledApiKeys.sync(bundledApiKeyStore, "gemini")
+        BundledApiKeys.sync(bundledApiKeyStore, "gigachat")
 
         // Checked once per process, before anything else has a chance to
         // throw: this is the one place a *native* crash (a segfault in
@@ -412,6 +414,24 @@ class AppContainer private constructor(private val context: Context) {
         isLocalOnly: Boolean,
         registryCandidates: List<FallbackCandidate>,
     ): Orchestrator {
+        // Every previously-built manager's idle models, freed before this one
+        // even exists — not just eventually, via releaseLocalModels(). That
+        // was written on the assumption something would call it soon after a
+        // manager got superseded (a settings change, a 503 cooldown
+        // invalidating the cached orchestrator, a Compare-mode signature
+        // change); in practice its only caller is the mic button, which this
+        // build hides — so nothing ever ran it, and a superseded manager's
+        // already-loaded local model just sat resident, uncounted, for the
+        // rest of the process's life. The next buildOrchestrator() call then
+        // loaded a second, fully separate copy of the same GGUF right
+        // alongside it: this is what an OOM kill shortly after a router
+        // rebuild looked like in the app log. runBlocking is deliberate, not
+        // a shortcut: this runs on the same thread about to build a new
+        // RuntimeManager regardless, evictIdle() only touches refCount==0
+        // entries (nothing this could contend with is still generating), and
+        // freeing an idle llama.cpp context is a bounded, fast native call —
+        // unlike loading one.
+        runtimeManagers.forEach { existing -> kotlinx.coroutines.runBlocking { existing.evictIdle() } }
         val manager = RuntimeManager(
             // Remote and stub models hold no local weights; the budget starts
             // mattering the moment an on-device runtime is added. Note this
@@ -424,7 +444,7 @@ class AppContainer private constructor(private val context: Context) {
         )
         runtimeManagers += manager
         val executors = NodeExecutors(
-            selector = ModelSelector(registry(registryCandidates), device),
+            selector = ModelSelector(registry(runtime, registryCandidates), device),
             runtimeManager = manager,
             contextEngine = ContextEngine(),
             memory = memory,
@@ -442,7 +462,13 @@ class AppContainer private constructor(private val context: Context) {
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
             defaultRepeatPenalty = settings.repeatPenalty,
-            defaultMaxTokens = settings.maxResponseTokens,
+            // Same reasoning as contextWindowTokens just above: maxResponseTokens
+            // is one shared setting a user can (reasonably) raise for a cloud
+            // model's longer, more capable answers, and until now local paid
+            // for that unconditionally too — a longer generation is direct,
+            // linear extra wall-clock time on hardware already the
+            // bottleneck, not just extra RAM the way context length is.
+            defaultMaxTokens = if (isLocalOnly) minOf(settings.maxResponseTokens, LOCAL_MAX_OUTPUT_TOKENS) else settings.maxResponseTokens,
         )
         return Orchestrator(CapabilityRouter(), executors)
     }
@@ -468,7 +494,16 @@ class AppContainer private constructor(private val context: Context) {
     private val compareOrchestrators = mutableMapOf<String, Orchestrator>()
     private val compareSignatures = mutableMapOf<String, String>()
 
-    fun compareCandidates(): List<Pair<String, Orchestrator>> =
+    /**
+     * One Compare-mode bubble's source. [isLocal] drives whether
+     * [ai.localstudio.app.ChatActivity] streams this source's answer token by
+     * token or waits for the full response — a cloud call is fast enough
+     * end-to-end that progressive rendering only adds visual noise, while a
+     * local model can take minutes and needs the incremental feedback.
+     */
+    data class CompareSource(val label: String, val orchestrator: Orchestrator, val isLocal: Boolean)
+
+    fun compareCandidates(): List<CompareSource> =
         enabledProviders().mapNotNull { provider ->
             val candidates = if (provider.id == CloudProviders.LOCAL.id) {
                 listOfNotNull(localCandidate())
@@ -476,7 +511,10 @@ class AppContainer private constructor(private val context: Context) {
                 cloudCandidates(provider)
             }
             if (candidates.isEmpty()) return@mapNotNull null
-            val runtime: ModelRuntime = candidates.singleOrNull()?.runtime ?: FallbackTextRuntime(candidates)
+            // Always wrapped, even for a single candidate: this is what gives
+            // every Compare-mode bubble the "Ответ от: <model> · <elapsed>"
+            // footer, not just chains with a fallback to name.
+            val runtime: ModelRuntime = FallbackTextRuntime(candidates)
             // The specific model that answered is still named, by
             // FallbackTextRuntime's own "Ответ от:" footer — this is just the
             // bubble's heading, which should stay the provider for a chain
@@ -518,7 +556,7 @@ class AppContainer private constructor(private val context: Context) {
                 compareOrchestrators[provider.id] = it
                 compareSignatures[provider.id] = signature
             }
-            label to orchestrator
+            CompareSource(label, orchestrator, isLocalOnly)
         }
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
@@ -604,12 +642,25 @@ class AppContainer private constructor(private val context: Context) {
      * already truncates a prompt that doesn't fit rather than failing, so
      * undersizing here degrades gracefully instead of breaking anything.
      */
-    private fun effectiveContextTokens(): Int =
-        if (documents.list().isEmpty() && !settings.memoryEnabled) {
-            minOf(settings.contextTokens, SMALL_CONTEXT_TOKENS)
+    private fun effectiveContextTokens(): Int {
+        // Even with a document or memory recall in play, local still gets a
+        // hard ceiling rather than the raw setting — [settings.contextTokens]
+        // is one shared control also used to size CLOUD_CONTEXT_WINDOW_TOKENS
+        // usage upstream, so a value the user raised for a big document
+        // against Gemini used to also hand a phone's llama.cpp context that
+        // same size verbatim. The app log's own OOM kills correlate with
+        // exactly that: a local model loading with a large accumulated
+        // context, on a device with no headroom for a KV cache anywhere near
+        // that big. LOCAL_CONTEXT_TOKENS_CEILING is deliberately still well
+        // above SMALL_CONTEXT_TOKENS — real room for an attached document or
+        // recalled memory — just not the *raw*, cloud-sized ceiling.
+        val ceiling = if (documents.list().isEmpty() && !settings.memoryEnabled) {
+            SMALL_CONTEXT_TOKENS
         } else {
-            settings.contextTokens
+            LOCAL_CONTEXT_TOKENS_CEILING
         }
+        return minOf(settings.contextTokens, ceiling)
+    }
 
     /**
      * A configured cloud provider as a run of fallback candidates — one per
@@ -628,11 +679,15 @@ class AppContainer private constructor(private val context: Context) {
      * candidates one provider contributes did.
      *
      * A model an earlier turn already saw a 503 from is left out of the list
-     * entirely for [ModelCooldownStore.DEFAULT_COOLDOWN_MS] — without this, a
-     * model stuck overloaded for hours gets retried (and fails, slowly) on
-     * every single message, which is what turned "one model is down" into
-     * "every reply takes 20+ seconds".
+     * for a while — [ModelCooldownStore] escalating from a few minutes up to
+     * [ModelCooldownStore.DEFAULT_COOLDOWN_MS] the more times in a row it
+     * keeps happening — without this, a model stuck overloaded gets retried
+     * (and fails, slowly) on every single message, which is what turned "one
+     * model is down" into "every reply takes 20+ seconds".
      */
+    /** Shared so its token cache (keyed by authorization key) survives across turns — see its own doc comment. */
+    private val gigaChatTokenProvider = GigaChatTokenProvider()
+
     private fun cloudCandidates(provider: CloudProvider): List<FallbackCandidate> {
         val endpoint = if (provider.editableUrl) settings.customEndpoint else provider.baseUrl
         if (endpoint.isBlank()) return emptyList()
@@ -641,39 +696,77 @@ class AppContainer private constructor(private val context: Context) {
                 baseUrl = endpoint,
                 apiKey = settings.apiKeyFor(provider.id).ifBlank { null },
                 keyRotator = apiKeyRotator(provider.id),
+                transformKey = if (provider.id == "gigachat") gigaChatTokenProvider::token else null,
             ),
         )
         val primaryModel = settings.chatModelFor(provider.id)
         val modelNames = (listOf(primaryModel) + provider.freeModels.filterNot { it == primaryModel })
             .filterNot { modelCooldowns.isOnCooldown(provider.id, it) }
+        // Set by the first sibling that hits HTTP 413 (request too large) —
+        // every other model on this SAME provider almost certainly shares
+        // the same context-length limit and will reject the identical
+        // oversized prompt too, so there is nothing to learn by actually
+        // trying each of them before falling through to a different
+        // provider. Scoped to this one cloudCandidates() call (i.e. this one
+        // turn's attempt at this one provider) rather than persisted:
+        // unlike a 503, a 413 says nothing about whether this provider is
+        // healthy — the very next message, with a shorter prompt, is
+        // expected to work against the exact same models.
+        val requestTooLargeForProvider = java.util.concurrent.atomic.AtomicBoolean(false)
         return modelNames.map { modelName ->
             val model = servedModel(modelName, RuntimeKind.REMOTE_OPENAI, Capability.TEXT_GENERATION, Capability.REASONING)
             val providerTitle = context.getString(provider.titleRes)
             FallbackCandidate(
-                label = if (modelName == primaryModel) providerTitle else "$providerTitle ($modelName)",
+                // Always the specific model, even for the primary one: the
+                // attribution footer this label ends up in (see
+                // FallbackTextRuntime) is the only place the user can tell
+                // *which* of a provider's free-tier models actually
+                // answered, and "Groq" alone answers a different question
+                // than "which Groq model" does.
+                label = "$providerTitle ($modelName)",
                 runtime = runtime,
                 model = model,
                 binding = model.bindings.first(),
+                shouldSkip = { requestTooLargeForProvider.get() },
+                // null (unverified) defaults to true, same as before this
+                // field existed — see CloudProvider.visionModels' own doc
+                // comment for which providers have an actual confirmed list.
+                supportsImages = provider.visionModels?.contains(modelName) ?: true,
                 onFailure = { error ->
-                    if (error is OpenAiException && error.status == 503) {
-                        modelCooldowns.markOverloaded(provider.id, modelName)
-                        // Otherwise the next message reuses the cached
-                        // orchestrator — built before this model went on
-                        // cooldown — and hits the very same overloaded model
-                        // it was just supposed to stop trying.
-                        cachedOrchestrator = null
-                        appLog.record(
-                            "MODEL_COOLDOWN",
-                            "$providerTitle ($modelName): HTTP 503, skipping for " +
-                                "${ModelCooldownStore.DEFAULT_COOLDOWN_MS / 60_000} min",
-                        )
+                    when {
+                        error is OpenAiException && error.status == 503 -> {
+                            modelCooldowns.markOverloaded(provider.id, modelName)
+                            // Otherwise the next message reuses the cached
+                            // orchestrator — built before this model went on
+                            // cooldown — and hits the very same overloaded
+                            // model it was just supposed to stop trying.
+                            cachedOrchestrator = null
+                            val cooldownMs = modelCooldowns.currentCooldownMs(provider.id, modelName)
+                            appLog.record(
+                                "MODEL_COOLDOWN",
+                                "$providerTitle ($modelName): HTTP 503, skipping for ${cooldownMs / 60_000} min",
+                            )
+                        }
+                        // Distinct from the 429/daily-limit path entirely —
+                        // this is not a quota problem key rotation or a
+                        // cooldown can route around, it means THIS request
+                        // (with this conversation's current prompt size) is
+                        // too big for this provider's free tier, full stop.
+                        error is OpenAiException && error.status == 413 -> {
+                            requestTooLargeForProvider.set(true)
+                            appLog.record(
+                                "GENERATION_ERROR",
+                                "$providerTitle ($modelName): HTTP 413, request too large — " +
+                                    "skipping the rest of this provider's models for this turn",
+                            )
+                        }
                     }
                 },
             )
         }
     }
 
-    private fun registry(candidates: List<FallbackCandidate>): ModelRegistry {
+    private fun registry(runtime: ModelRuntime, candidates: List<FallbackCandidate>): ModelRegistry {
         val entries = mutableListOf<RegistryEntry>()
         when {
             candidates.isEmpty() -> entries += RegistryEntry(
@@ -681,7 +774,22 @@ class AppContainer private constructor(private val context: Context) {
                 InstallState.INSTALLED,
             )
 
-            candidates.size == 1 -> {
+            // Branches on the RUNTIME actually being handed to RuntimeManager
+            // below, not on candidates.size — those used to always agree
+            // (a lone candidate's own runtime, a chain's own FALLBACK_CHAIN
+            // kind), but compareCandidates() now wraps even a single
+            // candidate in FallbackTextRuntime unconditionally (for the
+            // attribution+latency footer every Compare-mode source gets).
+            // Registering `only.model`'s ORIGINAL binding (llama.cpp, say)
+            // while RuntimeManager only has FALLBACK_CHAIN registered — the
+            // old candidates.size == 1 branch's mistake — sent ModelSelector
+            // to pick a runtime kind nothing in this orchestrator's own
+            // RuntimeManager knew how to serve: "No runtime registered for
+            // llama_cpp" on every single Compare-mode local turn.
+            runtime.kind == RuntimeKind.FALLBACK_CHAIN ->
+                entries += RegistryEntry(fallbackChainDescriptor(candidates), InstallState.INSTALLED)
+
+            else -> {
                 val only = candidates.single()
                 entries += RegistryEntry(only.model, InstallState.INSTALLED)
                 // Voice input never actually goes through the pipeline in
@@ -696,8 +804,6 @@ class AppContainer private constructor(private val context: Context) {
                     )
                 }
             }
-
-            else -> entries += RegistryEntry(fallbackChainDescriptor(candidates), InstallState.INSTALLED)
         }
         return ModelRegistry(entries)
     }
@@ -780,6 +886,19 @@ class AppContainer private constructor(private val context: Context) {
             ?.joinToString(" → ") { context.getString(it.titleRes) }
             ?: context.getString(CloudProviders.DEMO.titleRes)
 
+    /**
+     * Whether the route [orchestrator] last built is local-only — every
+     * candidate in it runs on-device, with no cloud fallback configured.
+     * [ChatActivity] uses this to decide whether a turn's answer should
+     * stream in as it's produced: worth it for a local model that can take
+     * minutes, but a cloud candidate answers in seconds, so live partial
+     * renders there add redraw churn without buying anything. Reads
+     * [lastCandidates] rather than rebuilding — call [orchestrator] first so
+     * this reflects the route about to actually run.
+     */
+    val isLocalOnlyRoute: Boolean
+        get() = lastCandidates.isNotEmpty() && lastCandidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP }
+
     private fun servedModel(
         id: String,
         kind: RuntimeKind,
@@ -815,6 +934,15 @@ class AppContainer private constructor(private val context: Context) {
         // Ceiling for a local context when nothing in this conversation
         // needs the user's full configured window — see effectiveContextTokens().
         private const val SMALL_CONTEXT_TOKENS = 2048
+
+        // Ceiling for a local context even when a document or memory recall
+        // IS in play — see effectiveContextTokens(). Room for real context,
+        // just not the raw, cloud-sized settings.contextTokens value verbatim.
+        private const val LOCAL_CONTEXT_TOKENS_CEILING = 4096
+
+        // A local model's own output length, capped independently of
+        // settings.maxResponseTokens — see its call site in buildOrchestrator().
+        private const val LOCAL_MAX_OUTPUT_TOKENS = 512
 
         @Volatile
         private var instance: AppContainer? = null

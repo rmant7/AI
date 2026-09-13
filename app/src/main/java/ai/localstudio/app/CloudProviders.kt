@@ -30,14 +30,31 @@ data class CloudProvider(
      */
     val freeModels: List<String> = emptyList(),
     /**
-     * Whether attaching an image is worth offering for this provider at all.
-     * Conservative on purpose: only providers actually confirmed to accept
-     * OpenAI-compatible vision content (`image_url` parts) are marked true —
-     * an editable model field means the user could always type in a model
-     * this doesn't hold for, so this is "don't block the common case," not a
-     * guarantee every model listed here understands images.
+     * Whether attaching an image is worth offering for this provider at all —
+     * true the moment at least one of its models can actually see one. Only
+     * gates the attach button (see ChatActivity); which of THIS provider's
+     * several models actually receives the image on a given turn is decided
+     * per-model by [visionModels] instead.
      */
     val visionCapable: Boolean = false,
+    /**
+     * Which of [freeModels] actually accept the OpenAI-compatible vision
+     * content shape (`image_url` parts) this app sends — confirmed by an
+     * actual failure/success, not assumed. `null` means unverified either
+     * way for every model this provider offers: an attached image is still
+     * sent and left to fail gracefully per-model, same as before this field
+     * existed. A non-null set (including empty) is enforced up front —
+     * AppContainer skips a candidate outright rather than spending a real
+     * request finding out it doesn't support images, which matters most for
+     * a provider like Groq that mixes vision and text-only models under one
+     * free-tier rotation: two of its models rejecting the same attached
+     * image before reaching the one that actually understands it wasted a
+     * full round trip each, observed directly in a live Compare-mode run.
+     * An editable model field still means the user can type in a name this
+     * set doesn't cover — treated as not vision-capable, the conservative
+     * default, rather than spending a request finding out either way.
+     */
+    val visionModels: Set<String>? = null,
 )
 
 object CloudProviders {
@@ -64,6 +81,31 @@ object CloudProviders {
         LOCAL,
         DEMO,
         CloudProvider(
+            id = "groq",
+            titleRes = R.string.provider_title_groq,
+            baseUrl = "https://api.groq.com/openai/v1",
+            defaultModel = "openai/gpt-oss-120b",
+            keyHintRes = R.string.provider_keyhint_groq,
+            freeModels = listOf(
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.6-27b",
+                "meta-llama/llama-4-scout-17b-16e-instruct",
+                "meta-llama/llama-4-maverick-17b-128e-instruct",
+            ),
+            visionCapable = true,
+            // Confirmed against Groq's own vision docs (console.groq.com/docs/vision):
+            // the Llama 4 models and Qwen3.6-27B accept image input, the
+            // gpt-oss reasoning models do not — matching a live failure
+            // observed directly ("messages[1].content must be a string" from
+            // both gpt-oss models, a real answer from qwen3.6-27b).
+            visionModels = setOf(
+                "qwen/qwen3.6-27b",
+                "meta-llama/llama-4-scout-17b-16e-instruct",
+                "meta-llama/llama-4-maverick-17b-128e-instruct",
+            ),
+        ),
+        CloudProvider(
             id = "gemini",
             titleRes = R.string.provider_title_gemini,
             baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -82,6 +124,38 @@ object CloudProviders {
             visionCapable = true,
         ),
         CloudProvider(
+            id = "gigachat",
+            titleRes = R.string.provider_title_gigachat,
+            baseUrl = "https://gigachat.devices.sberbank.ru/api/v1",
+            defaultModel = "GigaChat-2",
+            keyHintRes = R.string.provider_keyhint_gigachat,
+            // Model names and free-tier availability are unverified against
+            // a live account — GigaChat's own endpoints are unreachable from
+            // this app's build/dev environment (blocked at the network
+            // level there), so this list is taken from GigaChat's published
+            // catalogue rather than confirmed by an actual successful call.
+            // The model field stays editable, same as every other provider
+            // here, for exactly this kind of drift.
+            freeModels = listOf(
+                "GigaChat-2",
+                "GigaChat-2-Pro",
+                "GigaChat-2-Max",
+            ),
+            // GigaChat's own docs (developers.sber.ru) confirm it CAN read
+            // images — but only via a separate two-step flow (upload through
+            // POST /files, then reference the returned file id as an
+            // `attachment`), not the OpenAI-compatible inline image_url
+            // content this app sends. Observed live: every model here
+            // rejected an attached image with a flat "invalid JSON syntax" —
+            // not a graceful per-model rejection, its parser doesn't
+            // recognize this request shape at all. Marked as supporting no
+            // vision models for now rather than half-implementing the real
+            // upload flow blind (this app's dev environment cannot reach
+            // GigaChat's servers to verify it) — a real follow-up, not a
+            // one-line fix.
+            visionModels = emptySet(),
+        ),
+        CloudProvider(
             id = "mistral",
             titleRes = R.string.provider_title_mistral,
             baseUrl = "https://api.mistral.ai/v1",
@@ -93,20 +167,6 @@ object CloudProviders {
                 "ministral-8b-latest",
                 "mistral-large-latest",
                 "codestral-latest",
-            ),
-        ),
-        CloudProvider(
-            id = "groq",
-            titleRes = R.string.provider_title_groq,
-            baseUrl = "https://api.groq.com/openai/v1",
-            defaultModel = "openai/gpt-oss-120b",
-            keyHintRes = R.string.provider_keyhint_groq,
-            freeModels = listOf(
-                "openai/gpt-oss-120b",
-                "openai/gpt-oss-20b",
-                "qwen/qwen3.6-27b",
-                "meta-llama/llama-4-scout-17b-16e-instruct",
-                "meta-llama/llama-4-maverick-17b-128e-instruct",
             ),
         ),
         CloudProvider(
