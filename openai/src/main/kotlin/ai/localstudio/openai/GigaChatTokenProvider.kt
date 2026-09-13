@@ -47,16 +47,33 @@ class GigaChatTokenProvider(
     private val cache = ConcurrentHashMap<String, CachedToken>()
 
     suspend fun token(authorizationKey: String): String {
+        // Trimmed once, here, so both the cache key and the header value
+        // agree on the same string — a key typed or pasted with a trailing
+        // newline would otherwise cache under one string and send another.
+        val key = authorizationKey.trim()
         val now = System.currentTimeMillis()
-        cache[authorizationKey]?.let { cached ->
+        cache[key]?.let { cached ->
             if (now - cached.fetchedAtMs < TOKEN_LIFETIME_MS) return cached.accessToken
         }
-        val fetched = fetchToken(authorizationKey)
-        cache[authorizationKey] = CachedToken(fetched, now)
+        val fetched = fetchToken(key)
+        cache[key] = CachedToken(fetched, now)
         return fetched
     }
 
     private suspend fun fetchToken(authorizationKey: String): String = withContext(Dispatchers.IO) {
+        // GigaChat's own reference SDK (ai-forever/gigachat) validates this
+        // client-side and warns on exactly this mistake: pasting the Client
+        // Secret, or the raw "client_id:client_secret" pair, instead of the
+        // already-Base64-encoded "Authorization key" the console's "Get Key"
+        // dialog actually shows. Left unvalidated, that mistake used to
+        // surface as GigaChat's own opaque `{"code":4,"message":"Can't
+        // decode 'Authorization' header"}` — accurate, but not something
+        // that tells the user what to actually go fix.
+        require(runCatching { java.util.Base64.getDecoder().decode(authorizationKey) }.isSuccess) {
+            "This doesn't look like a GigaChat Authorization key (not valid Base64). " +
+                "Re-copy it from \"Получить ключ\" / Get Key in the Sber developer console — " +
+                "not the Client ID or Client Secret shown next to it."
+        }
         val connection = (URI.create(OAUTH_URL).toURL().openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
