@@ -76,6 +76,9 @@ class AppContainer private constructor(private val context: Context) {
 
     val settings = Settings(context)
 
+    /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". Declared here, ahead of its usual place below, so memory/memoryExperimentLogger (right after) can already reference it. */
+    val appLog = AppLog(context)
+
     /**
      * Memory lives above the models, so it survives switching between
      * runtimes — and, via [FileMemoryStore], the process dying too. The
@@ -86,18 +89,22 @@ class AppContainer private constructor(private val context: Context) {
      * place for those to drift out of sync with the one everything else uses.
      * memoryEnabled = false: consolidation must not recursively search or
      * write memory for its own extraction call.
+     *
+     * [LlmMemoryExtractor]'s own `log` callback is wired to [appLog] — this
+     * call is the entire reason a conversation's memory carries over to the
+     * next one at all, and until now a failed or empty extraction (the
+     * model call throwing, a cooldown, an empty response) failed completely
+     * silently: nothing showed up anywhere, "did my memory actually get
+     * saved" had no answer except reading memory.json directly.
      */
     val memory = FileMemoryStore(
         File(context.filesDir, "memory.json"),
-        extractor = LlmMemoryExtractor { prompt ->
+        extractor = LlmMemoryExtractor(log = { message -> appLog.record("MEMORY_CONSOLIDATE", message) }) { prompt ->
             orchestrator().handle(
                 UserRequest(conversationId = "memory-consolidation", text = prompt, memoryEnabled = false),
             ).text
         },
     )
-
-    /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". Declared here, ahead of its usual place below, so memoryExperimentLogger (right after) can already reference it. */
-    val appLog = AppLog(context)
 
     /**
      * Stage 3's measurement harness (see :commercial-memory), wired to the

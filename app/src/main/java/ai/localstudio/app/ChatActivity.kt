@@ -280,6 +280,12 @@ class ChatActivity : AppCompatActivity() {
     private fun consolidatePreviousConversation(id: String) {
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching { container.memory.consolidate(id) }
+                .onFailure { error ->
+                    container.appLog.record(
+                        "MEMORY_CONSOLIDATE",
+                        "conversation=$id consolidate() threw: ${error.javaClass.simpleName}: ${error.message}",
+                    )
+                }
         }
     }
 

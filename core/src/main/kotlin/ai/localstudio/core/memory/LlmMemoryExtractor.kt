@@ -34,6 +34,7 @@ import ai.localstudio.memory.MemoryScope
  * background nicety, not something that should ever fail a turn.
  */
 class LlmMemoryExtractor(
+    private val log: (String) -> Unit = {},
     private val generate: suspend (prompt: String) -> String,
 ) : MemoryExtractor {
 
@@ -41,9 +42,11 @@ class LlmMemoryExtractor(
         if (workingMemory.isEmpty()) return emptyList()
 
         val transcript = workingMemory.joinToString("\n") { it.text }
-        val response = runCatching { generate(PROMPT_PREFIX + transcript) }.getOrDefault("")
+        val response = runCatching { generate(PROMPT_PREFIX + transcript) }
+            .onFailure { log("conversation=$conversationId extraction call failed: ${it.message}") }
+            .getOrDefault("")
 
-        return response.lineSequence()
+        val facts = response.lineSequence()
             .map { it.trim() }
             // Checked against the raw, still-un-stripped line: a bare "-"
             // or "*" bullet-marker strip below has no space requirement of
@@ -55,6 +58,9 @@ class LlmMemoryExtractor(
             .filter { it.isNotBlank() && !it.equals(NOTHING_MARKER, ignoreCase = true) }
             .map { fact -> MemoryItem(id = "", text = fact, scope = MemoryScope.EPISODIC, createdAt = 0L) }
             .toList()
+
+        log("conversation=$conversationId working=${workingMemory.size} response=${response.length}chars facts=${facts.size}")
+        return facts
     }
 
     private companion object {
