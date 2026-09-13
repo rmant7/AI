@@ -42,7 +42,10 @@ object ExperimentalEmbeddingTester {
                 pooling = spec.pooling,
                 queryPrefix = spec.queryPrefix,
                 passagePrefix = spec.passagePrefix,
-            ) ?: throw IllegalStateException("model failed to load — check it is a valid embedding GGUF")
+            ) ?: throw IllegalStateException(
+                "model failed to load — " +
+                    bridge.nativeLastLoadError().ifBlank { "check it is a valid embedding GGUF" },
+            )
 
             try {
                 val queryVector = embedder.embedForQuery(QUERY)

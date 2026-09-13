@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,32 @@ constexpr int32_t BATCH_SIZE = 512;
 void raiseThreadPriority() {
     if (setpriority(PRIO_PROCESS, 0, -8) != 0) {
         LOGI("could not raise thread priority; continuing at default");
+    }
+}
+
+// The only channel a load failure's actual reason reaches Kotlin through —
+// every existing load path (nativeLoad, nativeLoadEmbeddingModel) already
+// logged this same text via LOGE, but only to logcat, unreachable from a
+// phone with no adb. nativeLastLoadError() below is what lets
+// ExperimentalEmbeddingsActivity show *why* a candidate GGUF failed to load
+// instead of a generic "check it is a valid embedding GGUF".
+std::mutex g_lastErrorMutex;
+std::string g_lastError;
+
+void setLastError(const std::string &text) {
+    std::lock_guard<std::mutex> lock(g_lastErrorMutex);
+    g_lastError = text;
+}
+
+std::string getLastError() {
+    std::lock_guard<std::mutex> lock(g_lastErrorMutex);
+    return g_lastError;
+}
+
+void logCallback(ggml_log_level level, const char *text, void *) {
+    if (level >= GGML_LOG_LEVEL_ERROR) {
+        LOGE("%s", text);
+        setLastError(text);
     }
 }
 
@@ -425,9 +452,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     static std::atomic<bool> backendReady{false};
     if (!backendReady.exchange(true)) {
         llama_backend_init();
-        llama_log_set([](ggml_log_level level, const char *text, void *) {
-            if (level >= GGML_LOG_LEVEL_ERROR) LOGE("%s", text);
-        }, nullptr);
+        llama_log_set(logCallback, nullptr);
     }
 
     const std::string path = toStdString(env, modelPath);
@@ -524,13 +549,12 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
 JNIEXPORT jlong JNICALL
 Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadEmbeddingModel(
     JNIEnv *env, jobject, jstring modelPath, jint contextTokens, jint threads, jint pooling) {
+  setLastError("");
   try {
     static std::atomic<bool> backendReady{false};
     if (!backendReady.exchange(true)) {
         llama_backend_init();
-        llama_log_set([](ggml_log_level level, const char *text, void *) {
-            if (level >= GGML_LOG_LEVEL_ERROR) LOGE("%s", text);
-        }, nullptr);
+        llama_log_set(logCallback, nullptr);
     }
 
     const std::string path = toStdString(env, modelPath);
@@ -584,11 +608,26 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadEmbeddingModel(
   } catch (const std::exception &e) {
     // Same reasoning as nativeLoad's own catch.
     LOGE("nativeLoadEmbeddingModel: exception: %s", e.what());
+    setLastError(e.what());
     return 0;
   } catch (...) {
     LOGE("nativeLoadEmbeddingModel: unknown exception");
+    setLastError("unknown native exception");
     return 0;
   }
+}
+
+/**
+ * The most recent error-level message llama.cpp logged (or the C++
+ * exception text, or the pooling/architecture reason this file itself
+ * detected) during the last [nativeLoadEmbeddingModel] call — empty when
+ * that call hasn't failed. This is the only way a load failure's actual
+ * cause reaches a phone with no adb: everything above already logs the same
+ * text via LOGE, but logcat is unreachable without a cable.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeLastLoadError(JNIEnv *env, jobject) {
+    return env->NewStringUTF(getLastError().c_str());
 }
 
 /**

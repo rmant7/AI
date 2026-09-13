@@ -4,11 +4,13 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import ai.localstudio.commercialmemory.AppMemory
+import ai.localstudio.commercialmemory.CommercialContextSelector
 import ai.localstudio.commercialmemory.ExperimentLogger
 import ai.localstudio.commercialmemory.ExperimentMode
 import ai.localstudio.commercialmemory.ExperimentRecord
 import ai.localstudio.commercialmemory.JsonlExperimentLogger
 import ai.localstudio.commercialmemory.MemoryExperimentRunner
+import ai.localstudio.commercialmemory.RankingWeights
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.context.ContextEngine
 import ai.localstudio.core.engine.ModelSelector
@@ -20,6 +22,7 @@ import ai.localstudio.core.memory.LlmMemoryExtractor
 import ai.localstudio.core.pipeline.NodeValue
 import ai.localstudio.core.pipeline.PipelineCodec
 import ai.localstudio.memory.FileMemoryStore
+import ai.localstudio.memory.FileSemanticIndex
 import ai.localstudio.memory.MemoryQuery
 import ai.localstudio.memory.MemoryScope
 import ai.localstudio.core.registry.DeviceProfile
@@ -42,8 +45,11 @@ import ai.localstudio.app.keys.BundledApiKeyStore
 import ai.localstudio.app.keys.BundledApiKeys
 import ai.localstudio.app.keys.PrefsApiKeyStore
 import ai.localstudio.app.llama.ExperimentalEmbeddingDownloads
+import ai.localstudio.app.llama.ExperimentalEmbeddingModels
 import ai.localstudio.app.llama.ExperimentalEmbeddingStore
+import ai.localstudio.app.llama.LazyMemoryEmbedder
 import ai.localstudio.app.llama.LlamaBridge
+import ai.localstudio.app.llama.LlamaCppMemoryEmbedder
 import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.llama.LlamaCppRuntime
 import ai.localstudio.app.models.CatalogFreshness
@@ -64,6 +70,7 @@ import ai.localstudio.openai.OpenAiRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -81,6 +88,33 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". Declared here, ahead of its usual place below, so memory/memoryExperimentLogger (right after) can already reference it. */
     val appLog = AppLog(context)
+
+    /**
+     * Fronts [memory]'s semantic half. Constructing this is cheap and
+     * synchronous (no native call) — the actual GGUF load that fills it in
+     * happens off the main thread, in [init]'s own background task, and only
+     * once [ExperimentalEmbeddingModels.E5_BASE] has actually been
+     * downloaded and manually verified via the "Experimental" screen (see
+     * [ai.localstudio.app.ExperimentalEmbeddingsActivity]). Every call made
+     * to this before that finishes degrades to the same lexical-only
+     * behavior [memory] already had with no embedder configured at all —
+     * see [LazyMemoryEmbedder]'s own doc comment.
+     */
+    private val semanticMemoryEmbedder = LazyMemoryEmbedder()
+
+    /**
+     * [FileSemanticIndex] is a small binary sidecar file, cheap to construct
+     * regardless of whether [semanticMemoryEmbedder] has finished loading —
+     * or whether the model behind it is even installed. A dimension/model
+     * mismatch on reopen (a different candidate downloaded later, say) just
+     * discards stale vectors; it never touches [memory]'s actual records —
+     * see that class's own doc comment on why that split is deliberate.
+     */
+    private val semanticMemoryIndex = FileSemanticIndex(
+        File(context.filesDir, "memory-embeddings.bin"),
+        modelId = ExperimentalEmbeddingModels.E5_BASE.id,
+        dimension = ExperimentalEmbeddingModels.E5_BASE.dimension,
+    )
 
     /**
      * Memory lives above the models, so it survives switching between
@@ -107,6 +141,8 @@ class AppContainer private constructor(private val context: Context) {
                 UserRequest(conversationId = "memory-consolidation", text = prompt, memoryEnabled = false),
             ).text
         },
+        semanticIndex = semanticMemoryIndex,
+        embedder = semanticMemoryEmbedder,
     )
 
     /**
@@ -137,7 +173,26 @@ class AppContainer private constructor(private val context: Context) {
             )
         }
     }
-    val memoryExperimentRunner = MemoryExperimentRunner(AppMemory(memory), logger = memoryExperimentLogger)
+    /**
+     * The first live, non-zero [RankingWeights.semantic] this app has ever
+     * used — [RankingWeights]' own doc comment on that field explains why it
+     * defaulted to 0.0 until now: no embedder was wired into the app, and
+     * SEMANTIC_RETRIEVAL_DESIGN.md's step 9 wanted a real measurement, not a
+     * guess, before picking one. That measurement still doesn't exist yet;
+     * this is a deliberately modest starting value (well under
+     * [RankingWeights.taskRelevance]'s 0.30) rather than a tuned one — safe
+     * to ship ahead of it because [semanticMemoryEmbedder] not being ready
+     * yet, or the embedder having no vector for a given item, both leave
+     * [ai.localstudio.commercialmemory.ContextCandidate.semanticScore] null,
+     * which [ai.localstudio.commercialmemory.HeuristicContextRanker]
+     * already treats as contributing nothing — so this weight is inert
+     * until real coverage exists, exactly like it was at 0.0.
+     */
+    val memoryExperimentRunner = MemoryExperimentRunner(
+        AppMemory(memory),
+        selector = CommercialContextSelector(weights = RankingWeights(semantic = SEMANTIC_RANKING_WEIGHT)),
+        logger = memoryExperimentLogger,
+    )
 
     val documents = DocumentStore(context)
 
@@ -233,6 +288,63 @@ class AppContainer private constructor(private val context: Context) {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching {
                 catalogFreshness.refreshIfStale(LocalModels.SEEDS, settings.huggingFaceToken.ifBlank { null })
+            }
+        }
+
+        // Loads the one experimental embedding candidate this app currently
+        // ships a spec for (see ExperimentalEmbeddingModels.E5_BASE) and, once
+        // it's ready, keeps semanticMemoryIndex caught up with memory — off
+        // the main thread (a GGUF load is real, blocking work) and off the
+        // hot path (embedPending() is never called from remember() or
+        // consolidate() themselves; see SEMANTIC_RETRIEVAL_DESIGN.md's own
+        // invariant that embedding coverage may lag, but a memory record must
+        // never be lost or hidden because of it).
+        //
+        // A no-op — not an error, not a retry loop — for as long as nobody
+        // has downloaded E5_BASE via ExperimentalEmbeddingsActivity: memory
+        // stays exactly as lexical-only as it always was.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val spec = ExperimentalEmbeddingModels.E5_BASE
+            if (!experimentalEmbeddingStore.isInstalled(spec)) return@launch
+            // Reading isAvailable, not just checking it: this is what
+            // actually triggers its lazy System.loadLibrary() call. Skipping
+            // straight to LlamaCppMemoryEmbedder.load() below without ever
+            // reading this property would call an external fun before the
+            // native library is loaded at all, on every device — not only
+            // ones this build genuinely doesn't support.
+            if (!LlamaBridge.isAvailable) return@launch
+
+            val embedder = runCatching {
+                LlamaCppMemoryEmbedder.load(
+                    bridge = LlamaBridge(),
+                    modelPath = experimentalEmbeddingStore.fileFor(spec).absolutePath,
+                    modelId = spec.id,
+                    pooling = spec.pooling,
+                    queryPrefix = spec.queryPrefix,
+                    passagePrefix = spec.passagePrefix,
+                )
+            }.getOrElse { error ->
+                appLog.record("SEMANTIC_MEMORY", "failed to load ${spec.title}: ${error.message}")
+                null
+            } ?: return@launch
+
+            semanticMemoryEmbedder.set(embedder)
+            appLog.record(
+                "SEMANTIC_MEMORY",
+                "${spec.title} ready (dimension=${embedder.dimension}) — backfilling existing memory",
+            )
+
+            // Periodic, not one-shot: consolidate() keeps adding new durable
+            // memories for as long as the app runs, and embedPending() is a
+            // cheap no-op whenever nothing is actually missing a vector (it
+            // starts by checking semanticMemoryIndex.missing(...) before ever
+            // calling the embedder) — this just keeps semantic coverage from
+            // permanently falling behind, without needing every write path
+            // in the app to remember to call it itself.
+            while (true) {
+                runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
+                    .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }
+                delay(SEMANTIC_BACKFILL_INTERVAL_MS)
             }
         }
     }
@@ -1014,6 +1126,25 @@ class AppContainer private constructor(private val context: Context) {
         // worth of memory items is never left behind" — see
         // forgetConversationMemory().
         private const val CONVERSATION_MEMORY_FORGET_LIMIT = 10_000
+
+        // See memoryExperimentRunner's own doc comment for why this specific
+        // value, and why shipping it non-zero ahead of a real measurement is
+        // still safe.
+        private const val SEMANTIC_RANKING_WEIGHT = 0.20
+
+        // How many memory records embedPending() backfills per pass — see the
+        // semantic-memory background task in init{}. One pass at this size is
+        // one native call per missing item; kept well below
+        // CONVERSATION_MEMORY_FORGET_LIMIT so a large backlog spreads across
+        // several passes instead of blocking the first one for a long time.
+        private const val SEMANTIC_BACKFILL_BATCH = 64
+
+        // How often that background task rechecks for newly-consolidated
+        // memories once the embedder is ready — frequent enough that a fact
+        // saved this session is searchable semantically well within the same
+        // session, infrequent enough that it costs nothing noticeable while
+        // (the common case) there is nothing new to embed.
+        private const val SEMANTIC_BACKFILL_INTERVAL_MS = 5 * 60 * 1000L
 
         @Volatile
         private var instance: AppContainer? = null

@@ -64,6 +64,14 @@ class LlamaBridge {
     private external fun nativeLoadEmbeddingModel(modelPath: String, contextTokens: Int, threads: Int, pooling: Int): Long
 
     /**
+     * The reason the *last* [nativeLoadEmbeddingModel] call on this bridge
+     * failed — empty if it didn't fail, or if it hasn't been called yet. The
+     * only way that reason reaches a caller with no adb/logcat access: every
+     * failure path already logs the same text natively, but only to logcat.
+     */
+    external fun nativeLastLoadError(): String
+
+    /**
      * The pooled, L2-normalized embedding of [text] — a plain dot product
      * between two results is then equivalent to cosine similarity. [handle]
      * must come from [nativeLoadEmbeddingModel]. An empty array on any
