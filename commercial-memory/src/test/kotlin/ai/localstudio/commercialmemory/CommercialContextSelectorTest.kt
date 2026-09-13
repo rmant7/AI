@@ -1,5 +1,6 @@
 package ai.localstudio.commercialmemory
 
+import ai.localstudio.memory.MemoryCandidate
 import ai.localstudio.memory.MemoryItem
 import ai.localstudio.memory.MemoryScope
 import kotlin.test.Test
@@ -11,13 +12,20 @@ class CommercialContextSelectorTest {
     private fun item(id: String, text: String, scope: MemoryScope = MemoryScope.SEMANTIC, createdAt: Long = 0) =
         MemoryItem(id, text, scope, createdAt)
 
+    // buildCandidates() takes what a MemoryProvider.candidates() call would
+    // return — this is just the lexical-only shape every existing test here
+    // predates semantic retrieval with, matching MemoryProvider.candidates()'s
+    // own default implementation for a backend with no semantic index.
+    private fun asCandidates(items: List<MemoryItem>): List<MemoryCandidate> =
+        items.mapIndexed { i, item -> MemoryCandidate(item, lexicalRank = i, semanticRank = null, semanticScore = null) }
+
     @Test
     fun `ranks the more relevant candidate first`() {
         val items = listOf(
             item("a", "The user prefers local Android AI models"),
             item("b", "The weather is cold today"),
         )
-        val candidates = buildCandidates("Android AI models", items)
+        val candidates = buildCandidates("Android AI models", asCandidates(items))
 
         val result = CommercialContextSelector().select("Android AI models", candidates)
 
@@ -31,7 +39,7 @@ class CommercialContextSelectorTest {
             item("a", "alpha beta gamma delta epsilon"),
             item("b", "alpha beta another memory"),
         )
-        val candidates = buildCandidates("alpha beta", items)
+        val candidates = buildCandidates("alpha beta", asCandidates(items))
 
         val result = CommercialContextSelector().select("alpha beta", candidates, ContextBudget(maxCharacters = 12))
 
@@ -41,7 +49,7 @@ class CommercialContextSelectorTest {
     @Test
     fun `a single oversized item is still selected, truncated, rather than selecting nothing`() {
         val items = listOf(item("a", "x".repeat(100)))
-        val candidates = buildCandidates("x", items)
+        val candidates = buildCandidates("x", asCandidates(items))
 
         val result = CommercialContextSelector().select("x", candidates, ContextBudget(maxCharacters = 10))
 
@@ -56,7 +64,7 @@ class CommercialContextSelectorTest {
             item("small", "fits"),
             item("huge", "x".repeat(100)),
         )
-        val candidates = buildCandidates("fits huge", items)
+        val candidates = buildCandidates("fits huge", asCandidates(items))
 
         val result = CommercialContextSelector().select("fits huge", candidates, ContextBudget(maxCharacters = 10))
 
@@ -66,7 +74,7 @@ class CommercialContextSelectorTest {
     @Test
     fun `maxItems caps the selection even when characters would still fit`() {
         val items = (1..5).map { item("id$it", "short text $it") }
-        val candidates = buildCandidates("short text", items)
+        val candidates = buildCandidates("short text", asCandidates(items))
 
         val result = CommercialContextSelector().select("short text", candidates, ContextBudget(maxCharacters = 10_000, maxItems = 2))
 
@@ -79,7 +87,7 @@ class CommercialContextSelectorTest {
             item("first", "irrelevant text about gardening"),
             item("second", "highly relevant to the query terms"),
         )
-        val candidates = buildCandidates("highly relevant query", items)
+        val candidates = buildCandidates("highly relevant query", asCandidates(items))
 
         val result = CommercialContextSelector(ranker = NoRanking).select("highly relevant query", candidates)
 

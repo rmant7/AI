@@ -37,4 +37,42 @@ class HeuristicContextRankerTest {
     fun `an empty candidate list ranks to an empty list`() {
         assertEquals(emptyList(), HeuristicContextRanker().rank("q", emptyList()))
     }
+
+    @Test
+    fun `semanticScore contributes nothing at the default weight of zero`() {
+        val noSemantic = candidate("no-semantic", lexical = 0.5).copy(semanticScore = null)
+        val highSemantic = candidate("high-semantic", lexical = 0.5).copy(semanticScore = 0.99)
+
+        val ranked = HeuristicContextRanker().rank("q", listOf(noSemantic, highSemantic))
+
+        // Tied on every weighted signal (both have identical lexical/task/
+        // recency/source scores and the default semantic weight is 0) — the
+        // one with an actual semantic score must not be treated as any more
+        // relevant until something has actually decided that weight matters.
+        assertEquals(setOf("no-semantic", "high-semantic"), ranked.map { it.memory.id }.toSet())
+    }
+
+    @Test
+    fun `a non-zero semantic weight lets semanticScore change the outcome`() {
+        val lexicalWinner = candidate("lexical-winner", lexical = 0.9).copy(semanticScore = 0.0)
+        val semanticWinner = candidate("semantic-winner", lexical = 0.1).copy(semanticScore = 0.9)
+        val weights = RankingWeights(lexical = 0.5, taskRelevance = 0.0, recency = 0.0, sourcePriority = 0.0, semantic = 0.5)
+
+        val ranked = HeuristicContextRanker().rank("q", listOf(lexicalWinner, semanticWinner), weights)
+
+        assertEquals("semantic-winner", ranked.first().memory.id, "0.1*0.5 + 0.9*0.5 must beat 0.9*0.5 + 0.0*0.5")
+    }
+
+    @Test
+    fun `a null semanticScore is treated as absent, not as the worst possible score`() {
+        val noVectorYet = candidate("no-vector-yet", lexical = 0.5).copy(semanticScore = null)
+        val weights = RankingWeights(lexical = 1.0, taskRelevance = 0.0, recency = 0.0, sourcePriority = 0.0, semantic = 1.0)
+
+        // Must not throw on a null semanticScore even with a non-zero semantic
+        // weight — a real backend reports null for exactly this case (no
+        // semantic index configured, or this item not embedded yet).
+        val ranked = HeuristicContextRanker().rank("q", listOf(noVectorYet), weights)
+
+        assertEquals(listOf("no-vector-yet"), ranked.map { it.memory.id })
+    }
 }

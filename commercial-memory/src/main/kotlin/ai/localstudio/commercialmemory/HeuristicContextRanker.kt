@@ -19,7 +19,14 @@ class HeuristicContextRanker : ContextRanker {
             val score = candidate.lexicalScore * weights.lexical +
                 candidate.taskRelevance * weights.taskRelevance +
                 candidate.recencyScore * weights.recency +
-                candidate.sourcePriority * weights.sourcePriority
+                candidate.sourcePriority * weights.sourcePriority +
+                // null (no semantic index configured, or this item has no
+                // vector yet) contributes nothing rather than being treated
+                // as "definitely irrelevant" (0.0 would be a real score for
+                // cosine similarity, not an absence of one) — but at
+                // weights.semantic's own default of 0, this line changes
+                // nothing regardless, by design.
+                (candidate.semanticScore ?: 0.0) * weights.semantic
             candidate to score
         }
         .sortedByDescending { it.second }

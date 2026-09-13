@@ -1,5 +1,6 @@
 package ai.localstudio.commercialmemory
 
+import ai.localstudio.memory.MemoryCandidate
 import ai.localstudio.memory.MemoryItem
 import ai.localstudio.memory.MemoryProvider
 import ai.localstudio.memory.MemoryQuery
@@ -30,12 +31,19 @@ class AppMemory(private val provider: MemoryProvider) {
     ): String = provider.remember(text, scope, metadata)
 
     /**
-     * Raw retrieval candidates for [query] — generic lexical matches from
+     * Raw retrieval candidates for [query] — lexical and (when the wired-up
+     * [MemoryProvider] backend maintains one) semantic matches from
      * Mobile_mem0, not yet ranked or budgeted for a specific model or turn.
      * [limit] is deliberately generous by default (wider than what will
      * actually be injected into a prompt): the whole point of a separate
      * ranking/selection step afterward is to choose well from a larger pool,
      * not to have retrieval itself decide what is relevant.
+     *
+     * Each result carries its own [MemoryCandidate.lexicalRank]/
+     * [MemoryCandidate.semanticRank]/[MemoryCandidate.semanticScore] rather
+     * than a single fused score — Mobile_mem0 reports signals, this module's
+     * own [ContextRanker] decides how much each one matters (see this
+     * module's README boundary section), never the other way around.
      */
     suspend fun candidates(
         query: String,
@@ -49,7 +57,7 @@ class AppMemory(private val provider: MemoryProvider) {
          * removes it as a requirement for a result to appear at all.
          */
         matchAll: Boolean = false,
-    ): List<MemoryItem> = provider.search(MemoryQuery(text = query, scopes = scopes, limit = limit, matchAll = matchAll))
+    ): List<MemoryCandidate> = provider.candidates(MemoryQuery(text = query, scopes = scopes, limit = limit, matchAll = matchAll))
 
     suspend fun forget(id: String) = provider.forget(id)
 

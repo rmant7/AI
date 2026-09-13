@@ -32,6 +32,22 @@ class AppMemoryTest {
     }
 
     @Test
+    fun `candidates reports lexicalRank with no semantic index configured`() = runBlocking {
+        // FileMemoryStore() with no MemorySemanticIndex/MemoryEmbedder passed
+        // — the shape AppContainer wires up until an embedder is actually
+        // configured (SEMANTIC_RETRIEVAL_DESIGN.md step 6+). candidates()
+        // must still work, falling back to lexical-only.
+        val memory = appMemory()
+        memory.remember("Пользователь строит локальный AI runtime", MemoryScope.SEMANTIC)
+
+        val hit = memory.candidates("локальный runtime").single()
+
+        assertEquals(0, hit.lexicalRank)
+        assertEquals(null, hit.semanticRank)
+        assertEquals(null, hit.semanticScore)
+    }
+
+    @Test
     fun `matchAll finds candidates a plain lexical query about memory itself would miss`() = runBlocking {
         val memory = appMemory()
         memory.remember("Пользователь строит локальный AI runtime", MemoryScope.SEMANTIC)

@@ -1,23 +1,21 @@
 package ai.localstudio.commercialmemory
 
-import ai.localstudio.memory.MemoryItem
+import ai.localstudio.memory.MemoryCandidate
 import ai.localstudio.memory.MemoryScope
 
 /**
  * Turns raw retrieval results ([AppMemory.candidates]) into scored
- * [ContextCandidate]s for [ContextRanker] to rank. Computed fresh from each
- * item's own fields rather than reused from Mobile_mem0's own internal
- * relevance score: that score already bakes in Mobile_mem0's own generic
- * scope/recency weighting for its own retrieval-ordering purposes, and the
- * whole point of this private layer is to score independently, with its own
- * (eventually swappable) weights — see the module README.
+ * [ContextCandidate]s for [ContextRanker] to rank. See [ContextCandidate]'s
+ * own doc comment for which signals are recomputed here versus carried
+ * straight through from Mobile_mem0, and why.
  */
-internal fun buildCandidates(query: String, items: List<MemoryItem>): List<ContextCandidate> {
-    val newest = items.maxOfOrNull { it.createdAt }
-    val oldest = items.minOfOrNull { it.createdAt } ?: newest
+internal fun buildCandidates(query: String, items: List<MemoryCandidate>): List<ContextCandidate> {
+    val newest = items.maxOfOrNull { it.item.createdAt }
+    val oldest = items.minOfOrNull { it.item.createdAt } ?: newest
     val span = if (newest != null && oldest != null) (newest - oldest).coerceAtLeast(1) else 1L
 
-    return items.map { item ->
+    return items.map { candidate ->
+        val item = candidate.item
         ContextCandidate(
             memory = item,
             lexicalScore = lexicalOverlap(query, item.text),
@@ -32,6 +30,7 @@ internal fun buildCandidates(query: String, items: List<MemoryItem>): List<Conte
                 MemoryScope.SEMANTIC -> 0.6
                 MemoryScope.EPISODIC -> 0.4
             },
+            semanticScore = candidate.semanticScore?.toDouble(),
         )
     }
 }
