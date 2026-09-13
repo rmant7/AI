@@ -4,7 +4,9 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import ai.localstudio.commercialmemory.AppMemory
+import ai.localstudio.commercialmemory.ExperimentLogger
 import ai.localstudio.commercialmemory.ExperimentMode
+import ai.localstudio.commercialmemory.ExperimentRecord
 import ai.localstudio.commercialmemory.JsonlExperimentLogger
 import ai.localstudio.commercialmemory.MemoryExperimentRunner
 import ai.localstudio.core.capability.Capability
@@ -94,6 +96,9 @@ class AppContainer private constructor(private val context: Context) {
         },
     )
 
+    /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". Declared here, ahead of its usual place below, so memoryExperimentLogger (right after) can already reference it. */
+    val appLog = AppLog(context)
+
     /**
      * Stage 3's measurement harness (see :commercial-memory), wired to the
      * real app for the first time: every turn's retrieve→rank→budget→select
@@ -102,8 +107,26 @@ class AppContainer private constructor(private val context: Context) {
      * turns "an architecture that could collect Stage-4 data" into data
      * getting collected, on a real device, from real use — the whole point
      * of shipping this rather than only unit-testing it.
+     *
+     * Also mirrored, one human-readable line per turn, into [appLog] — the
+     * JSONL file needs adb (or root) to actually read off a real device, and
+     * wireless debugging is exactly the kind of thing that reliably works
+     * right up until the one time you need it. [appLog] is already the
+     * existing "get a report off this phone with no cable and no dev tools"
+     * path (Settings → Журнал ошибок → Скопировать), so this rides that
+     * same, already-working mechanism instead of asking for a second one.
      */
-    private val memoryExperimentLogger = JsonlExperimentLogger(File(context.filesDir, "memory-experiments.jsonl"))
+    private val memoryExperimentLogger = object : ExperimentLogger {
+        private val jsonl = JsonlExperimentLogger(File(context.filesDir, "memory-experiments.jsonl"))
+        override fun log(record: ExperimentRecord) {
+            jsonl.log(record)
+            appLog.record(
+                "MEMORY_EXPERIMENT",
+                "${record.mode}: ${record.candidateCount} candidates -> ${record.selectedCount} selected " +
+                    "(${record.selectedCharacters} chars), ${record.latencyMs}ms",
+            )
+        }
+    }
     val memoryExperimentRunner = MemoryExperimentRunner(AppMemory(memory), logger = memoryExperimentLogger)
 
     val documents = DocumentStore(context)
@@ -119,9 +142,6 @@ class AppContainer private constructor(private val context: Context) {
     /** One rotator per provider, so cooldown state for Gemini and Mistral never mixes. */
     fun apiKeyRotator(providerId: String): ApiKeyRotator =
         ApiKeyRotator(apiKeyStore, providerId, bundledStore = bundledApiKeyStore)
-
-    /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". */
-    val appLog = AppLog(context)
 
     /** Which cloud models are sitting out an overload — see cloudCandidates(). */
     val modelCooldowns = ModelCooldownStore(context)
