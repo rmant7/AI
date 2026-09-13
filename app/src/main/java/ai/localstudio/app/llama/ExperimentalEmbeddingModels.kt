@@ -19,6 +19,8 @@ package ai.localstudio.app.llama
  */
 data class EmbeddingModelSpec(
     val id: String,
+    /** Display name for [ExperimentalEmbeddingsActivity] — never shown anywhere in the production model catalog. */
+    val title: String,
     val repoId: String,
     val quantLabel: String,
     val dimension: Int,
@@ -37,6 +39,7 @@ object ExperimentalEmbeddingModels {
      */
     val E5_SMALL = EmbeddingModelSpec(
         id = "multilingual-e5-small-iq4xs",
+        title = "Multilingual E5 Small",
         repoId = "cstr/multilingual-e5-small-GGUF",
         quantLabel = "IQ4_XS",
         dimension = 384,
@@ -48,6 +51,7 @@ object ExperimentalEmbeddingModels {
     /** Second candidate: same family, larger — for a real quality comparison against [E5_SMALL] once both load correctly. */
     val E5_BASE = EmbeddingModelSpec(
         id = "multilingual-e5-base-q4km",
+        title = "Multilingual E5 Base",
         repoId = "groonga/multilingual-e5-base-Q4_K_M-GGUF",
         quantLabel = "Q4_K_M",
         dimension = 768,
@@ -55,4 +59,7 @@ object ExperimentalEmbeddingModels {
         queryPrefix = "query: ",
         passagePrefix = "passage: ",
     )
+
+    /** Every candidate, for [ExperimentalEmbeddingsActivity] to list. */
+    val ALL = listOf(E5_SMALL, E5_BASE)
 }

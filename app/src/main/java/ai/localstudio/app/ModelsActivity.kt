@@ -278,6 +278,27 @@ class ModelsActivity : AppCompatActivity() {
         }
 
         add(Row.Custom)
+
+        // Manual, phone-only verification for a candidate embedding model —
+        // see ExperimentalEmbeddingsActivity's own doc comment. Deliberately
+        // last and visually a plain row rather than promoted like the models
+        // above it: nothing tapped here ever changes the app's actual chat
+        // model.
+        add(
+            Row.Model(
+                title = getString(R.string.models_experimental_embeddings_title),
+                subtitle = getString(R.string.models_experimental_embeddings_subtitle),
+                selected = false,
+                status = null,
+                progress = null,
+                indeterminate = false,
+                primaryLabel = getString(R.string.models_experimental_embeddings_open),
+                primaryEnabled = true,
+                secondaryLabel = null,
+                onPrimary = { startActivity(android.content.Intent(this, ExperimentalEmbeddingsActivity::class.java)) },
+                onSecondary = {},
+            ),
+        )
     }
 
     /**

@@ -41,6 +41,8 @@ import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.keys.BundledApiKeyStore
 import ai.localstudio.app.keys.BundledApiKeys
 import ai.localstudio.app.keys.PrefsApiKeyStore
+import ai.localstudio.app.llama.ExperimentalEmbeddingDownloads
+import ai.localstudio.app.llama.ExperimentalEmbeddingStore
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.llama.LlamaCppRuntime
@@ -329,6 +331,20 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
+
+    /**
+     * Backs [ExperimentalEmbeddingsActivity] — a phone-only (no adb) way to
+     * download and sanity-check a candidate [ai.localstudio.memory.MemoryEmbedder]
+     * model. Entirely separate from [downloads]/[modelStore]: nothing here
+     * ever feeds [LocalModels] or the chat-model registry, see
+     * ExperimentalEmbeddingModels' own doc comment for why that stays true
+     * until a candidate is actually verified.
+     */
+    val experimentalEmbeddingStore = ExperimentalEmbeddingStore(context)
+    val experimentalEmbeddingDownloads = ExperimentalEmbeddingDownloads(
+        experimentalEmbeddingStore,
+        tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
+    )
 
     private var cachedOrchestrator: Orchestrator? = null
     private var cachedSignature: String? = null

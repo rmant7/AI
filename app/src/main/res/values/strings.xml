@@ -124,6 +124,17 @@
     <string name="models_orphans_title">Unknown files</string>
     <string name="models_orphans_subtitle">Found %1$d files, ~%2$s total. The current app version doesn\'t use them — likely left over from another version or development branch.</string>
     <string name="models_orphans_delete">Delete (%1$s)</string>
+    <string name="models_experimental_embeddings_title">Experimental: embedding models</string>
+    <string name="models_experimental_embeddings_subtitle">Manual download and sanity check for a candidate memory-search model — not used by chat.</string>
+    <string name="models_experimental_embeddings_open">Open</string>
+    <string name="embed_screen_title">Experimental embedding models</string>
+    <string name="embed_screen_explainer">Downloads and checks a candidate embedding model for semantic memory search. These models are never used for chat and are not added to the model catalog automatically — download one, tap Test, and check the numbers below before deciding whether it\'s any good.</string>
+    <string name="embed_test">Test</string>
+    <string name="embed_testing">Testing…</string>
+    <string name="embed_result">Dimension: %1$d\nQuery vector L2 norm: %2$.3f (should be close to 1.0)\ncosine(query, similar passage): %3$.3f\ncosine(query, dissimilar passage): %4$.3f\n%5$s</string>
+    <string name="embed_result_ok">✓ similar scored higher than dissimilar — looks sensible</string>
+    <string name="embed_result_suspicious">⚠ dissimilar scored as high or higher — check pooling mode and query/passage prefixes</string>
+    <string name="embed_result_error">Error: %1$s</string>
     <string name="models_voice_header">Speech recognition models — work offline</string>
     <string name="models_switched_chat">Chat switched to %1$s</string>
     <string name="models_switched_voice">Voice input switched to %1$s</string>

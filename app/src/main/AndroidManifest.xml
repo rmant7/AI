@@ -40,6 +40,12 @@
             android:parentActivityName=".ChatActivity" />
 
         <activity
+            android:name=".ExperimentalEmbeddingsActivity"
+            android:exported="false"
+            android:label="@string/embed_screen_title"
+            android:parentActivityName=".ModelsActivity" />
+
+        <activity
             android:name=".GenerationSettingsActivity"
             android:exported="false"
             android:label="@string/settings_generation_header"
