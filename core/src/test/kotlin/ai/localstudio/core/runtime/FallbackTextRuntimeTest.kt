@@ -243,4 +243,34 @@ class FallbackTextRuntimeTest {
             "cancelling generation must stop the chain, not silently move on to the next candidate",
         )
     }
+
+    @Test
+    fun `a candidate whose shouldSkip returns true is never loaded or generated from`() = runBlocking {
+        var loadedSkipped = false
+        val skippable = FakeTextRuntime { succeeding("should never be reached") }
+        val runtime = FallbackTextRuntime(
+            listOf(
+                FallbackCandidate(
+                    label = "groq-sibling",
+                    runtime = object : ModelRuntime by skippable {
+                        override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel {
+                            loadedSkipped = true
+                            return skippable.load(model, binding)
+                        }
+                    },
+                    model = model("groq-sibling"),
+                    binding = binding(),
+                    shouldSkip = { true },
+                ),
+                candidate("cloud") { succeeding("a different provider answered") },
+            ),
+        )
+
+        val handle = runtime.load(model("m"), binding()) as TextModelHandle
+        val text = handle.generate(GenerationRequest(prompt = "hi")).toList().joinToString("")
+
+        assertTrue(!loadedSkipped, "a skipped candidate must never be loaded")
+        assertTrue(text.startsWith("a different provider answered"))
+        assertTrue(text.contains("groq-sibling: skipped"), "the skip should still show up in the failure trail: $text")
+    }
 }
