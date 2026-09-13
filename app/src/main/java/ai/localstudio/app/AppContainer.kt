@@ -428,7 +428,7 @@ class AppContainer private constructor(private val context: Context) {
         )
         runtimeManagers += manager
         val executors = NodeExecutors(
-            selector = ModelSelector(registry(registryCandidates), device),
+            selector = ModelSelector(registry(runtime, registryCandidates), device),
             runtimeManager = manager,
             contextEngine = ContextEngine(),
             memory = memory,
@@ -748,7 +748,7 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
-    private fun registry(candidates: List<FallbackCandidate>): ModelRegistry {
+    private fun registry(runtime: ModelRuntime, candidates: List<FallbackCandidate>): ModelRegistry {
         val entries = mutableListOf<RegistryEntry>()
         when {
             candidates.isEmpty() -> entries += RegistryEntry(
@@ -756,7 +756,22 @@ class AppContainer private constructor(private val context: Context) {
                 InstallState.INSTALLED,
             )
 
-            candidates.size == 1 -> {
+            // Branches on the RUNTIME actually being handed to RuntimeManager
+            // below, not on candidates.size — those used to always agree
+            // (a lone candidate's own runtime, a chain's own FALLBACK_CHAIN
+            // kind), but compareCandidates() now wraps even a single
+            // candidate in FallbackTextRuntime unconditionally (for the
+            // attribution+latency footer every Compare-mode source gets).
+            // Registering `only.model`'s ORIGINAL binding (llama.cpp, say)
+            // while RuntimeManager only has FALLBACK_CHAIN registered — the
+            // old candidates.size == 1 branch's mistake — sent ModelSelector
+            // to pick a runtime kind nothing in this orchestrator's own
+            // RuntimeManager knew how to serve: "No runtime registered for
+            // llama_cpp" on every single Compare-mode local turn.
+            runtime.kind == RuntimeKind.FALLBACK_CHAIN ->
+                entries += RegistryEntry(fallbackChainDescriptor(candidates), InstallState.INSTALLED)
+
+            else -> {
                 val only = candidates.single()
                 entries += RegistryEntry(only.model, InstallState.INSTALLED)
                 // Voice input never actually goes through the pipeline in
@@ -771,8 +786,6 @@ class AppContainer private constructor(private val context: Context) {
                     )
                 }
             }
-
-            else -> entries += RegistryEntry(fallbackChainDescriptor(candidates), InstallState.INSTALLED)
         }
         return ModelRegistry(entries)
     }
