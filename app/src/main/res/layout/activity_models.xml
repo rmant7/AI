@@ -19,11 +19,12 @@
          toggle group and not a hardcoded pair of buttons — a third/fourth
          entry is one more button, not a restructure — [Category.EMBEDDING]
          is the first of those. -->
-    <!-- Voice category hidden alongside the mic button in activity_chat.xml
-         — see that file's comment. The listener, the VOICE category enum,
-         and voiceRows() are all left wired in ModelsActivity.kt; only this
-         one button is hidden, same as before. The group itself is visible
-         again now that Embedding gives it a second real tab. -->
+    <!-- Voice category was hidden alongside the mic button in
+         activity_chat.xml (voice input quality wasn't ready to ship) — but
+         file transcription (TranscribeActivity, docs/13-asr-pipeline-migration.md)
+         needs this tab to pick/download a model, independent of whether mic
+         input is enabled. Un-hidden for that; the mic button itself is
+         unaffected and stays as it was. -->
     <com.google.android.material.button.MaterialButtonToggleGroup
         android:id="@+id/categoryToggle"
         android:layout_width="match_parent"
@@ -43,7 +44,6 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/categoryVoice"
-            android:visibility="gone"
             style="?attr/materialButtonOutlinedStyle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"

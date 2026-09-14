@@ -324,6 +324,7 @@
     <string name="role_assistant">Модель</string>
     <string name="role_error">Ошибка</string>
     <string name="clip_label_model_answer">Ответ модели</string>
+    <string name="clip_label_transcript">Транскрипт</string>
     <string name="history_untitled_chat">Новый чат</string>
     <string name="status_memory_on">память вкл</string>
     <string name="status_memory_off">память выкл</string>

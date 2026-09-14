@@ -5,8 +5,11 @@ import ai.localstudio.app.databinding.ItemTranscribeResultBinding
 import ai.localstudio.app.whisper.MediaFileUtils
 import ai.localstudio.app.whisper.WhisperModelSeed
 import ai.localstudio.core.model.TranscriptSegment
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -112,7 +115,15 @@ class TranscribeActivity : AppCompatActivity() {
         DocumentFile.fromSingleUri(this, uri)?.name ?: uri.lastPathSegment ?: uri.toString()
 
     private fun start() {
-        val seed = container.whisperStore.installedSeed()
+        // Same resolution as ChatActivity's mic path: the model the user
+        // actually picked on the Models > Voice tab, falling back to the
+        // largest installed only if that one isn't (or was never) chosen.
+        // Plain installedSeed() ignored Settings.whisperModelId entirely,
+        // which is why this screen kept using whichever model happened to
+        // be installed first (usually Tiny, the auto-downloaded default) no
+        // matter what was selected — Tiny's transcription quality on real
+        // speech is exactly what that looks like.
+        val seed = container.whisperStore.installedSeed(container.settings.whisperModelId)
         if (seed == null) {
             Toast.makeText(this, R.string.transcribe_no_model, Toast.LENGTH_LONG).show()
             return
@@ -223,7 +234,19 @@ class TranscribeActivity : AppCompatActivity() {
                 }
                 binding.resultText.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
                 binding.resultText.text = result.text
+                binding.resultCopyButton.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
+                binding.resultCopyButton.setOnClickListener { copyToClipboard(result.text) }
             }
+        }
+    }
+
+    private fun copyToClipboard(text: String) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.clip_label_transcript), text))
+        // Android 13+ shows its own "Copied" system toast for clipboard writes;
+        // showing this one too would be a redundant second confirmation.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(this, R.string.message_copied, Toast.LENGTH_SHORT).show()
         }
     }
 }

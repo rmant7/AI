@@ -322,6 +322,7 @@
     <string name="role_assistant">Model</string>
     <string name="role_error">Error</string>
     <string name="clip_label_model_answer">Model\'s answer</string>
+    <string name="clip_label_transcript">Transcript</string>
     <string name="history_untitled_chat">New chat</string>
     <string name="status_memory_on">memory on</string>
     <string name="status_memory_off">memory off</string>
