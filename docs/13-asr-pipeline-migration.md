@@ -113,6 +113,31 @@ VAD), было не интегрировано в архитектуру, рад
   раннером на оркестратор), и `registry()` добавляет запись для
   `Capability.SPEECH_TO_TEXT`, если whisper-модель реально установлена —
   то, чего не было вообще (см. «Аудит» выше).
+- `TranscribeActivity` — тестовый экран вертикального среза: file/folder
+  picker (SAF, перенесено из `claude-code`'s `MainActivity`/`MediaFileUtils`),
+  результат каждого файла сохраняется в `.txt` сразу после готовности.
+  Доступен из меню чата. Не идёт через `Orchestrator`/pipeline — как и
+  старый ad hoc mic-путь, дёргает `WhisperCppRuntime` напрямую через новый
+  `WhisperFileTranscriber` (грузит модель один раз, переиспользует на весь
+  batch).
+- Выгрузка под memory pressure: main незадолго до этого научил
+  `AppContainer.releaseMemoryUnderPressure()` освобождать простаивающие
+  LLM (`releaseLocalModels()` → `RuntimeManager.evictIdle()` по всем
+  оркестраторам) — но не голосовые модели. Симметрично добавлено
+  `releaseWhisperEngines()`: освобождает `whisperEngine`/
+  `whisperPreviewEngine` (старый ad hoc mic-путь — на этом билде
+  недостижим, т.к. кнопка микрофона скрыта, но код оставлен на будущее) и
+  `whisperFileTranscriber` (реально достижим через `TranscribeActivity`).
+  `WhisperFileTranscriber` для этого стал полем `AppContainer`, а не
+  локальным для Activity — иначе освобождать было бы нечего.
+  **Важно:** `WhisperFileTranscriber`, в отличие от `WhisperCppSpeechModel`,
+  не проходит через `RuntimeManager` и не защищён его refCount'ом — без
+  дополнительной защиты `release()` из memory-pressure-хендлера (другая
+  корутина) мог бы освободить нативный handle прямо во время идущей
+  транскрипции (use-after-free). Исправлено: `release()` сначала
+  запрашивает отмену и дожидается (`Job.join()`) завершения активного
+  вызова, и только потом освобождает — тот же приём, что уже использует
+  `LlamaTextModel.close()`.
 
 ## Изменённые/новые публичные API
 
@@ -193,6 +218,18 @@ RAM/CPU/battery/thermal и accuracy-замеры из задания требу�
 с таймстемпами) готова; сами цифры — предстоит снять на устройстве.
 
 ## Верификация в этой среде — и её пределы
+
+**Обновление:** репозиторий уже настроен на сборку в CI (`.github/workflows/android.yml`,
+триггерится на пуш в `claude/**`), с доступом к jitpack.io и Android SDK,
+которых нет в этой sandbox — это и стало реальным компилятором для веток
+этой сессии. CI поймал три настоящих ошибки компиляции, которые ручная
+вычитка пропустила: Int/Long mismatch в тестовом фейке, отсутствующую
+зависимость `kotlinx-coroutines-core` в модуле `:whisper` (там вообще не
+было `dependencies {}`), не обновлённый под новую сигнатуру `nativeTranscribe`
+вызов в старом `WhisperTranscriber.kt`, и пропущенный импорт
+`kotlinx.coroutines.cancel`. Каждая — по отдельному коммиту, см. `git log`
+этой ветки. Это подтверждает то, что было сказано ниже уже тогда: ручная
+вычитка без компилятора — предположение, не факт.
 
 Важно понимать, что реально проверено, а что нет:
 
