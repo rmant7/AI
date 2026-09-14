@@ -246,12 +246,30 @@ class TranscribeActivity : AppCompatActivity() {
         binding.micTranscriptText.visibility = View.VISIBLE
         lifecycleScope.launch {
             val segments = container.whisperMicSession.start(seed, MicrophoneAudioSource(), language = null)
+            var settledText = ""
+            var currentUtteranceStartMs = -1L
             // Suspends for as long as the session is active — completes when
             // WhisperCppMicSession.finish()/cancel() closes its underlying
             // channel (see StreamingSpeechSession's own contract).
+            //
+            // Every ~2s re-transcription of the still-growing utterance
+            // (docs/12-audio.md's sliding-window policy — see
+            // WhisperCppSpeechModel.startStreaming) arrives on this same
+            // Flow as its own TranscriptSegment, not just the final one —
+            // appending each of those would render as steadily duplicating
+            // garbage ("hello hello how hello how are…") instead of a
+            // revised line. StreamingSpeechSession carries no explicit
+            // partial/final flag, so this relies on the one thing that does
+            // distinguish them: every revision of the same utterance keeps
+            // the same startMs (see WhisperCppSpeechModel.startStreaming's
+            // emit()) — a changed startMs is what "the previous utterance
+            // settled, a new one began" actually looks like on this Flow.
             segments.collect { segment ->
-                val current = binding.micTranscriptText.text
-                binding.micTranscriptText.text = if (current.isNullOrBlank()) segment.text else "$current ${segment.text}"
+                if (segment.startMs != currentUtteranceStartMs) {
+                    settledText = binding.micTranscriptText.text?.toString().orEmpty()
+                    currentUtteranceStartMs = segment.startMs
+                }
+                binding.micTranscriptText.text = (settledText + " " + segment.text).trim()
             }
             // The Flow can complete on its own (the session finished/was
             // cancelled from elsewhere, e.g. onPause) without stopMic() ever

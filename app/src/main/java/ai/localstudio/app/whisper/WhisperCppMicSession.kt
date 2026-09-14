@@ -93,17 +93,27 @@ class WhisperCppMicSession(
         activeSession = session
 
         micJob = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            // Same reasoning as WhisperCppSpeechModel.transcribeInternal's
+            // producer: a plain launch under a SupervisorJob still crashes
+            // the process on an uncaught exception, and source.stream() can
+            // throw for real reasons here too (AudioRecord construction
+            // failing — no mic hardware, permission revoked between the
+            // check and this call, another app holding it exclusively).
+            // Cancelling the session on failure is what stopping this
+            // gracefully looks like instead of taking the app down with it.
             try {
                 source.stream { chunk -> session.acceptAudio(chunk) }
+                // A source finishing on its own (the mic loop only ever ends
+                // via cancellation, but a hypothetical bounded AudioSource
+                // wouldn't) is the same "no more audio" signal as the user
+                // releasing a mic button — finalize whatever's buffered
+                // instead of just dropping it.
+                session.finish()
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: Exception) {
+                session.cancel()
             }
-            // A source finishing on its own (the mic loop only ever ends via
-            // cancellation, but a hypothetical bounded AudioSource wouldn't)
-            // is the same "no more audio" signal as the user releasing a
-            // mic button — finalize whatever's buffered instead of just
-            // dropping it.
-            session.finish()
         }
         return session.segments
     }
