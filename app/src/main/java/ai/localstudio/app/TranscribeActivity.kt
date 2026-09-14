@@ -19,6 +19,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
@@ -99,7 +101,11 @@ class TranscribeActivity : AppCompatActivity() {
         // (Also freed under memory pressure regardless — see
         // AppContainer.releaseWhisperEngines — for the case where the
         // screen is merely backgrounded, not destroyed.)
-        container.whisperFileTranscriber.release()
+        //
+        // Off the main thread: release() blocks until any in-flight
+        // transcription actually unwinds (see its own doc comment) — fine on
+        // a background coroutine, an ANR risk called straight from onDestroy.
+        CoroutineScope(Dispatchers.IO).launch { container.whisperFileTranscriber.release() }
     }
 
     private fun displayName(uri: Uri): String =
