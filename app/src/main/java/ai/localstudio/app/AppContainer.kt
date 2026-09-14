@@ -192,11 +192,13 @@ class AppContainer private constructor(private val context: Context) {
      * defaulted to 0.0 until now: no embedder was wired into the app, and
      * SEMANTIC_RETRIEVAL_DESIGN.md's step 9 wanted a real measurement, not a
      * guess, before picking one. That measurement now exists — see
-     * [SEMANTIC_RANKING_WEIGHT]'s own doc comment for the actual benchmark
-     * numbers behind this value. Still not fully tuned (no A/B run against
-     * this app's own real usage yet, only the standalone retrieval
-     * benchmark), so it stays well under [RankingWeights.taskRelevance]'s
-     * 0.30 rather than matching or exceeding it. Safe regardless of tuning:
+     * [SEMANTIC_RANKING_WEIGHT]'s own doc comment for the hybrid-sweep
+     * numbers behind this value: it is the smallest weight that already
+     * captures the sweep's entire real gain over lexical-only, with every
+     * larger weight's additional gain too small to clear its own bootstrap
+     * noise. Still not the last word (no A/B run against this app's own
+     * real usage yet, only a synthetic-dataset sweep), and still well under
+     * [RankingWeights.taskRelevance]'s 0.30. Safe regardless of tuning:
      * [semanticMemoryEmbedder] not being ready yet, or the embedder having
      * no vector for a given item, both leave
      * [ai.localstudio.commercialmemory.ContextCandidate.semanticScore] null,
@@ -1178,25 +1180,46 @@ class AppContainer private constructor(private val context: Context) {
         // forgetConversationMemory().
         private const val CONVERSATION_MEMORY_FORGET_LIMIT = 10_000
 
-        // Benchmark-informed starting weight, not a finally-optimized one —
-        // see memoryExperimentRunner's own doc comment for why it's still
-        // deliberately conservative despite the benchmark's own numbers
-        // (below) looking strong. Source: benchmark/e5_base_benchmark.ipynb
-        // in Mobile_mem0 (multilingual-e5-base, Q4_K_M, mean pooling,
-        // query:/passage: prefixes), 92 positive queries + 10 negatives,
-        // lexical vs semantic on the same dataset:
+        // Hybrid-sweep-tuned, not a guess and not the earlier 0.20/0.30
+        // placeholders. Source: benchmark/run_hybrid_sweep.py in Mobile_mem0
+        // (multilingual-e5-base Q4_K_M, mean pooling, query:/passage:
+        // prefixes), same 92-positive/10-negative dataset as before.
+        //
+        // Part A re-confirmed lexical vs semantic (base) is unchanged from
+        // the original benchmark:
         //   Overall  Recall@1  Recall@5  Recall@10  MRR
         //   lexical     0.500     0.598      0.620   0.543
         //   semantic    0.848     0.946      0.946   0.892
-        //   Recall@1 by category: exact 0.778->0.944, identifier 1.000->1.000
-        //   (tied, not worse), low_overlap 0.176->0.471, morphology
-        //   0.500->0.950, synonym 0.200->0.933, paraphrase 0.600->0.867.
-        //   avg cosine: positive=0.841, negative=0.753 (gap 0.088).
-        // No A/B tuning against this app's own real usage has run yet —
-        // that is a different, still-open measurement (ExperimentLogger's
-        // real data, per SEMANTIC_RETRIEVAL_DESIGN.md's step 9) — so this
-        // is a starting point the benchmark supports, not a final value.
-        private const val SEMANTIC_RANKING_WEIGHT = 0.30
+        //
+        // Part B swept this exact hybrid formula (lexical*0.45 + semantic*w,
+        // matching HeuristicContextRanker's own lexical weight) across
+        // w = 0.00..0.50, with a deterministic bootstrap (200 resamples) per
+        // weight for stability:
+        //   weight  Recall@1  Recall@5  Recall@10    MRR   MRR std
+        //     0.00     0.500     0.620      0.674    0.565   0.047
+        //     0.10     0.663     0.913      0.924    0.775   0.035
+        //     0.20     0.663     0.924      0.924    0.781   0.034
+        //     0.25     0.663     0.924      0.924    0.781   0.034
+        //     0.30     0.663     0.924      0.924    0.781   0.034
+        //     0.35-0.50: identical to 0.30 — the ranking itself stops
+        //       changing past this point (a linear weighted sum saturates
+        //       once one term dominates every comparison that will ever
+        //       flip), not a measurement error.
+        // 0.00->0.10 is the entire real gain (MRR +0.21, far outside any
+        // weight's own bootstrap noise); every larger weight's additional
+        // gain over 0.10 (+0.006 MRR at most) is smaller than that weight's
+        // own bootstrap std (0.034-0.047) — not distinguishable from noise.
+        // No category regresses at 0.10 vs lexical-only, identifier included
+        // (both 1.000): the smallest weight that captures the real gain and
+        // the best-performing weight are the same value, so there is no
+        // trade-off to make. This supersedes the earlier 0.30 (itself set
+        // from Part A alone, before this hybrid formula existed to measure
+        // against) and the original 0.20 placeholder.
+        // Still open, unchanged from before: an A/B run against this app's
+        // own real ExperimentLogger data (SEMANTIC_RETRIEVAL_DESIGN.md's
+        // step 9) — this hybrid sweep is a synthetic-dataset measurement,
+        // the best one available without that.
+        private const val SEMANTIC_RANKING_WEIGHT = 0.10
 
         // How many memory records embedPending() backfills per pass — see the
         // semantic-memory background task in init{}. One pass at this size is
