@@ -44,6 +44,7 @@ import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.keys.BundledApiKeyStore
 import ai.localstudio.app.keys.BundledApiKeys
 import ai.localstudio.app.keys.PrefsApiKeyStore
+import ai.localstudio.app.llama.EmbeddingModelSpec
 import ai.localstudio.app.llama.ExperimentalDownloadState
 import ai.localstudio.app.llama.ExperimentalEmbeddingDownloads
 import ai.localstudio.app.llama.ExperimentalEmbeddingModels
@@ -407,25 +408,7 @@ class AppContainer private constructor(private val context: Context) {
                 }
             }
 
-            val embedder = runCatching {
-                LlamaCppMemoryEmbedder.load(
-                    bridge = LlamaBridge(),
-                    modelPath = experimentalEmbeddingStore.fileFor(spec).absolutePath,
-                    modelId = spec.id,
-                    pooling = spec.pooling,
-                    queryPrefix = spec.queryPrefix,
-                    passagePrefix = spec.passagePrefix,
-                )
-            }.getOrElse { error ->
-                appLog.record("SEMANTIC_MEMORY", "failed to load ${spec.title}: ${error.message}")
-                null
-            } ?: return@launch
-
-            semanticMemoryEmbedder.set(embedder)
-            appLog.record(
-                "SEMANTIC_MEMORY",
-                "${spec.title} ready (dimension=${embedder.dimension}) — backfilling existing memory",
-            )
+            if (!ensureEmbedderLoaded(spec)) return@launch
 
             // Periodic, not one-shot: consolidate() keeps adding new durable
             // memories for as long as the app runs, and embedPending() is a
@@ -433,7 +416,11 @@ class AppContainer private constructor(private val context: Context) {
             // starts by checking semanticMemoryIndex.missing(...) before ever
             // calling the embedder) — this just keeps semantic coverage from
             // permanently falling behind, without needing every write path
-            // in the app to remember to call it itself.
+            // in the app to remember to call it itself. ensureEmbedderLoaded
+            // here too, not just once above: onTrimMemory (see init{} below)
+            // can unload the model between iterations under real memory
+            // pressure, and this is what reloads it once pressure passes,
+            // from the same on-disk file, no re-download.
             //
             // Skipped while settings.semanticMemoryEnabled is off, not just
             // "allowed to run but pointless": semanticMemoryEmbedder's own
@@ -446,12 +433,83 @@ class AppContainer private constructor(private val context: Context) {
             // the library side.
             while (true) {
                 if (settings.semanticMemoryEnabled) {
+                    ensureEmbedderLoaded(spec)
                     runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
                         .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }
                 }
                 delay(SEMANTIC_BACKFILL_INTERVAL_MS)
             }
         }
+
+        // Releases the embedding model's native memory under real system
+        // pressure — see this task's own reasoning: a device OOM-killed this
+        // app's process once already with the model resident but idle (see
+        // PROCESS_EXIT logging), and until now nothing ever freed it once
+        // loaded. TRIM_MEMORY_RUNNING_LOW and up covers real pressure, both
+        // foreground (RUNNING_LOW/RUNNING_CRITICAL — the exact levels a
+        // still-visible, still-in-use app gets before being killed outright)
+        // and background; TRIM_MEMORY_RUNNING_MODERATE is deliberately
+        // excluded — it fires routinely and unloading on every one of those
+        // would make semantic search reload far more often than the RAM it
+        // actually saves is worth. onLowMemory() is the older, still-called-
+        // on-every-API-level fallback for the same "this is serious" signal.
+        // Reloading afterward is the background task above's own job, the
+        // next time it wakes up — this callback only ever frees, never loads.
+        context.registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) {
+                if (level < android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) return
+                CoroutineScope(Dispatchers.IO).launch {
+                    if (semanticMemoryEmbedder.isReady) {
+                        semanticMemoryEmbedder.unload()
+                        appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure (trim level $level); will reload once pressure passes")
+                    }
+                }
+            }
+
+            override fun onLowMemory() {
+                CoroutineScope(Dispatchers.IO).launch {
+                    if (semanticMemoryEmbedder.isReady) {
+                        semanticMemoryEmbedder.unload()
+                        appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure (onLowMemory); will reload once pressure passes")
+                    }
+                }
+            }
+
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
+        })
+    }
+
+    /**
+     * Loads [spec] and hands it to [semanticMemoryEmbedder] if it isn't
+     * already resident — shared by the initial load above and the periodic
+     * reload-after-[LazyMemoryEmbedder.unload] check, so both go through
+     * the exact same native-load and error-logging path. Returns whether
+     * the embedder is ready by the time this returns (already-ready counts).
+     */
+    private suspend fun ensureEmbedderLoaded(spec: EmbeddingModelSpec): Boolean {
+        if (semanticMemoryEmbedder.isReady) return true
+        if (!experimentalEmbeddingStore.isInstalled(spec)) return false
+
+        val embedder = runCatching {
+            LlamaCppMemoryEmbedder.load(
+                bridge = LlamaBridge(),
+                modelPath = experimentalEmbeddingStore.fileFor(spec).absolutePath,
+                modelId = spec.id,
+                pooling = spec.pooling,
+                queryPrefix = spec.queryPrefix,
+                passagePrefix = spec.passagePrefix,
+            )
+        }.getOrElse { error ->
+            appLog.record("SEMANTIC_MEMORY", "failed to load ${spec.title}: ${error.message}")
+            null
+        } ?: return false
+
+        semanticMemoryEmbedder.set(embedder) { embedder.close() }
+        appLog.record(
+            "SEMANTIC_MEMORY",
+            "${spec.title} ready (dimension=${embedder.dimension}) — backfilling existing memory",
+        )
+        return true
     }
 
     /**

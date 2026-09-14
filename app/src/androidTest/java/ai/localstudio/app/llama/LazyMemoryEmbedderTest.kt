@@ -61,7 +61,7 @@ class LazyMemoryEmbedderTest {
         val storageVectors = listOf(floatArrayOf(0.4f, 0.5f, 0.6f))
         val real = FakeEmbedder(modelId = "multilingual-e5-base-q4km", dimension = 768, queryVector, storageVectors)
 
-        lazy.set(real)
+        runBlocking { lazy.set(real) }
 
         assertTrue(lazy.isReady)
         assertEquals("multilingual-e5-base-q4km", lazy.modelId)
@@ -83,7 +83,7 @@ class LazyMemoryEmbedderTest {
             queryVector = floatArrayOf(0.1f, 0.2f, 0.3f),
             storageVectors = listOf(floatArrayOf(0.4f, 0.5f, 0.6f)),
         )
-        lazy.set(real)
+        runBlocking { lazy.set(real) }
         enabled = false
 
         // isReady still reports the real model as loaded — turning semantic
@@ -100,6 +100,70 @@ class LazyMemoryEmbedderTest {
         enabled = true
         runBlocking {
             assertArrayEquals(floatArrayOf(0.1f, 0.2f, 0.3f), lazy.embedForQuery("any query"), 0f)
+        }
+    }
+
+    @Test
+    fun unload_frees_the_delegate_runs_release_once_and_degrades_like_before_set() {
+        val lazy = LazyMemoryEmbedder()
+        val real = FakeEmbedder(
+            modelId = "multilingual-e5-base-q4km",
+            dimension = 768,
+            queryVector = floatArrayOf(0.1f, 0.2f, 0.3f),
+            storageVectors = listOf(floatArrayOf(0.4f, 0.5f, 0.6f)),
+        )
+        var releaseCount = 0
+
+        runBlocking {
+            lazy.set(real) { releaseCount++ }
+            assertTrue(lazy.isReady)
+
+            lazy.unload()
+        }
+
+        assertEquals(1, releaseCount)
+        assertFalse(lazy.isReady)
+        assertEquals("pending", lazy.modelId)
+        assertEquals(0, lazy.dimension)
+
+        runBlocking {
+            assertArrayEquals(FloatArray(0), lazy.embedForQuery("any query"), 0f)
+            assertTrue(lazy.embedForStorage(listOf("any text")).isEmpty())
+
+            // A no-op when nothing is loaded — AppContainer's onTrimMemory
+            // callback always calls this guarded by isReady, but unload()
+            // itself must stay safe even if that guard were ever dropped.
+            lazy.unload()
+        }
+        assertEquals(1, releaseCount)
+    }
+
+    @Test
+    fun set_after_unload_reloads_and_delegates_again() {
+        val lazy = LazyMemoryEmbedder()
+        val first = FakeEmbedder(
+            modelId = "first",
+            dimension = 768,
+            queryVector = floatArrayOf(0.1f, 0.2f, 0.3f),
+            storageVectors = emptyList(),
+        )
+        val second = FakeEmbedder(
+            modelId = "second",
+            dimension = 768,
+            queryVector = floatArrayOf(0.7f, 0.8f, 0.9f),
+            storageVectors = emptyList(),
+        )
+
+        runBlocking {
+            lazy.set(first)
+            lazy.unload()
+            lazy.set(second)
+        }
+
+        assertTrue(lazy.isReady)
+        assertEquals("second", lazy.modelId)
+        runBlocking {
+            assertArrayEquals(floatArrayOf(0.7f, 0.8f, 0.9f), lazy.embedForQuery("any query"), 0f)
         }
     }
 }
