@@ -1,5 +1,7 @@
 package ai.localstudio.whisper
 
+import kotlinx.coroutines.sync.Mutex
+
 /**
  * The JNI surface of whisper.cpp. One instance owns one loaded model.
  *
@@ -71,5 +73,17 @@ class WhisperBridge {
 
         /** Same reasoning as LlamaBridge.defaultThreads(): favour the performance cluster, not the efficiency cores. */
         fun defaultThreads(): Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+
+        /**
+         * Serializes every [nativeLoad]/[nativeTranscribe] call against a
+         * given handle's `whisper_context`, same reasoning and same pattern as
+         * LlamaBridge.nativeOpMutex: the context is not safe for concurrent
+         * native calls, and a [WhisperCppSpeechModel][ai.localstudio.app.whisper.WhisperCppSpeechModel]
+         * can have both a batch [nativeTranscribe] window and a streaming
+         * session's periodic re-transcribe in flight against the same
+         * handle. [nativeCancel] deliberately does *not* go through this —
+         * it has to reach a call that may currently be holding the lock.
+         */
+        val nativeOpMutex = Mutex()
     }
 }

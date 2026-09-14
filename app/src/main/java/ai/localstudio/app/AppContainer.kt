@@ -61,10 +61,12 @@ import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
+import ai.localstudio.app.whisper.WhisperCppRuntime
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
+import ai.localstudio.whisper.WhisperBridge
 import ai.localstudio.openai.GigaChatTokenProvider
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiException
@@ -692,6 +694,16 @@ class AppContainer private constructor(private val context: Context) {
      */
     val whisperPreviewEngine = WhisperEngine(whisperStore)
 
+    /**
+     * [ai.localstudio.core.runtime.SpeechModelHandle] for `whisper_cpp`, wired
+     * into [RuntimeManager] (see buildOrchestrator) so a pipeline's
+     * SPEECH_TO_TEXT node resolves to a real engine instead of throwing "no
+     * runtime registered" — see docs/13-asr-pipeline-migration.md. A single
+     * shared instance, unlike [LlamaCppRuntime] which is rebuilt per call:
+     * nothing about it varies per request the way llama's context size does.
+     */
+    val whisperCppRuntime: ModelRuntime = WhisperCppRuntime(log = appLog::record)
+
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
 
@@ -860,7 +872,17 @@ class AppContainer private constructor(private val context: Context) {
             // manager, so a local model loaded as part of a chain is not
             // tracked or evicted the way a standalone local model is.
             budgetBytes = device.usableRamBytes,
-            runtimes = mapOf(runtime.kind to runtime),
+            // whisperCppRuntime is always registered alongside whichever text
+            // runtime this orchestrator is for — SPEECH_TO_TEXT is a
+            // capability every orchestrator can be asked for regardless of
+            // which text-generation runtime backs it, and previously wasn't
+            // registered at all (RuntimeManager.acquire threw "no runtime
+            // registered for whisper_cpp" the moment anything tried). See
+            // docs/13-asr-pipeline-migration.md.
+            runtimes = buildMap {
+                put(runtime.kind, runtime)
+                put(whisperCppRuntime.kind, whisperCppRuntime)
+            },
         )
         runtimeManagers += manager
         val executors = NodeExecutors(
@@ -1225,6 +1247,37 @@ class AppContainer private constructor(private val context: Context) {
                 }
             }
         }
+        // Independent of the branch above (which is about text generation):
+        // whenever a whisper.cpp model is actually installed on disk, it's
+        // registered too, so SPEECH_TO_TEXT resolves to it via WhisperCppRuntime
+        // — see runtimeManagers/buildOrchestrator for why that runtime is
+        // always in RuntimeManager's map regardless of which one this
+        // orchestrator's own `runtime` argument is. Still not reachable from
+        // any screen in this app yet (see whisperEngine's own comment above,
+        // used directly by ChatActivity's mic button instead) — this is what
+        // lets a saved pipeline, or a future file-transcription screen, find
+        // and use it. See docs/13-asr-pipeline-migration.md.
+        whisperStore.installedSeed()?.let { seed ->
+            val file = whisperStore.modelFile(seed)
+            entries += RegistryEntry(
+                ModelDescriptor(
+                    id = seed.id,
+                    family = "whisper",
+                    version = "1",
+                    parameterCount = 1,
+                    capabilities = setOf(Capability.SPEECH_TO_TEXT),
+                    bindings = listOf(
+                        RuntimeBinding(
+                            runtime = RuntimeKind.WHISPER_CPP,
+                            artifact = file.absolutePath,
+                            fileSizeBytes = file.length().coerceAtLeast(1),
+                        ),
+                    ),
+                ),
+                InstallState.INSTALLED,
+                installedPath = file.absolutePath,
+            )
+        }
         return ModelRegistry(entries)
     }
 
@@ -1464,6 +1517,7 @@ class AppContainer private constructor(private val context: Context) {
                     add(RuntimeKind.STUB)
                     add(RuntimeKind.FALLBACK_CHAIN)
                     if (LlamaBridge.isAvailable) add(RuntimeKind.LLAMA_CPP)
+                    if (WhisperBridge.isAvailable) add(RuntimeKind.WHISPER_CPP)
                 },
                 hasGpuDelegate = false,
                 performanceIndex = 1.0,
