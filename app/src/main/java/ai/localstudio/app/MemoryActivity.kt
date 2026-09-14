@@ -69,15 +69,38 @@ class MemoryActivity : AppCompatActivity() {
         renderIndexStatus()
     }
 
+    /**
+     * Three states, not four booleans mashed into one sentence: whether
+     * [spec] is on disk at all (a download question — [ModelsActivity]'s),
+     * whether it's currently resident in RAM ([AppContainer.semanticEmbedderReady]
+     * — [ai.localstudio.app.llama.LazyMemoryEmbedder]'s question), and —
+     * only reachable once it's been resident before — whether a
+     * memory-pressure [ai.localstudio.app.llama.LazyMemoryEmbedder.unload]
+     * freed it since. That last one isn't tracked as a separate flag
+     * anywhere: "downloaded but not currently loaded, semantic retrieval
+     * on" always means exactly this, whether the cause was a pressure
+     * unload moments ago or the very first load still in flight — both
+     * self-heal the same way (see [AppContainer]'s `reloadTrigger` wiring),
+     * so both read as the same "temporarily unloaded" line here.
+     */
     private fun renderModelStatus() {
         val spec = ExperimentalEmbeddingModels.E5_BASE
         val installed = container.experimentalEmbeddingDownloads.stateOf(spec) is ExperimentalDownloadState.Installed
-        binding.memoryModelStatus.text = when {
-            !installed -> getString(R.string.memory_model_not_downloaded, spec.title)
-            !container.settings.semanticMemoryEnabled -> getString(R.string.memory_model_disabled, spec.title)
-            container.semanticEmbedderReady -> getString(R.string.memory_model_ready, spec.title)
-            else -> getString(R.string.memory_model_loading, spec.title)
+        val lines = mutableListOf(spec.title)
+        lines += getString(
+            if (installed) R.string.memory_model_status_downloaded else R.string.memory_model_status_not_downloaded,
+        )
+        if (installed) {
+            when {
+                !container.settings.semanticMemoryEnabled -> lines += getString(R.string.memory_model_status_disabled_hint)
+                container.semanticEmbedderReady -> lines += getString(R.string.memory_model_status_ready)
+                else -> {
+                    lines += getString(R.string.memory_model_status_unloaded)
+                    lines += getString(R.string.memory_model_status_unloaded_hint)
+                }
+            }
         }
+        binding.memoryModelStatus.text = lines.joinToString("\n")
     }
 
     /**

@@ -49,10 +49,12 @@
     <string name="memory_semantic">Семантический поиск</string>
     <string name="memory_semantic_hint">Находит подходящие воспоминания по смыслу, а не только по совпадающим словам — с помощью модели эмбеддингов на устройстве. При отключении остаётся только поиск по словам; долговременная память при этом продолжает работать.</string>
     <string name="memory_model_header">Модель эмбеддингов</string>
-    <string name="memory_model_not_downloaded">%1$s ещё не скачана.</string>
-    <string name="memory_model_disabled">%1$s скачана, но семантический поиск выше выключен.</string>
-    <string name="memory_model_ready">%1$s скачана и загружена — семантический поиск активен.</string>
-    <string name="memory_model_loading">%1$s скачана, но ещё не загружена — это происходит автоматически вскоре после включения памяти.</string>
+    <string name="memory_model_status_downloaded">✓ Скачана</string>
+    <string name="memory_model_status_not_downloaded">○ Не скачана</string>
+    <string name="memory_model_status_ready">✓ Готова</string>
+    <string name="memory_model_status_unloaded">○ Временно выгружена</string>
+    <string name="memory_model_status_unloaded_hint">Загрузится снова по мере необходимости</string>
+    <string name="memory_model_status_disabled_hint">Семантический поиск выше выключен</string>
     <string name="memory_manage_model">Управление моделью эмбеддингов</string>
     <string name="memory_index_header">Индекс</string>
     <string name="memory_index_status">%1$d / %2$d воспоминаний проиндексировано</string>

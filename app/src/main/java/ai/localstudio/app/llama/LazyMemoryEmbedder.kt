@@ -1,6 +1,7 @@
 package ai.localstudio.app.llama
 
 import ai.localstudio.memory.MemoryEmbedder
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -34,8 +35,25 @@ import kotlinx.coroutines.sync.withLock
  * to remember. [isReady] still reports whether the real model is loaded
  * (a *download-and-load* question, the Models screen's own concern),
  * independent of whether it is currently allowed to answer.
+ *
+ * [reloadTrigger] is what turns [unload] into a self-healing degradation
+ * rather than a permanent one until [AppContainer]'s own periodic backfill
+ * loop happens to tick again: the moment a real call finds [isEnabled] true
+ * but nothing loaded, this fires once, in the background, while that same
+ * call still answers immediately with the same lexical-only fallback as
+ * any other not-ready call. [AppContainer] wires this to the exact same
+ * load path (`ensureEmbedderLoaded`) the periodic loop already uses — see
+ * that function's own doc comment for how it stays limited to the file
+ * already on disk, never a re-download, and never two such loads running
+ * at once regardless of which of the two callers asked. The periodic loop
+ * itself is left in place as a second, independent path to the same
+ * recovery, in case a [reloadTrigger] call is ever missed or its own
+ * attempt fails outright.
  */
-class LazyMemoryEmbedder(private val isEnabled: () -> Boolean = { true }) : MemoryEmbedder {
+class LazyMemoryEmbedder(
+    private val isEnabled: () -> Boolean = { true },
+    private val reloadTrigger: (onComplete: () -> Unit) -> Unit = { onComplete -> onComplete() },
+) : MemoryEmbedder {
 
     @Volatile
     private var delegate: MemoryEmbedder? = null
@@ -56,20 +74,55 @@ class LazyMemoryEmbedder(private val isEnabled: () -> Boolean = { true }) : Memo
      */
     private val lock = Mutex()
 
+    /**
+     * Guards [reloadTrigger] itself, not the load it kicks off — a burst of
+     * calls arriving while not ready (a batch of memory writes, several
+     * concurrent searches) should fire it once, not once per call. Reset by
+     * [reloadTrigger]'s own completion callback regardless of outcome, and
+     * again — as a fully idempotent safety net, not double-tracking — by
+     * every [set], so a reload that lands through some other path (the
+     * periodic loop calling [AppContainer]'s loader directly, say) still
+     * leaves this ready for the next [unload].
+     */
+    private val reloadInFlight = AtomicBoolean(false)
+
     val isReady: Boolean get() = delegate != null
 
-    /** [release] runs once, inside [unload], to free whatever native resources [real] holds. */
-    suspend fun set(real: MemoryEmbedder, release: () -> Unit = {}) = lock.withLock {
-        this.delegate = real
-        this.release = release
+    /**
+     * Installs [real] as the active delegate, whose [release] callback runs
+     * once, inside [unload], to free whatever native resources it holds.
+     *
+     * If a delegate is already installed — [set] called again with no
+     * intervening [unload], exactly what a completed [reloadTrigger] looks
+     * like when the periodic loop's own load also lands around the same
+     * time — the previous delegate's own [release] still runs here, so its
+     * native resources are never leaked outliving this call. The new
+     * delegate is assigned first, before that old [release] runs: a
+     * throwing old [release] then still leaves [delegate] pointing at the
+     * new, valid instance rather than one already freed.
+     */
+    suspend fun set(real: MemoryEmbedder, release: () -> Unit = {}) {
+        val oldRelease = lock.withLock {
+            val old = this.release
+            this.delegate = real
+            this.release = release
+            old
+        }
+        reloadInFlight.set(false)
+        oldRelease?.invoke()
     }
 
     /**
      * Frees the currently loaded model (via the [release] callback [set]
      * was given) and reverts to the same not-ready-yet degradation as
-     * before [set] was ever called — [AppContainer] reloads it the next
-     * time memory actually needs it, from the same on-disk file, no
-     * re-download. A no-op if nothing is currently loaded.
+     * before [set] was ever called. A no-op if nothing is currently loaded.
+     *
+     * Nothing reloads it from here — the very next [embedForQuery]/
+     * [embedForStorage] call does, via [reloadTrigger], while itself still
+     * answering with the lexical-only fallback immediately; [AppContainer]'s
+     * periodic backfill loop is a second, independent path to the same
+     * reload. Either way it comes from the same on-disk file, never a
+     * re-download.
      */
     suspend fun unload() = lock.withLock {
         release?.invoke()
@@ -80,11 +133,44 @@ class LazyMemoryEmbedder(private val isEnabled: () -> Boolean = { true }) : Memo
     override val modelId: String get() = delegate?.modelId ?: "pending"
     override val dimension: Int get() = delegate?.dimension ?: 0
 
-    override suspend fun embedForQuery(query: String): FloatArray = lock.withLock {
-        if (isEnabled()) delegate?.embedForQuery(query) ?: FloatArray(0) else FloatArray(0)
+    override suspend fun embedForQuery(query: String): FloatArray {
+        var notReady = false
+        val vector = lock.withLock {
+            val current = delegate
+            when {
+                !isEnabled() -> null
+                current != null -> current.embedForQuery(query)
+                else -> { notReady = true; null }
+            }
+        }
+        if (notReady) requestReload()
+        return vector ?: FloatArray(0)
     }
 
-    override suspend fun embedForStorage(texts: List<String>): List<FloatArray> = lock.withLock {
-        if (isEnabled()) delegate?.embedForStorage(texts) ?: emptyList() else emptyList()
+    override suspend fun embedForStorage(texts: List<String>): List<FloatArray> {
+        var notReady = false
+        val vectors = lock.withLock {
+            val current = delegate
+            when {
+                !isEnabled() -> null
+                current != null -> current.embedForStorage(texts)
+                else -> { notReady = true; null }
+            }
+        }
+        if (notReady) requestReload()
+        return vectors ?: emptyList()
+    }
+
+    /**
+     * Fires [reloadTrigger] at most once per unload — [reloadInFlight] is
+     * set here, before the trigger itself runs anything, and cleared by its
+     * completion callback (or by the next [set], whichever comes first), so
+     * a second call arriving while a reload is already in flight is a
+     * cheap no-op rather than a second concurrent load.
+     */
+    private fun requestReload() {
+        if (reloadInFlight.compareAndSet(false, true)) {
+            reloadTrigger { reloadInFlight.set(false) }
+        }
     }
 }

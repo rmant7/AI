@@ -75,6 +75,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -101,8 +103,26 @@ class AppContainer private constructor(private val context: Context) {
      * Every call made to this before that finishes degrades to the same
      * lexical-only behavior [memory] already had with no embedder
      * configured at all — see [LazyMemoryEmbedder]'s own doc comment.
+     *
+     * `reloadTrigger` routes through the same [ensureEmbedderLoaded] the
+     * background task below and the periodic backfill loop already use —
+     * fired the instant a real call finds this unloaded (a memory-pressure
+     * [LazyMemoryEmbedder.unload], most likely), on its own background
+     * coroutine so the call that triggered it still returns its lexical-only
+     * fallback immediately rather than waiting on the reload.
      */
-    private val semanticMemoryEmbedder = LazyMemoryEmbedder(isEnabled = { settings.semanticMemoryEnabled })
+    private val semanticMemoryEmbedder = LazyMemoryEmbedder(
+        isEnabled = { settings.semanticMemoryEnabled },
+        reloadTrigger = { onComplete ->
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                try {
+                    ensureEmbedderLoaded(ExperimentalEmbeddingModels.E5_BASE)
+                } finally {
+                    onComplete()
+                }
+            }
+        },
+    )
 
     /** Whether semantic retrieval is actually usable right now — the Memory screen's own status line, and nothing else's, needs this. */
     val semanticEmbedderReady: Boolean get() = semanticMemoryEmbedder.isReady
@@ -218,8 +238,11 @@ class AppContainer private constructor(private val context: Context) {
      * noise. Still not the last word (no A/B run against this app's own
      * real usage yet, only a synthetic-dataset sweep), and still well under
      * [RankingWeights.taskRelevance]'s 0.30. Safe regardless of tuning:
-     * [semanticMemoryEmbedder] not being ready yet, or the embedder having
-     * no vector for a given item, both leave
+     * [semanticMemoryEmbedder] not being ready yet — including the moment
+     * right after a memory-pressure [unload], now covered by
+     * [LazyMemoryEmbedder]'s own `reloadTrigger` (see [ensureEmbedderLoaded])
+     * rather than left to wait for the periodic backfill loop — or the
+     * embedder having no vector for a given item, both leave
      * [ai.localstudio.commercialmemory.ContextCandidate.semanticScore] null,
      * which [ai.localstudio.commercialmemory.HeuristicContextRanker]
      * already treats as contributing nothing — so this weight is inert
@@ -458,21 +481,11 @@ class AppContainer private constructor(private val context: Context) {
         context.registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
                 if (level < android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) return
-                CoroutineScope(Dispatchers.IO).launch {
-                    if (semanticMemoryEmbedder.isReady) {
-                        semanticMemoryEmbedder.unload()
-                        appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure (trim level $level); will reload once pressure passes")
-                    }
-                }
+                CoroutineScope(Dispatchers.IO).launch { releaseEmbedderUnderMemoryPressure("trim level $level") }
             }
 
             override fun onLowMemory() {
-                CoroutineScope(Dispatchers.IO).launch {
-                    if (semanticMemoryEmbedder.isReady) {
-                        semanticMemoryEmbedder.unload()
-                        appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure (onLowMemory); will reload once pressure passes")
-                    }
-                }
+                CoroutineScope(Dispatchers.IO).launch { releaseEmbedderUnderMemoryPressure("onLowMemory") }
             }
 
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
@@ -480,15 +493,65 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * Loads [spec] and hands it to [semanticMemoryEmbedder] if it isn't
-     * already resident — shared by the initial load above and the periodic
-     * reload-after-[LazyMemoryEmbedder.unload] check, so both go through
-     * the exact same native-load and error-logging path. Returns whether
-     * the embedder is ready by the time this returns (already-ready counts).
+     * The actual unload both real memory-pressure callbacks above and
+     * [simulateMemoryPressureForTesting] run — suspending, unlike
+     * [android.content.ComponentCallbacks2.onTrimMemory]/`onLowMemory`
+     * themselves, which launch this on a background coroutine rather than
+     * calling it directly since neither is itself a suspend function.
      */
-    private suspend fun ensureEmbedderLoaded(spec: EmbeddingModelSpec): Boolean {
-        if (semanticMemoryEmbedder.isReady) return true
-        if (!experimentalEmbeddingStore.isInstalled(spec)) return false
+    private suspend fun releaseEmbedderUnderMemoryPressure(reason: String) {
+        if (semanticMemoryEmbedder.isReady) {
+            semanticMemoryEmbedder.unload()
+            appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
+        }
+    }
+
+    /**
+     * Test/diagnostic-only entry point: runs the exact unload
+     * [onTrimMemory][android.content.ComponentCallbacks2.onTrimMemory]
+     * (TRIM_MEMORY_RUNNING_LOW and up) would under real system memory
+     * pressure — suspending, so an instrumentation test can await it
+     * deterministically instead of racing the fire-and-forget coroutine the
+     * real callback launches. Nothing in this app can force Android to
+     * actually deliver TRIM_MEMORY_RUNNING_LOW from a test, so this is the
+     * only practical way to exercise the full downloaded → loaded →
+     * pressure → lexical-fallback → async-reload → semantic-again lifecycle
+     * end to end without a device that happens to be genuinely low on
+     * memory mid-test-run.
+     */
+    suspend fun simulateMemoryPressureForTesting() {
+        releaseEmbedderUnderMemoryPressure("simulated for test")
+    }
+
+    /**
+     * Serializes every actual native load [ensureEmbedderLoaded] attempts.
+     * Before [LazyMemoryEmbedder]'s own `reloadTrigger` existed, this
+     * function only ever ran from one place at a time — the initial
+     * background task, then the periodic backfill loop, always
+     * sequentially. `reloadTrigger` adds a second, independent caller that
+     * can fire around the same moment the periodic loop's own tick does;
+     * this is what keeps that overlap from becoming two concurrent
+     * [LlamaCppMemoryEmbedder.load] calls racing over the same GGUF file. A
+     * caller that arrives while another is already loading simply waits for
+     * it to finish and reads its result, rather than starting a second,
+     * redundant load of its own.
+     */
+    private val embedderReloadMutex = Mutex()
+
+    /**
+     * Loads [spec] and hands it to [semanticMemoryEmbedder] if it isn't
+     * already resident — shared by the initial load above, the periodic
+     * reload-after-[LazyMemoryEmbedder.unload] check, and
+     * [LazyMemoryEmbedder]'s own `reloadTrigger`, so all three go through
+     * the exact same native-load, error-logging, and no-parallel-loads path
+     * (see [embedderReloadMutex]). Returns whether the embedder is ready by
+     * the time this returns (already-ready counts). Never re-downloads:
+     * a spec not yet installed on disk is reported not-ready rather than
+     * started here, exactly as before.
+     */
+    private suspend fun ensureEmbedderLoaded(spec: EmbeddingModelSpec): Boolean = embedderReloadMutex.withLock {
+        if (semanticMemoryEmbedder.isReady) return@withLock true
+        if (!experimentalEmbeddingStore.isInstalled(spec)) return@withLock false
 
         val embedder = runCatching {
             LlamaCppMemoryEmbedder.load(
@@ -502,14 +565,14 @@ class AppContainer private constructor(private val context: Context) {
         }.getOrElse { error ->
             appLog.record("SEMANTIC_MEMORY", "failed to load ${spec.title}: ${error.message}")
             null
-        } ?: return false
+        } ?: return@withLock false
 
         semanticMemoryEmbedder.set(embedder) { embedder.close() }
         appLog.record(
             "SEMANTIC_MEMORY",
             "${spec.title} ready (dimension=${embedder.dimension}) — backfilling existing memory",
         )
-        return true
+        true
     }
 
     /**
