@@ -167,10 +167,25 @@ internal class WhisperCppSpeechModel(
 
         val producerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val producer = producerScope.launch {
+            // A plain `launch` under a SupervisorJob still crashes the
+            // process on an uncaught exception — SupervisorJob only stops it
+            // from cancelling siblings, it doesn't swallow the exception
+            // itself. source.stream() throws routinely for anything
+            // MediaCodecAudioSource couldn't decode (no audio track,
+            // unsupported format, a genuinely corrupt file) — every one of
+            // those would otherwise crash the whole app instead of just
+            // failing this transcription. channel.close(cause) is what
+            // turns that into an ordinary exception the consumer's
+            // `for (chunk in channel)` loop below throws, exactly as if
+            // source.stream() had been called in-line without a channel
+            // between them at all.
             try {
                 source.stream { chunk -> channel.send(chunk) }
-            } finally {
                 channel.close()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                channel.close(e)
             }
         }
 
