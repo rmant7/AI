@@ -244,20 +244,41 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                 try {
                     val rawKey = keyEntry?.key ?: config.apiKey
                     val authKey = config.transformKey?.let { transform -> rawKey?.let { transform(it) } } ?: rawKey
+                    // truncatedByLength tracks the *last* chunk's own
+                    // finish_reason, checked only once [DONE] confirms the
+                    // stream itself completed normally — a provider hitting
+                    // its own output-length cap (Groq's free tier on a long
+                    // answer, observed for real) ends the SSE stream exactly
+                    // as cleanly as a model that finished on its own
+                    // (finish_reason "stop"), with no exception anywhere to
+                    // catch. Without reading this field, that clean-looking
+                    // stream end was reported as a complete, successful
+                    // answer with nothing to tell a truncated numbered list
+                    // apart from one that actually ended after item 5.
+                    var truncatedByLength = false
                     http.postJsonStreaming(url("/chat/completions"), body, authKey).use { response ->
                         val reader = response.reader()
                         while (true) {
                             if (cancelled.get()) return@use
                             val line = reader.readLine() ?: return@use
                             val payload = SseParser.dataOf(line) ?: continue
-                            if (SseParser.isTerminator(payload)) return@use
+                            if (SseParser.isTerminator(payload)) {
+                                if (truncatedByLength) {
+                                    throw java.io.IOException(
+                                        "the model reached its own output-length limit and the response was cut off",
+                                    )
+                                }
+                                return@use
+                            }
                             val chunk = runCatching {
                                 openAiJson.decodeFromString(ChatStreamChunk.serializer(), payload)
                             }.getOrNull() ?: continue
-                            chunk.choices.firstOrNull()?.delta?.content?.takeIf { it.isNotEmpty() }?.let {
+                            val choice = chunk.choices.firstOrNull()
+                            choice?.delta?.content?.takeIf { it.isNotEmpty() }?.let {
                                 emittedAny = true
                                 emit(it)
                             }
+                            if (choice?.finishReason == "length") truncatedByLength = true
                         }
                     }
                     break

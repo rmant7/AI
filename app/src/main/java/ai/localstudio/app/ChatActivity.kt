@@ -565,6 +565,17 @@ class ChatActivity : AppCompatActivity() {
     }
 
     /**
+     * Same reasoning as send()'s own onFailure handler: a source that
+     * streamed real, useful text before failing (a truncated-by-length
+     * answer, a connection dropped mid-stream) had that text already reach
+     * [partial] via onPartialText — replacing it outright with a bare error
+     * string would throw away an answer that visibly existed a moment
+     * earlier. Whatever streamed is kept, with the failure noted underneath.
+     */
+    private fun withPartial(partial: String?, errorBody: String): String =
+        if (!partial.isNullOrBlank()) "$partial\n\n---\n⚠ $errorBody" else errorBody
+
+    /**
      * Settings.compareMode's parallel path: every enabled source gets its
      * own single-candidate Orchestrator (see AppContainer.compareCandidates)
      * and runs independently instead of being tried as a fallback chain —
@@ -652,12 +663,12 @@ class ChatActivity : AppCompatActivity() {
                             answer.text.ifBlank { getString(R.string.chat_empty_answer) }
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                             container.appLog.record("GENERATION_ERROR", "$label: timeout after ${GENERATION_TIMEOUT_MS}ms")
-                            getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
+                            withPartial(partial.value, getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000))
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Exception) {
                             container.appLog.record("GENERATION_ERROR", "$label: ${e.javaClass.simpleName}: ${e.message}")
-                            getString(R.string.chat_compare_generic_error, e.message ?: e.toString())
+                            withPartial(partial.value, getString(R.string.chat_compare_generic_error, e.message ?: e.toString()))
                         } finally {
                             // In a finally, not just after the try: the
                             // CancellationException branch above rethrows

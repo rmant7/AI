@@ -30,6 +30,13 @@ class FakeOpenAiServer : Closeable {
 
     /** Real models emit tokens over seconds; a server that dumps them instantly hides timing behaviour. */
     var chatChunkDelayMs: Long = 0
+
+    /**
+     * Set on the final chunk's own choice, exactly where a real OpenAI-
+     * compatible provider puts it — null (the default) omits the field
+     * entirely, matching a normal, non-truncated completion.
+     */
+    var chatFinishReason: String? = null
     var chatStatus: Int = 200
     var chatErrorBody: String = """{"error":{"message":"model not found","type":"invalid_request_error"}}"""
 
@@ -64,9 +71,11 @@ class FakeOpenAiServer : Closeable {
             exchange.sendResponseHeaders(200, 0)
             exchange.responseBody.use { out ->
                 out.write(": keep-alive\n\n".toByteArray())
-                for (chunk in chatChunks) {
+                chatChunks.forEachIndexed { index, chunk ->
                     if (chatChunkDelayMs > 0) Thread.sleep(chatChunkDelayMs)
-                    val payload = """{"choices":[{"index":0,"delta":{"content":${quote(chunk)}}}]}"""
+                    val finishReason = chatFinishReason.takeIf { index == chatChunks.lastIndex }
+                    val finishReasonField = finishReason?.let { ""","finish_reason":${quote(it)}""" }.orEmpty()
+                    val payload = """{"choices":[{"index":0,"delta":{"content":${quote(chunk)}}$finishReasonField}]}"""
                     out.write("data: $payload\n\n".toByteArray(StandardCharsets.UTF_8))
                     out.flush()
                 }

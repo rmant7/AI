@@ -97,6 +97,33 @@ class OpenAiRuntimeTest {
     }
 
     @Test
+    fun `a stream that hits the provider's own length limit fails instead of reporting success`() = runBlocking {
+        // Real symptom, reported from a live device: a long numbered-list
+        // answer from Groq just stopped mid-item, with no error shown
+        // anywhere — the SSE stream still ended cleanly with [DONE], it was
+        // just [DONE] after finish_reason "length" rather than "stop", and
+        // that field was never read.
+        server.chatFinishReason = "length"
+        val handle = assertIs<TextModelHandle>(textModel())
+
+        val failure = assertFailsWith<java.io.IOException> {
+            handle.generate(GenerationRequest(prompt = "long answer")).toList()
+        }
+
+        assertContains(failure.message!!, "output-length limit")
+    }
+
+    @Test
+    fun `an ordinary finish is unaffected by the length-limit check`() = runBlocking {
+        server.chatFinishReason = "stop"
+        val handle = assertIs<TextModelHandle>(textModel())
+
+        val chunks = handle.generate(GenerationRequest(prompt = "hi")).toList()
+
+        assertEquals(listOf("Привет", ", ", "мир"), chunks)
+    }
+
+    @Test
     fun `an error response carries the server's message`() = runBlocking {
         server.chatStatus = 404
         val handle = assertIs<TextModelHandle>(textModel())
