@@ -99,6 +99,11 @@
     <string name="transcribe_play">Play</string>
     <string name="transcribe_pause">Pause</string>
     <string name="transcribe_play_failed">Couldn\'t play this file: %1$s</string>
+    <string name="transcribe_mic_section_title">LIVE MIC (PHASE 3 TEST)</string>
+    <string name="transcribe_mic_start">Start listening</string>
+    <string name="transcribe_mic_stop">Stop</string>
+    <string name="transcribe_mic_listening">Listening…</string>
+    <string name="transcribe_mic_idle">Idle</string>
 
     <string name="settings_whisper_model">Speech recognition model (offline)</string>
     <string name="settings_whisper_manage">Open Models → Voice</string>

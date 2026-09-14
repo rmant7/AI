@@ -3,11 +3,14 @@ package ai.localstudio.app
 import ai.localstudio.app.databinding.ActivityTranscribeBinding
 import ai.localstudio.app.databinding.ItemTranscribeResultBinding
 import ai.localstudio.app.whisper.MediaFileUtils
+import ai.localstudio.app.whisper.MicrophoneAudioSource
 import ai.localstudio.app.whisper.WhisperModelSeed
 import ai.localstudio.core.model.TranscriptSegment
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
@@ -18,6 +21,7 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -26,6 +30,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -35,7 +40,13 @@ import java.io.File
  * it through [ai.localstudio.app.whisper.WhisperFileTranscriber] (which loads
  * the model once, via [ai.localstudio.app.AppContainer.whisperFileTranscriber],
  * and reuses it across every file), watch segments arrive before the file
- * finishes decoding, save each result as it completes.
+ * finishes decoding, save each result as it completes. Also carries a
+ * "LIVE MIC" section (Phase 3) driving
+ * [ai.localstudio.app.whisper.WhisperCppMicSession] — a genuinely
+ * incremental [ai.localstudio.core.runtime.SpeechModelHandle.startStreaming]
+ * session fed by the microphone, independent of the file/folder controls
+ * above it and of [ChatActivity]'s own (currently hidden) mic button, which
+ * this class does not touch.
  *
  * Deliberately not wired through [ai.localstudio.core.engine.Orchestrator] —
  * this is a way to exercise [ai.localstudio.app.whisper.WhisperCppRuntime]/
@@ -54,6 +65,13 @@ class TranscribeActivity : AppCompatActivity() {
     /** The source clip currently loaded for playback, so a row can tell whether it's the one showing a pause icon. */
     private var playingUri: Uri? = null
     private var mediaPlayer: MediaPlayer? = null
+
+    /** Phase 3 test harness state — see the "LIVE MIC" section in activity_transcribe.xml and WhisperCppMicSession's own doc comment. */
+    private var micActive = false
+
+    private val requestMicPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startMic() else Toast.makeText(this, R.string.chat_mic_permission, Toast.LENGTH_SHORT).show()
+    }
 
     private val pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -92,8 +110,10 @@ class TranscribeActivity : AppCompatActivity() {
         binding.pickFolderButton.setOnClickListener { pickFolderLauncher.launch(null) }
         binding.transcribeStartButton.setOnClickListener { start() }
         binding.transcribeStopButton.setOnClickListener { stop() }
+        binding.micToggleButton.setOnClickListener { onMicToggleClicked() }
 
         render()
+        renderMicState()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -106,8 +126,10 @@ class TranscribeActivity : AppCompatActivity() {
         // Audio playing on from a screen the user has already left (Home,
         // app switcher, the Voice model picker) is a leak, not a feature —
         // stop it here rather than waiting for onDestroy, which a mere
-        // background/foreground cycle never reaches.
+        // background/foreground cycle never reaches. Same reasoning for a
+        // live mic recording still listening into the background.
         stopPlayback()
+        if (micActive) stopMic()
     }
 
     override fun onDestroy() {
@@ -122,7 +144,10 @@ class TranscribeActivity : AppCompatActivity() {
         // Off the main thread: release() blocks until any in-flight
         // transcription actually unwinds (see its own doc comment) — fine on
         // a background coroutine, an ANR risk called straight from onDestroy.
-        CoroutineScope(Dispatchers.IO).launch { container.whisperFileTranscriber.release() }
+        CoroutineScope(Dispatchers.IO).launch {
+            container.whisperFileTranscriber.release()
+            container.whisperMicSession.release()
+        }
     }
 
     private fun displayName(uri: Uri): String =
@@ -195,6 +220,56 @@ class TranscribeActivity : AppCompatActivity() {
     private fun stop() {
         job?.cancel()
         container.whisperFileTranscriber.requestCancel()
+    }
+
+    private fun onMicToggleClicked() {
+        if (micActive) {
+            stopMic()
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startMic()
+        } else {
+            requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    private fun startMic() {
+        val seed = container.whisperStore.installedSeed(container.settings.whisperModelId)
+        if (seed == null) {
+            Toast.makeText(this, R.string.transcribe_no_model, Toast.LENGTH_LONG).show()
+            return
+        }
+        micActive = true
+        renderMicState()
+        binding.micTranscriptText.text = ""
+        binding.micTranscriptText.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            val segments = container.whisperMicSession.start(seed, MicrophoneAudioSource(), language = null)
+            // Suspends for as long as the session is active — completes when
+            // WhisperCppMicSession.finish()/cancel() closes its underlying
+            // channel (see StreamingSpeechSession's own contract).
+            segments.collect { segment ->
+                val current = binding.micTranscriptText.text
+                binding.micTranscriptText.text = if (current.isNullOrBlank()) segment.text else "$current ${segment.text}"
+            }
+            // The Flow can complete on its own (the session finished/was
+            // cancelled from elsewhere, e.g. onPause) without stopMic() ever
+            // running — keep the button/status in sync either way.
+            micActive = false
+            renderMicState()
+        }
+    }
+
+    private fun stopMic() {
+        container.whisperMicSession.finish()
+        micActive = false
+        renderMicState()
+    }
+
+    private fun renderMicState() {
+        binding.micToggleButton.text = getString(if (micActive) R.string.transcribe_mic_stop else R.string.transcribe_mic_start)
+        binding.micStatusText.text = getString(if (micActive) R.string.transcribe_mic_listening else R.string.transcribe_mic_idle)
     }
 
     /**

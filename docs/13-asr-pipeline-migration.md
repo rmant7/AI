@@ -171,9 +171,11 @@ VAD), было не интегрировано в архитектуру, рад
   `OpenAiRuntime.RemoteSpeechModel.audioFile()`); ни один вызывающий код в
   приложении сегодня не строит `AudioRef` с `content://` — экрана выбора
   файла нет. Добавить `Context`-резолвинг, когда появится реальный UI.
-- **UI экрана «выбрать файл → транскрибировать»** — не создавался: задание
-  прямо требует не трогать старый UI/lifecycle и не расширять срез сверх
-  необходимого; сама постановка Definition of Done про экран не говорит.
+- **UI экрана «выбрать файл → транскрибировать»** — изначально не создавался
+  по той же логике (Definition of Done про экран не говорит). Позже
+  добавлен `TranscribeActivity` — см. отдельный раздел ниже: пользователю
+  оказалось нужно реально потестить на устройстве, а не только прочитать
+  код.
 - **CMakeLists.txt** — не менялся: в AI он уже был на уровне (или лучше)
   reference-реализации (`-O3`/`-DNDEBUG` принудительно, `armv8.2-a+dotprod+fp16+i8mm`,
   пиннутый `whisper.cpp v1.9.3`). Единственное, чего не хватало — `flash_attn`
@@ -190,24 +192,70 @@ VAD), было не интегрировано в архитектуру, рад
    нативный вызов на этом handle — включая чужой, если одновременно идут
    и `transcribe()`, и `startStreaming()`-сессия. Для одного активного
    вызова за раз (текущий сценарий использования) это не проблема.
-3. `startStreaming()` реализован (интерфейс того требует от каждого
-   `SpeechModelHandle`), но не готов к продакшену на живом микрофоне —
-   см. «Что не перенесено» выше.
+3. ~~`startStreaming()` не готов к продакшену на живом микрофоне~~ —
+   актуализировано: `close()` теперь сам берёт `nativeOpMutex` перед
+   `nativeFree`, так что он безопасен против гонки с сессией
+   `startStreaming()` в любом случае (см. Phase 3 ниже). Остаётся
+   ограничение: `WhisperCppMicSession` не заведён через `RuntimeManager`
+   (тот же выбор, что и `WhisperFileTranscriber`) — RAM-бюджетом живой
+   mic-сессии `RuntimeManager` не управляет, только `releaseMemoryUnderPressure`.
 
-## TODO по фазам (как в задании)
+## Прогресс по фазам (обновлено после аудита + доработки)
 
-- **Phase 2** — `transcribeDirectory()`: обход директории, поддерживаемые
-  форматы, последовательная или ограниченно-параллельная обработка,
-  сохранение результата сразу после каждого файла, одна загруженная модель
-  на весь проход.
-- **Phase 3** — живой микрофон на `WhisperCppSpeechModel.startStreaming()`
-  вместо `WhisperEngine`/`AudioRecorder`; решить ref-counting-проблему
-  из «Что не перенесено».
+- **Phase 2 — по факту сделан.** `TranscribeActivity`'s folder picker
+  (`MediaFileUtils.listMediaFilesRecursively` + `WhisperFileTranscriber`)
+  уже даёт: обход директории, последовательную обработку, сохранение
+  каждого результата сразу после готовности, одну загруженную модель на
+  весь проход. Отдельного публичного `transcribeDirectory()` API нет —
+  логика инкапсулирована в Activity, этого достаточно для текущей цели
+  (тестовый экран, не публичный SDK).
+- **Phase 3 — инфраструктура готова, в продакшен UI не встроена.**
+  Новое:
+  - `MicrophoneAudioSource` (`app/whisper/`) — микрофон как `AudioSource`,
+    параметры захвата перенесены из уже рабочего `AudioRecorder` (MIC,
+    не VOICE_RECOGNITION; ×8 буфер; блоки ~0.25 с).
+  - `WhisperCppMicSession` (`app/whisper/`) — по аналогии с
+    `WhisperFileTranscriber`: грузит модель напрямую через
+    `WhisperCppRuntime` (не через `RuntimeManager` — тот же выбор, что и
+    `WhisperFileTranscriber`, по той же причине: `RuntimeManager` рассчитан
+    на acquire-use-release в границах одного вызова, а не на
+    открытую по времени сессию), качает `AudioSource` в
+    `StreamingSpeechSession.acceptAudio()` на фоновой корутине.
+  - `WhisperCppSpeechModel.close()` исправлен на реальную безопасность:
+    теперь берёт `WhisperBridge.nativeOpMutex` перед `nativeFree` — тем
+    самым ждёт любой текущий нативный вызов (batch или streaming) вместо
+    того, чтобы просто полагаться на то, что вызывающий код никогда не
+    попросит закрыть занятую модель. Это и была основная техническая
+    причина, по которой `startStreaming()` не был безопасен для живого
+    использования — теперь безопасен.
+  - `TranscribeActivity` получил раздел «LIVE MIC (PHASE 3 TEST)» —
+    кнопка старт/стоп, разрешение `RECORD_AUDIO`, живой транскрипт на
+    экране. Не идёт через `Orchestrator`.
+  - **Сознательно не тронуто:** `ChatActivity`'s собственная кнопка
+    микрофона (`WhisperEngine`/`AudioRecorder`, сейчас скрыта из-за
+    известных проблем с качеством/латентностью — см. комментарий в
+    `activity_chat.xml`) не переведена на этот путь. Причина не техническая:
+    это решение о продукте («достаточно ли теперь хорошо качество,
+    учитывая выбор модели»), которое требует реального устройства и
+    решения человека, а не архитектурного изменения втихую без возможности
+    проверить. `WhisperCppMicSession` — новая, отдельная инфраструктура,
+    которую можно подключить к `ChatActivity`, когда это решение будет
+    принято.
 - **Phase 4** — настоящий incremental/token-level streaming (если
   whisper.cpp или альтернативный движок это позволяют) вместо
-  sliding-window shim.
+  sliding-window shim, который используют и `startStreaming()`, и теперь
+  `WhisperCppMicSession`.
 - **Phase 5** — альтернативные движки (`SherpaSpeechModel`, `QwenAsrSpeechModel`,
   `RemoteSpeechModel` — последний уже существует как `OpenAiRuntime.RemoteSpeechModel`).
+
+## Ветки этой работы
+
+- `claude/asr-pipeline-migration-5035ni` — Phase 1 (vertical slice) +
+  `TranscribeActivity` (batch/Phase 2) + memory-pressure fix для голосовых
+  моделей + play/copy кнопки. Собран и проверен в CI (build + smoke-test
+  зелёные).
+- `claude/asr-phase3-mic-streaming` — форк от предыдущей, начиная отсюда
+  Phase 3 (эта секция) ведётся отдельно от уже проверенной Phase 1/2 ветки.
 
 ## Benchmark
 

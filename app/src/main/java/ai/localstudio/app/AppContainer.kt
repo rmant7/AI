@@ -61,6 +61,7 @@ import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
+import ai.localstudio.app.whisper.WhisperCppMicSession
 import ai.localstudio.app.whisper.WhisperCppRuntime
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
@@ -572,6 +573,10 @@ class AppContainer private constructor(private val context: Context) {
             whisperFileTranscriber.release()
             appLog.record("WHISPER", "file-transcriber engine unloaded under memory pressure ($reason)")
         }
+        if (whisperMicSession.isLoaded) {
+            whisperMicSession.release()
+            appLog.record("WHISPER", "mic session unloaded under memory pressure ($reason)")
+        }
     }
 
     /**
@@ -756,6 +761,16 @@ class AppContainer private constructor(private val context: Context) {
      * pressure that unloads everything else.
      */
     val whisperFileTranscriber = WhisperFileTranscriber(whisperCppRuntime as WhisperCppRuntime, whisperStore)
+
+    /**
+     * Phase 3 (docs/13-asr-pipeline-migration.md): a live-mic
+     * [ai.localstudio.core.runtime.StreamingSpeechSession] driver, new and
+     * not yet wired into any screen's UI — [TranscribeActivity] exercises
+     * it as a test harness the same way it already does for files. Shared
+     * for the same reason [whisperFileTranscriber] is: so
+     * [releaseMemoryUnderPressure] can free it too.
+     */
+    val whisperMicSession = WhisperCppMicSession(whisperCppRuntime as WhisperCppRuntime, whisperStore)
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

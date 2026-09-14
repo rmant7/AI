@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -312,27 +313,28 @@ internal class WhisperCppSpeechModel(
     }
 
     /**
-     * Safe with respect to [transcribe]/[transcribeStreaming]: those run the
-     * native call synchronously within the awaited suspend chain, so by the
-     * time [ai.localstudio.core.runtime.RuntimeManager.release] can bring
-     * this model's refCount to 0 (i.e., every `withModel { }` block that
-     * called them has already returned), no native call from this instance
-     * is still in flight.
+     * Never frees the native handle while some other coroutine is still
+     * inside [WhisperBridge.nativeTranscribe] on it — batch, streaming,
+     * doesn't matter which. That's what acquiring [WhisperBridge.nativeOpMutex]
+     * here buys: every native call anywhere in this class already goes
+     * through it (see [transcribeInternal] and [startStreaming]'s `infer`),
+     * so this simply waits its turn like any of them would, then frees.
+     * `requestCancel()`/[StreamingSpeechSession.cancel] should still be
+     * called first when there's a call actually in flight — this makes
+     * `close()` itself safe, it doesn't make it fast; without a prior
+     * cancel it can block until whatever's running finishes on its own.
      *
-     * **Not** safe with respect to a session from [startStreaming]: it
+     * This is what makes a [startStreaming] session safe to free at all: it
      * returns immediately and keeps making native calls from a background
-     * coroutine for as long as the caller keeps feeding it audio — well
-     * after whatever `withModel { }` block *created* the session has
-     * returned and released its refCount. [RuntimeManager] has no concept of
-     * a long-lived handle outliving the call that acquired it, so a live mic
-     * session must not be wired up against an evictable model until that's
-     * addressed (acquire a ref-count-holding handle for the session's own
-     * lifetime, release it from [StreamingSpeechSession.finish]/[cancel]) —
-     * tracked as a Phase 3 TODO in docs/13-asr-pipeline-migration.md. Phase
-     * 1's transcribe()-only vertical slice never exercises this path.
+     * coroutine for as long as the caller feeds it audio, well past
+     * whatever call created it — [WhisperCppMicSession] relies on exactly
+     * this (see its own doc comment) instead of routing through
+     * [ai.localstudio.core.runtime.RuntimeManager], which has no concept of
+     * a long-lived handle outliving the call that acquired it in the first
+     * place.
      */
     override fun close() {
-        bridge.nativeFree(handle)
+        runBlocking { WhisperBridge.nativeOpMutex.withLock { bridge.nativeFree(handle) } }
     }
 
     private fun audioSourceFor(audio: AudioRef): AudioSource {

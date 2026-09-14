@@ -8,10 +8,6 @@ import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
 import android.net.Uri
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.runBlocking
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Loads a whisper.cpp model once and transcribes any number of files against
@@ -29,17 +25,6 @@ class WhisperFileTranscriber(
 ) {
     private var loadedSeedId: String? = null
     private var loaded: WhisperCppSpeechModel? = null
-
-    /**
-     * The calling coroutine's own [Job] for whichever [transcribe] call is
-     * currently in flight, if any. Not routed through
-     * [ai.localstudio.core.runtime.RuntimeManager] means nothing else
-     * guarantees a native call isn't still running when [release] is called
-     * — unlike [WhisperCppSpeechModel.close]'s own safety argument, which
-     * relies specifically on `RuntimeManager`'s refCount==0 gate that this
-     * class has no equivalent of. [release] joins this before freeing.
-     */
-    private val activeJob = AtomicReference<Job?>(null)
 
     /** Whether a model is currently resident — checked before [release] purely for a meaningful log line, not correctness ([release] is a safe no-op either way). */
     val isLoaded: Boolean get() = loaded != null
@@ -84,13 +69,7 @@ class WhisperFileTranscriber(
         onSegment: (TranscriptSegment) -> Unit,
     ): Transcript {
         val handle = ensureLoaded(seed)
-        val job = currentCoroutineContext()[Job]
-        activeJob.set(job)
-        try {
-            return handle.transcribeStreaming(AudioRef(uri = uri.toString()), language, onSegment)
-        } finally {
-            activeJob.compareAndSet(job, null)
-        }
+        return handle.transcribeStreaming(AudioRef(uri = uri.toString()), language, onSegment)
     }
 
     /** Interrupts whichever file is transcribing right now; the model stays loaded for the next one. */
@@ -102,18 +81,15 @@ class WhisperFileTranscriber(
      * Frees the native model — safe to call even while a [transcribe] is in
      * flight on another coroutine (e.g. [ai.localstudio.app.AppContainer]'s
      * memory-pressure handler, concurrently with
-     * [ai.localstudio.app.TranscribeActivity]'s own): cancels it first, then
-     * blocks until it has actually finished before freeing, the same
-     * reasoning as `LlamaTextModel.close()`'s own `activeWorker.join()`. Not
-     * itself suspending — called from both a plain lifecycle callback
-     * ([ai.localstudio.app.TranscribeActivity.onDestroy]) and a background
-     * coroutine, and blocking a background thread briefly for an in-flight
-     * cancellation to unwind is the trade this makes instead of a second,
-     * harder-to-call suspend variant for what amounts to the same operation.
+     * [ai.localstudio.app.TranscribeActivity]'s own): [WhisperCppSpeechModel.close]
+     * itself now waits for any native call already in progress before
+     * freeing (it acquires the same [ai.localstudio.whisper.WhisperBridge.nativeOpMutex]
+     * every native call goes through). [requestCancel] first so that wait is
+     * short instead of running the in-flight window to completion — not a
+     * requirement for correctness anymore, just for promptness.
      */
     fun release() {
         loaded?.requestCancel()
-        runBlocking { activeJob.get()?.join() }
         loaded?.close()
         loaded = null
         loadedSeedId = null
