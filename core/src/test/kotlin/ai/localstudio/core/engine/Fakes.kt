@@ -104,7 +104,7 @@ class FakeStreamingSession(private val text: String, private val language: Strin
     }
 
     override fun finish() {
-        channel.trySend(TranscriptSegment(text = text, startMs = 0, endMs = (acceptedSampleCount / 16), speaker = null, confidence = 0.94))
+        channel.trySend(TranscriptSegment(text = text, startMs = 0, endMs = (acceptedSampleCount / 16).toLong(), speaker = null, confidence = 0.94))
         channel.close()
     }
 
