@@ -59,6 +59,23 @@ data class CloudProvider(
 
 object CloudProviders {
 
+    /**
+     * Not a real endpoint — [baseUrl] is blank, so [ai.localstudio.app.AppContainer.cloudCandidates]
+     * always returns an empty list for it, same as any other provider with
+     * no address configured. Deliberately left out of [ALL]: it used to be
+     * selectable and toggleable there like a normal provider, but "enabling"
+     * it did nothing (it never contributed a real [ai.localstudio.core.runtime.FallbackCandidate]),
+     * while [ai.localstudio.app.AppContainer.runtimeLabel] still showed it
+     * as though it were part of the active route — confusing, since a
+     * person had no way to tell it apart from a provider that actually
+     * worked. Its only real job — [ai.localstudio.app.StubRuntime] answering
+     * something before any real model or provider is configured — already
+     * happens automatically whenever [ai.localstudio.app.AppContainer.orchestrator]
+     * finds zero real candidates, with no dependency on this object being
+     * selectable anywhere; this is kept only as the label
+     * [ai.localstudio.app.AppContainer.runtimeLabel] and [byId]'s own
+     * not-found fallback still use.
+     */
     val DEMO = CloudProvider(
         id = "demo",
         titleRes = R.string.provider_title_demo,
@@ -77,9 +94,9 @@ object CloudProviders {
         needsKey = false,
     )
 
+    /** [DEMO] is deliberately absent — see its own doc comment for why it was never a real, selectable choice here. */
     val ALL = listOf(
         LOCAL,
-        DEMO,
         CloudProvider(
             id = "groq",
             titleRes = R.string.provider_title_groq,

@@ -12,8 +12,11 @@ class Settings(context: Context) {
 
     private val prefs = context.getSharedPreferences("local-ai-studio", Context.MODE_PRIVATE)
 
+    // LOCAL, not CloudProviders.DEMO: DEMO isn't in CloudProviders.ALL (see
+    // its own doc comment), so defaulting to it here would make a fresh
+    // install's Settings spinner show nothing selected until first touched.
     var providerId: String
-        get() = prefs.getString(KEY_PROVIDER, CloudProviders.DEMO.id).orEmpty()
+        get() = prefs.getString(KEY_PROVIDER, CloudProviders.LOCAL.id).orEmpty()
         set(value) = prefs.edit().putString(KEY_PROVIDER, value).apply()
 
     val provider: CloudProvider get() = CloudProviders.byId(providerId)
