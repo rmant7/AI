@@ -507,11 +507,11 @@ class AppContainer private constructor(private val context: Context) {
                 ) {
                     return
                 }
-                CoroutineScope(Dispatchers.IO).launch { releaseEmbedderUnderMemoryPressure("trim level $level") }
+                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("trim level $level") }
             }
 
             override fun onLowMemory() {
-                CoroutineScope(Dispatchers.IO).launch { releaseEmbedderUnderMemoryPressure("onLowMemory") }
+                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("onLowMemory") }
             }
 
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
@@ -519,21 +519,34 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * The actual unload both real memory-pressure callbacks above and
+     * The actual release both real memory-pressure callbacks above and
      * [simulateMemoryPressureForTesting] run — suspending, unlike
      * [android.content.ComponentCallbacks2.onTrimMemory]/`onLowMemory`
      * themselves, which launch this on a background coroutine rather than
      * calling it directly since neither is itself a suspend function.
+     *
+     * Frees [releaseLocalModels] too, not just [semanticMemoryEmbedder] —
+     * this app's own log evidence is why: the embedding model is a few
+     * hundred MB, while an idle local chat model plus its KV cache is
+     * several GB, and until this call existed here nothing ever freed that
+     * under memory pressure at all (its only other caller sits behind the
+     * mic button, which this build hides — see [releaseLocalModels]'s own
+     * doc comment). A real device log showed a `PROCESS_EXIT` from an
+     * outright OOM kill with the embedding model already correctly
+     * unloading on trim signals but the multi-GB chat model still fully
+     * resident throughout — freeing only the smaller of the two was never
+     * going to be enough to actually avoid that.
      */
-    private suspend fun releaseEmbedderUnderMemoryPressure(reason: String) {
+    private suspend fun releaseMemoryUnderPressure(reason: String) {
         if (semanticMemoryEmbedder.isReady) {
             semanticMemoryEmbedder.unload()
             appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
         }
+        releaseLocalModels()
     }
 
     /**
-     * Test/diagnostic-only entry point: runs the exact unload
+     * Test/diagnostic-only entry point: runs the exact release
      * [onTrimMemory][android.content.ComponentCallbacks2.onTrimMemory]
      * would under real system memory pressure (see that function's own
      * doc comment for exactly which levels qualify) — suspending, so an
@@ -547,7 +560,7 @@ class AppContainer private constructor(private val context: Context) {
      * memory mid-test-run.
      */
     suspend fun simulateMemoryPressureForTesting() {
-        releaseEmbedderUnderMemoryPressure("simulated for test")
+        releaseMemoryUnderPressure("simulated for test")
     }
 
     /**
@@ -828,14 +841,18 @@ class AppContainer private constructor(private val context: Context) {
     private val runtimeManagers = mutableListOf<RuntimeManager>()
 
     /**
-     * Frees every locally-loaded model (the LLM, its vision projector) —
-     * called right before starting a voice recording, so Whisper is not
-     * competing with an already-resident multi-GB local model for the same
-     * RAM budget the same way that local model was competing with Whisper
-     * before WhisperEngine started releasing itself after each use. Uses
-     * [RuntimeManager.evictIdle], not the blunter unloadAll: a model still
-     * actively mid-generation (refCount > 0) is left alone rather than
-     * force-freed out from under whatever is using it.
+     * Frees every locally-loaded model (the LLM, its vision projector). Two
+     * callers: [releaseMemoryUnderPressure], under real system memory
+     * pressure — a multi-GB resident model with nothing ever freeing it was
+     * exactly what a real `PROCESS_EXIT` OOM kill looked like in this app's
+     * own log; and (originally) right before starting a voice recording, so
+     * Whisper would not compete with an already-resident local model for
+     * the same RAM budget — currently unreachable in this build since the
+     * mic button is hidden (see `activity_chat.xml`'s own comment), left in
+     * place for when it comes back. Uses [RuntimeManager.evictIdle], not the
+     * blunter unloadAll: a model still actively mid-generation (refCount > 0)
+     * is left alone rather than force-freed out from under whatever is
+     * using it.
      */
     suspend fun releaseLocalModels() {
         runtimeManagers.forEach { it.evictIdle() }
