@@ -50,14 +50,16 @@ class ExperimentalEmbeddingModelTest {
         // ExperimentalEmbeddingModels' current candidates. Change these two
         // arguments directly when testing a model that expects something
         // else - this is a manual harness, not a catalog lookup.
-        val embedder = LlamaCppMemoryEmbedder.load(
-            bridge = bridge,
-            modelPath = modelFile.absolutePath,
-            modelId = "experimental",
-            pooling = EmbeddingPooling.MEAN,
-            queryPrefix = "query: ",
-            passagePrefix = "passage: ",
-        )
+        val embedder = runBlocking {
+            LlamaCppMemoryEmbedder.load(
+                bridge = bridge,
+                modelPath = modelFile.absolutePath,
+                modelId = "experimental",
+                pooling = EmbeddingPooling.MEAN,
+                queryPrefix = "query: ",
+                passagePrefix = "passage: ",
+            )
+        }
         assertTrue("model failed to load from ${modelFile.absolutePath} - check it is a valid embedding GGUF", embedder != null)
         requireNotNull(embedder)
 

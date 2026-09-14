@@ -1,5 +1,7 @@
 package ai.localstudio.app.llama
 
+import kotlinx.coroutines.sync.Mutex
+
 /**
  * Which token(s) of an embedding model's output become the sentence vector —
  * `llama_pooling_type`'s ordinal values, as defined in llama.h at this app's
@@ -163,5 +165,28 @@ class LlamaBridge {
          * cluster, and it keeps sustained load — and thermal throttling — lower.
          */
         fun defaultThreads(): Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+
+        /**
+         * Serializes every blocking native llama.cpp call across the whole
+         * app — chat generation, model loads, and memory embedding alike,
+         * any model or context, any [LlamaBridge] instance.
+         *
+         * Root-caused from a real on-device native crash (segfault) reported
+         * during ordinary use: [LlamaCppMemoryEmbedder]'s periodic
+         * `embedPending()` backfill loop and a live query's
+         * `embedForQuery()` both call [nativeEmbed] on the very same loaded
+         * embedding context from independent coroutines, with nothing in
+         * Kotlin stopping them from doing so at the same instant. A single
+         * `llama_context`'s KV cache and batch buffers are not safe to touch
+         * from two threads at once — this is not a hypothetical race, it is
+         * exactly what a live device hit. Sharing this one mutex between
+         * [LlamaCppRuntime]'s chat calls and [LlamaCppMemoryEmbedder]'s
+         * embedding calls (different contexts, but the same native process
+         * and thread pool) is the same "queued after, not in parallel with"
+         * guarantee [LlamaCppRuntime] already relied on for chat generation
+         * and model loads — this just closes the gap that the embedding
+         * path never went through it.
+         */
+        val nativeOpMutex = Mutex()
     }
 }

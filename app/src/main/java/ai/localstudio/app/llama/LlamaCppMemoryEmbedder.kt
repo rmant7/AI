@@ -2,6 +2,7 @@ package ai.localstudio.app.llama
 
 import ai.localstudio.memory.MemoryEmbedder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -34,12 +35,23 @@ class LlamaCppMemoryEmbedder private constructor(
     private val passagePrefix: String?,
 ) : MemoryEmbedder {
 
+    // Both wrapped in LlamaBridge.nativeOpMutex: this embedder's periodic
+    // embedPending() backfill and a live query's embedForQuery() run on
+    // independent coroutines with nothing else stopping them from calling
+    // nativeEmbed() on this exact same llama_context at the same instant —
+    // confirmed as the cause of a real on-device native crash (see the
+    // mutex's own doc comment). A single llama_context's KV cache and batch
+    // buffers are not safe to touch from two threads at once.
     override suspend fun embedForStorage(texts: List<String>): List<FloatArray> = withContext(Dispatchers.Default) {
-        texts.map { text -> bridge.nativeEmbed(handle, passagePrefix?.plus(text) ?: text) }
+        LlamaBridge.nativeOpMutex.withLock {
+            texts.map { text -> bridge.nativeEmbed(handle, passagePrefix?.plus(text) ?: text) }
+        }
     }
 
     override suspend fun embedForQuery(query: String): FloatArray = withContext(Dispatchers.Default) {
-        bridge.nativeEmbed(handle, queryPrefix?.plus(query) ?: query)
+        LlamaBridge.nativeOpMutex.withLock {
+            bridge.nativeEmbed(handle, queryPrefix?.plus(query) ?: query)
+        }
     }
 
     /** Releases the native context. Not part of [MemoryEmbedder] — that interface has no lifecycle of its own. */
@@ -67,7 +79,7 @@ class LlamaCppMemoryEmbedder private constructor(
          * being loaded, not inherit a value that happened to work for a
          * different one.
          */
-        fun load(
+        suspend fun load(
             bridge: LlamaBridge,
             modelPath: String,
             modelId: String,
@@ -76,15 +88,15 @@ class LlamaCppMemoryEmbedder private constructor(
             passagePrefix: String? = null,
             contextTokens: Int = DEFAULT_CONTEXT_TOKENS,
             threads: Int = LlamaBridge.defaultThreads(),
-        ): LlamaCppMemoryEmbedder? {
+        ): LlamaCppMemoryEmbedder? = LlamaBridge.nativeOpMutex.withLock {
             val handle = bridge.nativeLoadEmbeddingModel(modelPath, contextTokens, threads, pooling)
-            if (handle == 0L) return null
+            if (handle == 0L) return@withLock null
             val dimension = bridge.nativeEmbeddingDimension(handle)
             if (dimension <= 0) {
                 bridge.nativeFree(handle)
-                return null
+                return@withLock null
             }
-            return LlamaCppMemoryEmbedder(bridge, handle, modelId, dimension, queryPrefix, passagePrefix)
+            LlamaCppMemoryEmbedder(bridge, handle, modelId, dimension, queryPrefix, passagePrefix)
         }
 
         // Memory facts and queries are short (one sentence to a short

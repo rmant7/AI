@@ -21,28 +21,10 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-
-/**
- * Serializes every blocking native llama.cpp call across the whole app —
- * every [LlamaCppRuntime.load] and every [LlamaTextModel.generate], any
- * model, any instance. Both wrap a single-shot JNI call with no
- * cancellation hook worth relying on for [load] (see its own doc comment):
- * abandoning the coroutine that's waiting on one leaves the native call
- * itself running to completion regardless, on its own thread, and nothing
- * stopped a completely unrelated *new* load or generate from starting right
- * alongside it — both then compete for the same CPU cores and RAM. Confirmed
- * on a real device: an abandoned load of one model and a plain generate on
- * a *different*, already-loaded model, running at the same time, both took
- * several times longer than either alone should. This mutex is what makes
- * "abandon and try something else" mean "queued after," not "in parallel
- * with," whatever's still finishing in the background.
- */
-private val nativeOpMutex = Mutex()
 
 /**
  * How much free RAM must be visible, relative to the projector *file's*
@@ -131,7 +113,7 @@ class LlamaCppRuntime(
         var producedHandle = 0L
         val result = CompletableDeferred<Unit>()
         val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            nativeOpMutex.withLock {
+            LlamaBridge.nativeOpMutex.withLock {
                 producedHandle = runCatching { bridge.nativeLoad(file.absolutePath, contextTokens, threads) }.getOrDefault(0L)
             }
             result.complete(Unit)
@@ -175,7 +157,7 @@ class LlamaCppRuntime(
                 )
                 false
             } else {
-                nativeOpMutex.withLock {
+                LlamaBridge.nativeOpMutex.withLock {
                     runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
                 }.also { loaded ->
                     log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} from $mmprojPath")
@@ -246,7 +228,7 @@ private class LlamaTextModel(
             runCatching {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
             }
-            val produced = nativeOpMutex.withLock {
+            val produced = LlamaBridge.nativeOpMutex.withLock {
                 if (image != null) {
                     // ImageRef.uri is always a "data:<mime>;base64,<payload>" string
                     // here, never a content:// or file path — ChatActivity.attachImage()
