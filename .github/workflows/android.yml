@@ -39,9 +39,12 @@ jobs:
 
       # The JVM modules build and test without the Android SDK; running them
       # first means a logic regression fails in seconds rather than after a
-      # full Android build.
-      - name: Test core and openai
-        run: ./gradlew --no-daemon :core:test :openai:test 2>&1 | tee -a build.log
+      # full Android build. :commercial-memory was missing here entirely —
+      # its own test suite (MemoryExperimentRunnerTest, HeuristicContextRankerTest,
+      # ...) had never actually run in CI; :core:test only forced it to
+      # *compile* as a dependency, never to run its own tests.
+      - name: Test core, commercial-memory and openai
+        run: ./gradlew --no-daemon :core:test :commercial-memory:test :openai:test 2>&1 | tee -a build.log
 
       # --max-workers=1: with two native-build modules now (:app's llama_jni
       # and :whisper's whisper_jni), Gradle configures both CMake projects in

@@ -1,6 +1,8 @@
 package ai.localstudio.commercialmemory
 
 import ai.localstudio.memory.FileMemoryStore
+import ai.localstudio.memory.InMemorySemanticIndex
+import ai.localstudio.memory.MemoryEmbedder
 import ai.localstudio.memory.MemoryScope
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -72,6 +74,33 @@ class MemoryExperimentRunnerTest {
 
         val modes = logger.all().map { it.mode }
         assertEquals(listOf(ExperimentMode.MEMORY_OFF, ExperimentMode.BASIC_MEMORY, ExperimentMode.COMMERCIAL_MEMORY), modes)
+    }
+
+    @Test
+    fun `semanticOnlyCandidateCount reports items a lexical-only search would never find`() = runBlocking {
+        // A trivial embedder: every text maps to the same vector, so cosine
+        // similarity is always 1.0 — this test only cares that an item with
+        // zero shared vocabulary with the query is still found (semanticRank
+        // set, lexicalRank null), not about ranking real embedding quality.
+        val fakeEmbedder = object : MemoryEmbedder {
+            override val modelId = "fake-test-embedder"
+            override val dimension = 2
+            override suspend fun embedForQuery(query: String) = floatArrayOf(1f, 0f)
+            override suspend fun embedForStorage(texts: List<String>) = texts.map { floatArrayOf(1f, 0f) }
+        }
+        val index = InMemorySemanticIndex(modelId = fakeEmbedder.modelId, dimension = fakeEmbedder.dimension)
+        val file = File.createTempFile("experiment-runner-semantic-test", ".json").apply { deleteOnExit() }
+        val store = FileMemoryStore(file, semanticIndex = index, embedder = fakeEmbedder)
+        store.remember("совершенно не связанный по словам текст", MemoryScope.SEMANTIC)
+        store.embedPending()
+
+        val logger = InMemoryExperimentLogger()
+        val runner = MemoryExperimentRunner(AppMemory(store), logger = logger)
+
+        val result = runner.run("абсолютно другой запрос без общих слов", ExperimentMode.COMMERCIAL_MEMORY)
+
+        assertTrue(result.items.isNotEmpty(), "sanity check: the semantic-only item was actually selected")
+        assertEquals(1, logger.all().single().semanticOnlyCandidateCount)
     }
 
     @Test

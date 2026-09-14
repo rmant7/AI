@@ -23,4 +23,12 @@ data class ExperimentRecord(
     val selectedCharacters: Int,
     val latencyMs: Long,
     val responseQualityScore: Double? = null,
+    /**
+     * Of [candidateCount], how many were found *only* by semantic search —
+     * no lexical match at all. Zero for as long as no embedder is
+     * configured, or every retrieval happens to share vocabulary with what
+     * it finds; the number that actually answers whether semantic retrieval
+     * is contributing anything a lexical-only search wouldn't have.
+     */
+    val semanticOnlyCandidateCount: Int = 0,
 )

@@ -166,9 +166,20 @@ class AppContainer private constructor(private val context: Context) {
         private val jsonl = JsonlExperimentLogger(File(context.filesDir, "memory-experiments.jsonl"))
         override fun log(record: ExperimentRecord) {
             jsonl.log(record)
+            // semanticOnlyCandidateCount is the number this line exists for:
+            // candidateCount alone can't say whether a lexical-only search
+            // would have found the same things — this is what actually
+            // proves semantic retrieval found something vocabulary overlap
+            // never would have, as opposed to two conversations just
+            // happening to share words.
+            val semanticNote = if (record.semanticOnlyCandidateCount > 0) {
+                " (${record.semanticOnlyCandidateCount} semantic-only)"
+            } else {
+                ""
+            }
             appLog.record(
                 "MEMORY_EXPERIMENT",
-                "${record.mode}: ${record.candidateCount} candidates -> ${record.selectedCount} selected " +
+                "${record.mode}: ${record.candidateCount} candidates$semanticNote -> ${record.selectedCount} selected " +
                     "(${record.selectedCharacters} chars), ${record.latencyMs}ms",
             )
         }

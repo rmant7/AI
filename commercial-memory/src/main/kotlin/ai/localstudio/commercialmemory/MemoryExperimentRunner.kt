@@ -1,5 +1,6 @@
 package ai.localstudio.commercialmemory
 
+import ai.localstudio.memory.MemoryCandidate
 import java.util.UUID
 
 /**
@@ -29,9 +30,9 @@ class MemoryExperimentRunner(
     ): ContextSelection {
         val start = clock()
 
-        val (candidateCount, selection) = when (mode) {
+        val (candidateCount, semanticOnlyCandidateCount, selection) = when (mode) {
             ExperimentMode.MEMORY_OFF ->
-                0 to ContextSelection(emptyList(), emptyMap(), 0)
+                Triple(0, 0, ContextSelection(emptyList(), emptyMap(), 0))
 
             ExperimentMode.BASIC_MEMORY -> {
                 val items = appMemory.candidates(query, limit = retrievalLimit, matchAll = matchAll)
@@ -40,13 +41,17 @@ class MemoryExperimentRunner(
                 // switched off (NoRanking) — see that object's own comment
                 // for why this still goes through CommercialContextSelector
                 // rather than a separate, unbudgeted code path.
-                items.size to CommercialContextSelector(ranker = NoRanking).select(query, candidates, budget)
+                Triple(
+                    items.size,
+                    semanticOnlyCount(items),
+                    CommercialContextSelector(ranker = NoRanking).select(query, candidates, budget),
+                )
             }
 
             ExperimentMode.COMMERCIAL_MEMORY -> {
                 val items = appMemory.candidates(query, limit = retrievalLimit, matchAll = matchAll)
                 val candidates = buildCandidates(query, items)
-                items.size to selector.select(query, candidates, budget)
+                Triple(items.size, semanticOnlyCount(items), selector.select(query, candidates, budget))
             }
         }
 
@@ -57,6 +62,7 @@ class MemoryExperimentRunner(
                 mode = mode,
                 queryLength = query.length,
                 candidateCount = candidateCount,
+                semanticOnlyCandidateCount = semanticOnlyCandidateCount,
                 selectedCount = selection.items.size,
                 selectedCharacters = selection.estimatedCharacters,
                 latencyMs = clock() - start,
@@ -65,6 +71,17 @@ class MemoryExperimentRunner(
 
         return selection
     }
+
+    /**
+     * How many of [items] a lexical-only search (what this app had before
+     * semantic retrieval existed) would never have found at all — a vocabulary
+     * mismatch between query and stored text, closed only by cosine similarity.
+     * The number that actually answers "is the embedder pulling its weight,"
+     * as opposed to candidateCount alone, which a lexical match can inflate on
+     * its own and says nothing about which retriever actually found what.
+     */
+    private fun semanticOnlyCount(items: List<MemoryCandidate>): Int =
+        items.count { it.semanticRank != null && it.lexicalRank == null }
 
     private companion object {
         const val DEFAULT_RETRIEVAL_LIMIT = 40
