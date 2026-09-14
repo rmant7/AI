@@ -37,6 +37,7 @@ class MemoryActivity : AppCompatActivity() {
         binding.memoryEnabledCheck.isChecked = container.settings.memoryEnabled
         binding.memoryEnabledCheck.setOnCheckedChangeListener { _, checked ->
             container.settings.memoryEnabled = checked
+            updateSemanticCheckAvailability()
         }
 
         binding.memorySemanticCheck.isChecked = container.settings.semanticMemoryEnabled
@@ -44,6 +45,7 @@ class MemoryActivity : AppCompatActivity() {
             container.settings.semanticMemoryEnabled = checked
             renderModelStatus()
         }
+        updateSemanticCheckAvailability()
 
         binding.memoryManageModelButton.setOnClickListener {
             startActivity(ModelsActivity.intent(this, ModelsActivity.Category.EMBEDDING))
@@ -65,8 +67,26 @@ class MemoryActivity : AppCompatActivity() {
     private fun render() {
         binding.memoryEnabledCheck.isChecked = container.settings.memoryEnabled
         binding.memorySemanticCheck.isChecked = container.settings.semanticMemoryEnabled
+        updateSemanticCheckAvailability()
         renderModelStatus()
         renderIndexStatus()
+    }
+
+    /**
+     * [Settings.semanticMemoryEnabled] does nothing at all while
+     * [Settings.memoryEnabled] is off — nothing ever queries `memory` in the
+     * first place, so there is no "semantic half" to gate. A checked-but-off
+     * long-term-memory combination looked identical to a checked-and-active
+     * one before this: a real report of "why doesn't the embedding model
+     * download" turned out to be exactly this, with nothing on screen
+     * hinting that the semantic checkbox was currently inert. Greying it out
+     * (Android's own disabled-CheckBox styling) makes that dependency
+     * visible without touching the persisted value underneath — turning
+     * long-term memory back on picks up whatever semantic preference was
+     * already there, nothing is silently reset either way.
+     */
+    private fun updateSemanticCheckAvailability() {
+        binding.memorySemanticCheck.isEnabled = container.settings.memoryEnabled
     }
 
     /**
