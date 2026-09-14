@@ -5,7 +5,7 @@ README) and `:core` (via `api`) depend on the generic memory API that also
 lives, published separately, as
 [rmant7/Mobile_mem0](https://github.com/rmant7/Mobile_mem0).
 
-## Current state (this branch): the published artifact, via JitPack
+## Current state: the published artifact, via JitPack
 
 `Mobile_mem0` was tagged `v0.1.0` after its own `MemoryProviderContractTest`
 suite was added and `consolidate()` was hardened against a throwing
@@ -60,16 +60,16 @@ project's own conventions rule out.
 by `:core` or `:commercial-memory` on this branch. Whether to remove it from
 this repo entirely is a separate decision, deliberately not made here.
 
-## What this means for `main`
+## History: `mem0` and `main`
 
-This switch was made on `mem0` (formerly `commercial-memory-layer-v1`) only.
-`main` (and `:app`/`:core` as shipped) still depend on `:memory` in-tree —
-moving the rest of the app onto the published artifact too is the same
-"bigger decision" this document flagged before the tag existed, and still
-isn't made here. Do not assume this branch's `build.gradle.kts` state
-reflects what should ship from `main`.
+This switch was made on a branch named `mem0` (formerly
+`commercial-memory-layer-v1`), developed in parallel with `main` while
+`main` still shipped `:app`/`:core` against `:memory` in-tree. `mem0` also
+built under a different `applicationId` (`ai.localstudio.app.mem0`) so it
+could be installed on the same device as a `main` build at the same time,
+without one overwriting the other.
 
-This branch also builds under a different `applicationId`
-(`ai.localstudio.app.mem0`, vs. main's `ai.localstudio.app`) specifically so
-it can be installed on the same device as a build from `main` at the same
-time, without one overwriting the other.
+`mem0` has since been fast-forward-merged into `main` — there is no longer
+a separate branch or a separate `applicationId` to distinguish between:
+`main` is this state, full stop, and `:app`'s `applicationId` is back to
+plain `ai.localstudio.app`.
