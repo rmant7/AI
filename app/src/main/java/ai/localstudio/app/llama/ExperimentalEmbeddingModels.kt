@@ -1,21 +1,24 @@
 package ai.localstudio.app.llama
 
 /**
- * Candidate embedding models for [ai.localstudio.memory.MemorySemanticIndex] —
- * **experimental, deliberately not wired into anything.** None of these are
- * referenced by [ai.localstudio.app.models.LocalModels], the model-download
- * UI, or [ai.localstudio.app.AppContainer]. See
- * `Mobile_mem0/SEMANTIC_RETRIEVAL_DESIGN.md`'s "Choosing the concrete model"
- * section for why: picking one needs verifying it actually exists as listed,
- * behaves correctly through [LlamaCppMemoryEmbedder], and uses the right
- * [pooling] — none of which this file, written without device or network
- * access, could do. This exists only to give manual, on-device verification
- * (see [ai.localstudio.app.LlamaNativeTest]'s embedding-model sibling test)
- * something concrete to load, one candidate at a time.
+ * Embedding models for [ai.localstudio.memory.MemorySemanticIndex] — one
+ * production model ([E5_BASE]) and one still-experimental candidate
+ * ([E5_SMALL], which does not currently load at all — see its own doc
+ * comment). Not referenced by [ai.localstudio.app.models.LocalModels] or its
+ * download UI either way: those are the *chat*-model catalog, a different
+ * concept this app's Models screen exposes for a different kind of model —
+ * see `Mobile_mem0/SEMANTIC_RETRIEVAL_DESIGN.md`'s "Choosing the concrete
+ * model" section for that distinction, and for the on-device verification
+ * (dimension/cosine sanity check) plus the standalone Mobile_mem0 benchmark
+ * (`benchmark/e5_base_benchmark.ipynb`) that promoted [E5_BASE] out of
+ * "download it yourself first" and into [ai.localstudio.app.AppContainer]'s
+ * own automatic download-and-load path.
  *
- * [fileName] is deliberately left unset here rather than guessed — confirm
- * the exact file name from the repo's own listing before downloading; a
- * repo commonly hosts several quantizations under different names.
+ * A future candidate still belongs here first, unwired, exactly the way
+ * [E5_BASE] itself started: verified manually via
+ * [ai.localstudio.app.ExperimentalEmbeddingsActivity] (dimension, cosine
+ * sanity check) before anything in [ai.localstudio.app.AppContainer] is
+ * changed to load it automatically.
  */
 data class EmbeddingModelSpec(
     val id: String,
@@ -32,10 +35,17 @@ data class EmbeddingModelSpec(
 object ExperimentalEmbeddingModels {
 
     /**
-     * First candidate to test the JNI path with: small enough for a fast
-     * first device test, per the e5 family's own documented convention of
-     * `"query: "`/`"passage: "` prefixes on an asymmetric encoder trained
-     * for mean pooling.
+     * Still experimental, and currently broken: on-device verification via
+     * [ai.localstudio.app.ExperimentalEmbeddingsActivity] failed to load
+     * this exact file with `llama_model_load: error loading model: bert
+     * model needs to define token type count` — a metadata field missing
+     * from this specific GGUF conversion, not something this app's own JNI
+     * code can work around. Never auto-loaded by
+     * [ai.localstudio.app.AppContainer] for that reason; kept here (rather
+     * than deleted) as a record of what was tried, and because the
+     * Experimental screen still needs something to show alongside [E5_BASE].
+     * A different Small conversion could replace this entry once verified —
+     * this one specifically should not be retried as-is.
      */
     val E5_SMALL = EmbeddingModelSpec(
         id = "multilingual-e5-small-iq4xs",
@@ -48,7 +58,17 @@ object ExperimentalEmbeddingModels {
         passagePrefix = "passage: ",
     )
 
-    /** Second candidate: same family, larger — for a real quality comparison against [E5_SMALL] once both load correctly. */
+    /**
+     * The app's production semantic-memory embedding model — the only one
+     * [ai.localstudio.app.AppContainer] downloads and loads automatically.
+     * Verified twice: on-device via
+     * [ai.localstudio.app.ExperimentalEmbeddingsActivity] (dimension 768,
+     * cosine(similar)=0.897 > cosine(dissimilar)=0.754), and again by the
+     * standalone Mobile_mem0 retrieval benchmark
+     * (`benchmark/e5_base_benchmark.ipynb`), which found it beat lexical
+     * retrieval overall (Recall@1 0.848 vs 0.500) and in every measured
+     * category except `identifier`, where it tied rather than lost.
+     */
     val E5_BASE = EmbeddingModelSpec(
         id = "multilingual-e5-base-q4km",
         title = "Multilingual E5 Base",

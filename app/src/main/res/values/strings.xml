@@ -125,7 +125,7 @@
     <string name="models_orphans_subtitle">Found %1$d files, ~%2$s total. The current app version doesn\'t use them — likely left over from another version or development branch.</string>
     <string name="models_orphans_delete">Delete (%1$s)</string>
     <string name="models_experimental_embeddings_title">Experimental: embedding models</string>
-    <string name="models_experimental_embeddings_subtitle">Manual download and sanity check for a candidate memory-search model — not used by chat.</string>
+    <string name="models_experimental_embeddings_subtitle">Manual download and sanity check for memory-search embedding models. Base loads automatically for real memory search; this screen is for verifying it (or a future candidate) by hand.</string>
     <string name="models_experimental_embeddings_open">Open</string>
     <string name="embed_screen_title">Experimental embedding models</string>
     <string name="embed_screen_explainer">Downloads and checks a candidate embedding model for semantic memory search. These models are never used for chat and are not added to the model catalog automatically — download one, tap Test, and check the numbers below before deciding whether it\'s any good.</string>

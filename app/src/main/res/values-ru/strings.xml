@@ -127,7 +127,7 @@
     <string name="models_orphans_subtitle">Найдено файлов: %1$d, общий размер ~%2$s. Текущая версия приложения их не использует — вероятно, остались от другой версии или ветки разработки.</string>
     <string name="models_orphans_delete">Удалить (%1$s)</string>
     <string name="models_experimental_embeddings_title">Эксперимент: модели эмбеддингов</string>
-    <string name="models_experimental_embeddings_subtitle">Ручное скачивание и проверка модели для семантического поиска в памяти — в чате не используется.</string>
+    <string name="models_experimental_embeddings_subtitle">Ручное скачивание и проверка моделей для семантического поиска в памяти. Base загружается автоматически и реально используется в поиске; этот экран — для ручной проверки её (или будущих кандидатов).</string>
     <string name="models_experimental_embeddings_open">Открыть</string>
     <string name="embed_screen_title">Экспериментальные модели эмбеддингов</string>
     <string name="embed_screen_explainer">Скачивание и проверка кандидата в модели эмбеддингов для семантического поиска по памяти. Эти модели никогда не используются в чате и не попадают в каталог моделей автоматически — скачайте модель, нажмите «Тест» и проверьте цифры ниже, прежде чем решать, годится ли она.</string>

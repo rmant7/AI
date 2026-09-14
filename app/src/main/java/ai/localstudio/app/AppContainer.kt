@@ -44,6 +44,7 @@ import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.keys.BundledApiKeyStore
 import ai.localstudio.app.keys.BundledApiKeys
 import ai.localstudio.app.keys.PrefsApiKeyStore
+import ai.localstudio.app.llama.ExperimentalDownloadState
 import ai.localstudio.app.llama.ExperimentalEmbeddingDownloads
 import ai.localstudio.app.llama.ExperimentalEmbeddingModels
 import ai.localstudio.app.llama.ExperimentalEmbeddingStore
@@ -71,6 +72,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -325,21 +327,33 @@ class AppContainer private constructor(private val context: Context) {
             }
         }
 
-        // Loads the one experimental embedding candidate this app currently
-        // ships a spec for (see ExperimentalEmbeddingModels.E5_BASE) and, once
-        // it's ready, keeps semanticMemoryIndex caught up with memory — off
-        // the main thread (a GGUF load is real, blocking work) and off the
-        // hot path (embedPending() is never called from remember() or
+        // multilingual-e5-base is this app's production embedding model as of
+        // this task — see ExperimentalEmbeddingModels.E5_BASE's own doc
+        // comment for the verification history (on-device dimension/cosine
+        // check, plus the standalone Mobile_mem0 benchmark) that promoted it
+        // out of "download it yourself on the Experimental screen first."
+        // This task loads it automatically, downloading it first if it
+        // isn't on disk yet, and keeps semanticMemoryIndex caught up with
+        // memory afterward — off the main thread (both the download and the
+        // GGUF load are real, blocking-if-synchronous work) and off the hot
+        // path (embedPending() is never called from remember() or
         // consolidate() themselves; see SEMANTIC_RETRIEVAL_DESIGN.md's own
-        // invariant that embedding coverage may lag, but a memory record must
-        // never be lost or hidden because of it).
+        // invariant that embedding coverage may lag, but a memory record
+        // must never be lost or hidden because of it).
         //
-        // A no-op — not an error, not a retry loop — for as long as nobody
-        // has downloaded E5_BASE via ExperimentalEmbeddingsActivity: memory
-        // stays exactly as lexical-only as it always was.
+        // Gated on memoryEnabled for the same reason the document-replay
+        // task above is: with memory off, nothing ever queries `memory`, so
+        // there is no "semantic memory" to initialize at all — downloading
+        // ~180 MB nobody's retrieval will ever use would be pure waste.
+        // Every other failure mode (no network, download failed, unsupported
+        // device, the GGUF fails to load) degrades to memory staying exactly
+        // as lexical-only as it always was — never a crash, never a blocked
+        // launch, and never a retry loop within one run; a failed attempt
+        // simply tries again fresh on the next cold start, the same way this
+        // app already backfills a missing chat-model mmproj file.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            if (!settings.memoryEnabled) return@launch
             val spec = ExperimentalEmbeddingModels.E5_BASE
-            if (!experimentalEmbeddingStore.isInstalled(spec)) return@launch
             // Reading isAvailable, not just checking it: this is what
             // actually triggers its lazy System.loadLibrary() call. Skipping
             // straight to LlamaCppMemoryEmbedder.load() below without ever
@@ -347,6 +361,18 @@ class AppContainer private constructor(private val context: Context) {
             // native library is loaded at all, on every device — not only
             // ones this build genuinely doesn't support.
             if (!LlamaBridge.isAvailable) return@launch
+
+            if (!experimentalEmbeddingStore.isInstalled(spec)) {
+                experimentalEmbeddingDownloads.start(spec)
+                experimentalEmbeddingDownloads.state.first { states ->
+                    val s = states[spec.id]
+                    s is ExperimentalDownloadState.Installed || s is ExperimentalDownloadState.Failed
+                }
+                if (!experimentalEmbeddingStore.isInstalled(spec)) {
+                    appLog.record("SEMANTIC_MEMORY", "auto-download of ${spec.title} did not complete this run; memory stays lexical-only for now")
+                    return@launch
+                }
+            }
 
             val embedder = runCatching {
                 LlamaCppMemoryEmbedder.load(
