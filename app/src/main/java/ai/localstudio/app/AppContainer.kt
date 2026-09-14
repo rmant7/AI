@@ -396,7 +396,17 @@ class AppContainer private constructor(private val context: Context) {
         // simply tries again fresh on the next cold start, the same way this
         // app already backfills a missing chat-model mmproj file.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            if (!settings.memoryEnabled) return@launch
+            // Both early returns below log before bailing — without it, a
+            // memory-off or unsupported-ABI device produces a completely
+            // silent "why did Base never download" with nothing in the log
+            // to tell it apart from every other skip reason further down,
+            // which already do log. This is exactly what made a real report
+            // of that question take a live device log to even start
+            // narrowing down.
+            if (!settings.memoryEnabled) {
+                appLog.record("SEMANTIC_MEMORY", "auto-download of Multilingual E5 Base skipped: long-term memory is off")
+                return@launch
+            }
             val spec = ExperimentalEmbeddingModels.E5_BASE
             // Reading isAvailable, not just checking it: this is what
             // actually triggers its lazy System.loadLibrary() call. Skipping
@@ -404,7 +414,10 @@ class AppContainer private constructor(private val context: Context) {
             // reading this property would call an external fun before the
             // native library is loaded at all, on every device — not only
             // ones this build genuinely doesn't support.
-            if (!LlamaBridge.isAvailable) return@launch
+            if (!LlamaBridge.isAvailable) {
+                appLog.record("SEMANTIC_MEMORY", "auto-download of ${spec.title} skipped: llama_jni did not load for this device/ABI")
+                return@launch
+            }
 
             if (!experimentalEmbeddingStore.isInstalled(spec)) {
                 // settings.autoDownloadEnabled/downloadPolicy: this is the
