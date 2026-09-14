@@ -8,6 +8,7 @@ import ai.localstudio.core.model.TranscriptSegment
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -49,6 +50,10 @@ class TranscribeActivity : AppCompatActivity() {
     private val adapter = ResultAdapter()
     private val results = mutableListOf<Result>()
     private var job: Job? = null
+
+    /** The source clip currently loaded for playback, so a row can tell whether it's the one showing a pause icon. */
+    private var playingUri: Uri? = null
+    private var mediaPlayer: MediaPlayer? = null
 
     private val pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -94,6 +99,15 @@ class TranscribeActivity : AppCompatActivity() {
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Audio playing on from a screen the user has already left (Home,
+        // app switcher, the Voice model picker) is a leak, not a feature —
+        // stop it here rather than waiting for onDestroy, which a mere
+        // background/foreground cycle never reaches.
+        stopPlayback()
     }
 
     override fun onDestroy() {
@@ -183,6 +197,42 @@ class TranscribeActivity : AppCompatActivity() {
         container.whisperFileTranscriber.requestCancel()
     }
 
+    /**
+     * Plays [uri] straight from its own SAF/file source — no decode through
+     * [ai.localstudio.app.whisper.MediaCodecAudioSource], deliberately: the
+     * point is to hear the *original* clip next to the transcript, not a
+     * resampled copy of what whisper.cpp actually received.
+     */
+    private fun togglePlayback(uri: Uri) {
+        if (playingUri == uri) {
+            stopPlayback()
+            return
+        }
+        stopPlayback()
+        playingUri = uri
+        render()
+        val player = MediaPlayer()
+        try {
+            player.setDataSource(this, uri)
+            player.setOnPreparedListener { it.start() }
+            player.setOnCompletionListener { stopPlayback() }
+            player.setOnErrorListener { _, _, _ -> stopPlayback(); true }
+            player.prepareAsync()
+            mediaPlayer = player
+        } catch (e: Exception) {
+            player.release()
+            Toast.makeText(this, getString(R.string.transcribe_play_failed, e.message ?: e.toString()), Toast.LENGTH_SHORT).show()
+            stopPlayback()
+        }
+    }
+
+    private fun stopPlayback() {
+        mediaPlayer?.let { player -> runCatching { player.stop() }; player.release() }
+        mediaPlayer = null
+        playingUri = null
+        render()
+    }
+
     private fun setRunning(running: Boolean) {
         binding.transcribeStartButton.isEnabled = !running && results.isNotEmpty()
         binding.transcribeStopButton.isEnabled = running
@@ -236,6 +286,11 @@ class TranscribeActivity : AppCompatActivity() {
                 binding.resultText.text = result.text
                 binding.resultCopyButton.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
                 binding.resultCopyButton.setOnClickListener { copyToClipboard(result.text) }
+
+                val isPlaying = playingUri == result.uri
+                binding.resultPlayButton.setImageResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                binding.resultPlayButton.contentDescription = getString(if (isPlaying) R.string.transcribe_pause else R.string.transcribe_play)
+                binding.resultPlayButton.setOnClickListener { togglePlayback(result.uri) }
             }
         }
     }

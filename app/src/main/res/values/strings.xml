@@ -96,6 +96,9 @@
     <string name="transcribe_status_done">Done, saved as %1$s</string>
     <string name="transcribe_status_error">Error: %1$s</string>
     <string name="transcribe_status_cancelled">Cancelled</string>
+    <string name="transcribe_play">Play</string>
+    <string name="transcribe_pause">Pause</string>
+    <string name="transcribe_play_failed">Couldn\'t play this file: %1$s</string>
 
     <string name="settings_whisper_model">Speech recognition model (offline)</string>
     <string name="settings_whisper_manage">Open Models → Voice</string>

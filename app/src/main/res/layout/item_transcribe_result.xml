@@ -30,6 +30,15 @@
                 android:textStyle="bold" />
 
             <ImageButton
+                android:id="@+id/resultPlayButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/transcribe_play"
+                android:padding="6dp"
+                android:src="@drawable/ic_play_arrow" />
+
+            <ImageButton
                 android:id="@+id/resultCopyButton"
                 android:layout_width="32dp"
                 android:layout_height="32dp"
