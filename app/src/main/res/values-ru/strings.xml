@@ -55,6 +55,7 @@
     <string name="memory_model_status_unloaded">○ Временно выгружена</string>
     <string name="memory_model_status_unloaded_hint">Загрузится снова по мере необходимости</string>
     <string name="memory_model_status_disabled_hint">Семантический поиск выше выключен</string>
+    <string name="memory_model_status_memory_off_hint">Долговременная память выше выключена</string>
     <string name="memory_manage_model">Управление моделью эмбеддингов</string>
     <string name="memory_index_header">Индекс</string>
     <string name="memory_index_status">%1$d / %2$d воспоминаний проиндексировано</string>

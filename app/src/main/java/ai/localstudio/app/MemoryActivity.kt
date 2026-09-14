@@ -101,7 +101,14 @@ class MemoryActivity : AppCompatActivity() {
      * on" always means exactly this, whether the cause was a pressure
      * unload moments ago or the very first load still in flight — both
      * self-heal the same way (see [AppContainer]'s `reloadTrigger` wiring),
-     * so both read as the same "temporarily unloaded" line here.
+     * so both read as the same "temporarily unloaded" line here — but only
+     * while [Settings.memoryEnabled] is actually on. While it's off,
+     * [AppContainer]'s whole auto-load-and-reload background task never
+     * runs at all (see its own doc comment), so "will reload when needed"
+     * would be a straight-up lie here; checked ahead of
+     * [Settings.semanticMemoryEnabled] since that flag is itself inert
+     * (and greyed out — see [updateSemanticCheckAvailability]) while memory
+     * is off, so this is the more specific, more useful reason to show.
      */
     private fun renderModelStatus() {
         val spec = ExperimentalEmbeddingModels.E5_BASE
@@ -112,6 +119,7 @@ class MemoryActivity : AppCompatActivity() {
         )
         if (installed) {
             when {
+                !container.settings.memoryEnabled -> lines += getString(R.string.memory_model_status_memory_off_hint)
                 !container.settings.semanticMemoryEnabled -> lines += getString(R.string.memory_model_status_disabled_hint)
                 container.semanticEmbedderReady -> lines += getString(R.string.memory_model_status_ready)
                 else -> {

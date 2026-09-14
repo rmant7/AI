@@ -190,9 +190,12 @@ class ChatActivity : AppCompatActivity() {
         menu.add(0, MENU_FILES, 2, R.string.menu_files)
         menu.add(0, MENU_SETTINGS, 3, R.string.menu_settings)
         menu.add(0, MENU_HISTORY, 4, R.string.menu_history)
-        menu.add(0, MENU_LOG, 5, R.string.menu_log)
-        menu.add(0, MENU_SHARE_CHAT, 6, R.string.menu_share_chat)
-        menu.add(0, MENU_CLEAR, 7, R.string.menu_clear)
+        menu.add(0, MENU_SHARE_CHAT, 5, R.string.menu_share_chat)
+        menu.add(0, MENU_CLEAR, 6, R.string.menu_clear)
+        // Last on purpose, not grouped with History/Share/Clear above it —
+        // those are all about *this chat's* content, while the log is a
+        // diagnostic tool unrelated to any one conversation.
+        menu.add(0, MENU_LOG, 7, R.string.menu_log)
         return true
     }
 
