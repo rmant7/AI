@@ -3,6 +3,7 @@ package ai.localstudio.core.runtime
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.model.Transcript
+import ai.localstudio.core.model.TranscriptSegment
 import ai.localstudio.core.model.VisionResult
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
@@ -39,12 +40,44 @@ interface TextModelHandle : LoadedModel, Interruptible {
 
 interface SpeechModelHandle : LoadedModel, Interruptible {
     /**
-     * Transcribes a whole buffer. Live dictation is built on this same call:
-     * the current utterance is re-transcribed as it grows, which is what lets
-     * the model revise earlier words once it has heard the end of the sentence.
-     * See `ai.localstudio.core.audio.UtteranceAccumulator` and docs/12-audio.md.
+     * Transcribes a whole [audio] reference in one call and returns the full
+     * [Transcript]. What "whole" costs depends on the implementation: a file
+     * handle is expected to decode and infer incrementally under the hood
+     * (bounded memory, first segments available before the last one is
+     * decoded — see docs/13-asr-pipeline-migration.md) even though this
+     * suspend function itself only resolves once, at the end.
      */
     suspend fun transcribe(audio: AudioRef, language: String? = null): Transcript
+
+    /**
+     * Starts a genuinely incremental session: audio pushed in as it arrives via
+     * [StreamingSpeechSession.acceptAudio], text delivered as it is produced via
+     * [StreamingSpeechSession.segments] — a distinct mode from [transcribe], not
+     * a relabeling of it (the old approach this replaces called [transcribe] on
+     * a growing buffer every couple of seconds, which makes the cost of a turn
+     * grow with the turn's own length). See docs/13-asr-pipeline-migration.md.
+     */
+    fun startStreaming(language: String? = null): StreamingSpeechSession
+}
+
+/**
+ * One in-progress speech session, fed audio incrementally by whoever owns the
+ * capture loop — a microphone thread or a file-decode pipeline. Not modeled as
+ * a coroutine `Flow` *in*, deliberately: audio delivery is push-driven by that
+ * external loop, not pull-driven by a suspend collector.
+ */
+interface StreamingSpeechSession {
+    /** Mono 16kHz PCM16. Must return quickly — buffer, don't infer, on this call. */
+    fun acceptAudio(pcm: ShortArray)
+
+    /** No more audio is coming: flushes whatever is buffered and completes [segments]. */
+    fun finish()
+
+    /** Stops immediately, discarding any unflushed buffered audio, and completes [segments]. */
+    fun cancel()
+
+    /** Segments as they become available. The flow completes after [finish] or [cancel]. */
+    val segments: Flow<TranscriptSegment>
 }
 
 interface VisionModelHandle : LoadedModel {

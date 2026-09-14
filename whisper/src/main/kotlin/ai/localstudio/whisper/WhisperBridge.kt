@@ -9,18 +9,54 @@ package ai.localstudio.whisper
  */
 class WhisperBridge {
 
+    /**
+     * Delivered once per finalized segment, during [nativeTranscribe] rather
+     * than only after it returns — the native side calls this as soon as
+     * whisper.cpp itself finalizes a segment (`new_segment_callback`), which is
+     * what lets a caller show text before a long chunk's inference finishes,
+     * not just before the whole file decodes. [startMs]/[endMs] are relative
+     * to the start of the sample array passed to that call, not to the file —
+     * the caller (see `ai.localstudio.app.whisper.WhisperCppSpeechModel`) adds
+     * its own chunk offset.
+     */
+    fun interface SegmentSink {
+        fun onSegment(text: String, startMs: Long, endMs: Long)
+    }
+
     /** Returns a handle, or 0 when the model could not be loaded. */
     external fun nativeLoad(modelPath: String): Long
 
     external fun nativeFree(handle: Long)
 
     /**
+     * Flips [handle]'s abort flag. whisper.cpp checks it between decode steps
+     * (see whisper_jni.cpp's `abort_callback`), so a running [nativeTranscribe]
+     * notices at its next checkpoint rather than immediately — the same
+     * contract [ai.localstudio.core.runtime.Interruptible] documents for every
+     * engine. The flag is reset at the start of the next [nativeTranscribe]
+     * call, so a cancelled call never causes the next one to abort instantly.
+     */
+    external fun nativeCancel(handle: Long)
+
+    /**
      * [samples] is mono 16kHz PCM as float32 in [-1, 1]. [language] is an
      * ISO-639-1 code ("ru", "en", ...) or "auto" — see the native side's own
      * doc comment for why passing the actual language beats "auto" whenever
-     * it's known. Returns the transcribed text, or "" on failure.
+     * it's known. [sink], when non-null, receives each segment as whisper.cpp
+     * finalizes it. Returns the full transcribed text (all segments
+     * concatenated), or "" on failure or cancellation.
      */
-    external fun nativeTranscribe(handle: Long, samples: FloatArray, threads: Int, language: String): String
+    // No default value on `sink`: a Kotlin default requires a generated
+    // bridge method the compiler cannot synthesize for an `external`
+    // (bodyless) declaration, so every caller passes it explicitly — null
+    // when only the returned concatenated string is wanted.
+    external fun nativeTranscribe(
+        handle: Long,
+        samples: FloatArray,
+        threads: Int,
+        language: String,
+        sink: SegmentSink?,
+    ): String
 
     companion object {
         /**

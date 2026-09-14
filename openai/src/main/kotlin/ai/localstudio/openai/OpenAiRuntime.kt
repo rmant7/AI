@@ -15,19 +15,27 @@ import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.SpeechModelHandle
+import ai.localstudio.core.runtime.StreamingSpeechSession
 import ai.localstudio.core.runtime.TextModelHandle
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URI
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class OpenAiConfig(
@@ -407,6 +415,73 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                 ?.takeIf { it.scheme == "file" }
                 ?.path
             return File(path ?: audio.uri)
+        }
+
+        /**
+         * No realtime endpoint is wired up for a generic OpenAI-compatible
+         * server (Ollama, llama-server), so this session is a shim, not true
+         * streaming: audio is buffered until [StreamingSpeechSession.finish]
+         * and sent as one REST request through the same [transcribe] call a
+         * batch caller would use, exactly like the on-device engines' own
+         * windowed fallback (see docs/13-asr-pipeline-migration.md). A real
+         * realtime API (OpenAI's `/v1/realtime`, for instance) would replace
+         * this with an actual incremental session without any change above
+         * [SpeechModelHandle].
+         */
+        override fun startStreaming(language: String?): StreamingSpeechSession = object : StreamingSpeechSession {
+            private val buffer = ByteArrayOutputStream()
+            private val finished = AtomicBoolean(false)
+            private val channel = Channel<TranscriptSegment>(Channel.UNLIMITED)
+            override val segments: Flow<TranscriptSegment> = channel.receiveAsFlow()
+
+            override fun acceptAudio(pcm: ShortArray) {
+                val bytes = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+                pcm.forEach { bytes.putShort(it) }
+                synchronized(buffer) { buffer.write(bytes.array()) }
+            }
+
+            override fun finish() {
+                if (!finished.compareAndSet(false, true)) return
+                val pcmBytes = synchronized(buffer) { buffer.toByteArray() }
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        if (pcmBytes.isNotEmpty()) {
+                            val temp = File.createTempFile("localaistudio-stream", ".wav")
+                            try {
+                                temp.writeBytes(wavHeader(pcmBytes.size) + pcmBytes)
+                                val transcript = transcribe(AudioRef(uri = temp.toURI().toString()), language)
+                                val segments = transcript.segments.ifEmpty {
+                                    listOf(TranscriptSegment(text = transcript.text, startMs = 0, endMs = durationMsOf(pcmBytes.size)))
+                                }
+                                segments.forEach { channel.trySend(it) }
+                            } finally {
+                                temp.delete()
+                            }
+                        }
+                    } finally {
+                        channel.close()
+                    }
+                }
+            }
+
+            override fun cancel() {
+                finished.set(true)
+                channel.close()
+            }
+        }
+
+        private fun durationMsOf(pcm16Bytes: Int): Long = (pcm16Bytes / 2 * 1000L) / 16_000
+
+        /** Minimal 44-byte canonical header for mono 16-bit PCM at 16kHz. */
+        private fun wavHeader(dataBytes: Int): ByteArray {
+            val sampleRate = 16_000
+            val byteRate = sampleRate * 2
+            val buf = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+            buf.put("RIFF".toByteArray()); buf.putInt(36 + dataBytes); buf.put("WAVE".toByteArray())
+            buf.put("fmt ".toByteArray()); buf.putInt(16); buf.putShort(1); buf.putShort(1)
+            buf.putInt(sampleRate); buf.putInt(byteRate); buf.putShort(2); buf.putShort(16)
+            buf.put("data".toByteArray()); buf.putInt(dataBytes)
+            return buf.array()
         }
 
         override fun requestCancel() = Unit

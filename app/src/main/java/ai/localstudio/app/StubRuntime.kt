@@ -4,6 +4,7 @@ import android.content.Context
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.model.Transcript
+import ai.localstudio.core.model.TranscriptSegment
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
@@ -12,9 +13,12 @@ import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.SpeechModelHandle
+import ai.localstudio.core.runtime.StreamingSpeechSession
 import ai.localstudio.core.runtime.TextModelHandle
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * A runtime with no weights and no network.
@@ -66,6 +70,25 @@ class StubRuntime(private val context: Context) : ModelRuntime {
 
         override suspend fun transcribe(audio: AudioRef, language: String?): Transcript =
             Transcript(text = context.getString(R.string.stub_demo_transcript), language = language ?: "en", confidence = 0.0)
+
+        override fun startStreaming(language: String?): StreamingSpeechSession =
+            object : StreamingSpeechSession {
+                private val channel = Channel<TranscriptSegment>(Channel.UNLIMITED)
+                override val segments: Flow<TranscriptSegment> = channel.receiveAsFlow()
+
+                override fun acceptAudio(pcm: ShortArray) = Unit
+
+                override fun finish() {
+                    channel.trySend(
+                        TranscriptSegment(text = context.getString(R.string.stub_demo_transcript), startMs = 0, endMs = 0),
+                    )
+                    channel.close()
+                }
+
+                override fun cancel() {
+                    channel.close()
+                }
+            }
 
         override fun requestCancel() = Unit
 

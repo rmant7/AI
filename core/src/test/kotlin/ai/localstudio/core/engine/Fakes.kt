@@ -4,6 +4,7 @@ import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.model.Transcript
+import ai.localstudio.core.model.TranscriptSegment
 import ai.localstudio.core.model.VisionResult
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
@@ -14,10 +15,13 @@ import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.SpeechModelHandle
+import ai.localstudio.core.runtime.StreamingSpeechSession
 import ai.localstudio.core.runtime.TextModelHandle
 import ai.localstudio.core.runtime.VisionModelHandle
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * A runtime that loads the fake counterpart of whatever the model claims to be.
@@ -80,8 +84,33 @@ class FakeSpeechModel(
     override suspend fun transcribe(audio: AudioRef, language: String?): Transcript =
         Transcript(text = text, language = language ?: "ru", confidence = 0.94)
 
+    override fun startStreaming(language: String?): StreamingSpeechSession =
+        FakeStreamingSession(text, language ?: "ru")
+
     override fun requestCancel() = Unit
     override fun close() = Unit
+}
+
+/** Emits one segment on [finish], with the same canned text every [FakeSpeechModel] returns. */
+class FakeStreamingSession(private val text: String, private val language: String) : StreamingSpeechSession {
+    private val received = mutableListOf<ShortArray>()
+    private val channel = Channel<TranscriptSegment>(Channel.UNLIMITED)
+    override val segments: Flow<TranscriptSegment> = channel.receiveAsFlow()
+
+    val acceptedSampleCount: Int get() = received.sumOf { it.size }
+
+    override fun acceptAudio(pcm: ShortArray) {
+        received += pcm
+    }
+
+    override fun finish() {
+        channel.trySend(TranscriptSegment(text = text, startMs = 0, endMs = (acceptedSampleCount / 16), speaker = null, confidence = 0.94))
+        channel.close()
+    }
+
+    override fun cancel() {
+        channel.close()
+    }
 }
 
 class FakeVisionModel(
