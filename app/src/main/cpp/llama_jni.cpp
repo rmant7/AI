@@ -64,6 +64,21 @@ void setLastError(const std::string &text) {
     g_lastError = text;
 }
 
+// llama.cpp typically logs a *specific* cause first (an unsupported
+// architecture, a bad magic number, ...) and then a generic wrapper message
+// ("llama_model_load_from_file_impl: failed to load model") right after it,
+// from an outer function that has no idea what actually went wrong further
+// down. Overwriting on every ERROR-level line — what setLastError() does —
+// keeps only that last, useless wrapper text once a load actually fails.
+// Appending instead keeps the whole sequence, in order, so the specific
+// cause is still there for ExperimentalEmbeddingsActivity to show, not just
+// the outermost "something failed" line.
+void appendLastError(const std::string &text) {
+    std::lock_guard<std::mutex> lock(g_lastErrorMutex);
+    if (!g_lastError.empty()) g_lastError += "\n";
+    g_lastError += text;
+}
+
 std::string getLastError() {
     std::lock_guard<std::mutex> lock(g_lastErrorMutex);
     return g_lastError;
@@ -72,7 +87,7 @@ std::string getLastError() {
 void logCallback(ggml_log_level level, const char *text, void *) {
     if (level >= GGML_LOG_LEVEL_ERROR) {
         LOGE("%s", text);
-        setLastError(text);
+        appendLastError(text);
     }
 }
 
@@ -608,11 +623,11 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadEmbeddingModel(
   } catch (const std::exception &e) {
     // Same reasoning as nativeLoad's own catch.
     LOGE("nativeLoadEmbeddingModel: exception: %s", e.what());
-    setLastError(e.what());
+    appendLastError(e.what());
     return 0;
   } catch (...) {
     LOGE("nativeLoadEmbeddingModel: unknown exception");
-    setLastError("unknown native exception");
+    appendLastError("unknown native exception");
     return 0;
   }
 }
