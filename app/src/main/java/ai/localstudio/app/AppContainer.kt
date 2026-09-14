@@ -64,6 +64,7 @@ import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.whisper.WhisperCppRuntime
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperEngine
+import ai.localstudio.app.whisper.WhisperFileTranscriber
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.whisper.WhisperBridge
@@ -536,6 +537,18 @@ class AppContainer private constructor(private val context: Context) {
      * unloading on trim signals but the multi-GB chat model still fully
      * resident throughout — freeing only the smaller of the two was never
      * going to be enough to actually avoid that.
+     *
+     * Also frees whichever whisper.cpp engine(s) are currently resident —
+     * the same gap, unaddressed by the commit above: it freed the LLM side
+     * of the RAM budget but not the ASR side, even though a large whisper
+     * model (up to ~1.1 GB for large-v3) is not that far off the embedding
+     * model this function already treats as worth freeing. Three separate
+     * engines, not one, because none of them share state: [whisperEngine]/
+     * [whisperPreviewEngine] (the ad hoc mic path — see their own doc
+     * comments) and [whisperFileTranscriber] ([TranscribeActivity]'s
+     * vertical-slice test harness, docs/13-asr-pipeline-migration.md) each
+     * load independently and are each just as capable of sitting resident
+     * and uncounted through a real OOM as the LLM was.
      */
     private suspend fun releaseMemoryUnderPressure(reason: String) {
         if (semanticMemoryEmbedder.isReady) {
@@ -543,6 +556,22 @@ class AppContainer private constructor(private val context: Context) {
             appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
         }
         releaseLocalModels()
+        releaseWhisperEngines(reason)
+    }
+
+    private fun releaseWhisperEngines(reason: String) {
+        if (whisperEngine.isLoaded) {
+            whisperEngine.release()
+            appLog.record("WHISPER", "main engine unloaded under memory pressure ($reason)")
+        }
+        if (whisperPreviewEngine.isLoaded) {
+            whisperPreviewEngine.release()
+            appLog.record("WHISPER", "preview engine unloaded under memory pressure ($reason)")
+        }
+        if (whisperFileTranscriber.isLoaded) {
+            whisperFileTranscriber.release()
+            appLog.record("WHISPER", "file-transcriber engine unloaded under memory pressure ($reason)")
+        }
     }
 
     /**
@@ -716,6 +745,17 @@ class AppContainer private constructor(private val context: Context) {
      * nothing about it varies per request the way llama's context size does.
      */
     val whisperCppRuntime: ModelRuntime = WhisperCppRuntime(context = context, log = appLog::record)
+
+    /**
+     * Shared across the app rather than owned by [TranscribeActivity] so
+     * [releaseMemoryUnderPressure] can free it too — the same model-lifecycle
+     * gap that commit fixed for the LLM applied here just as much: a large
+     * whisper.cpp model (up to ~1.1 GB for large-v3) left resident behind
+     * [TranscribeActivity] while the user goes do something else in
+     * [ChatActivity] would otherwise sit uncounted through the exact memory
+     * pressure that unloads everything else.
+     */
+    val whisperFileTranscriber = WhisperFileTranscriber(whisperCppRuntime as WhisperCppRuntime, whisperStore)
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

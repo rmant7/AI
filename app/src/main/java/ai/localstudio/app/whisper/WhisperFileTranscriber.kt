@@ -26,6 +26,9 @@ class WhisperFileTranscriber(
     private var loadedSeedId: String? = null
     private var loaded: WhisperCppSpeechModel? = null
 
+    /** Whether a model is currently resident — checked before [release] purely for a meaningful log line, not correctness ([release] is a safe no-op either way). */
+    val isLoaded: Boolean get() = loaded != null
+
     /** Loads [seed] if it isn't already the one resident — reused across every subsequent call, same file or not. */
     private suspend fun ensureLoaded(seed: WhisperModelSeed): WhisperCppSpeechModel {
         loaded?.let { if (loadedSeedId == seed.id) return it }

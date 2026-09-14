@@ -53,7 +53,7 @@ class WhisperTranscriber(private val modelFile: File) {
         val audioFloats = decodePcmToFloat(audioData)
         if (rmsEnergy(audioFloats) < SILENCE_THRESHOLD) return@withContext ""
 
-        bridge.nativeTranscribe(handle, audioFloats, WhisperBridge.defaultThreads(), language)
+        bridge.nativeTranscribe(handle, audioFloats, WhisperBridge.defaultThreads(), language, sink = null)
     }
 
     fun release() {

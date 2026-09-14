@@ -3,8 +3,6 @@ package ai.localstudio.app
 import ai.localstudio.app.databinding.ActivityTranscribeBinding
 import ai.localstudio.app.databinding.ItemTranscribeResultBinding
 import ai.localstudio.app.whisper.MediaFileUtils
-import ai.localstudio.app.whisper.WhisperCppRuntime
-import ai.localstudio.app.whisper.WhisperFileTranscriber
 import ai.localstudio.app.whisper.WhisperModelSeed
 import ai.localstudio.core.model.TranscriptSegment
 import android.content.Intent
@@ -28,20 +26,21 @@ import java.io.File
 /**
  * Test harness for the whisper.cpp vertical slice
  * (docs/13-asr-pipeline-migration.md): pick a file or a folder, transcribe
- * it through [WhisperFileTranscriber] (which loads the model once and reuses
- * it across every file), watch segments arrive before the file finishes
- * decoding, save each result as it completes.
+ * it through [ai.localstudio.app.whisper.WhisperFileTranscriber] (which loads
+ * the model once, via [ai.localstudio.app.AppContainer.whisperFileTranscriber],
+ * and reuses it across every file), watch segments arrive before the file
+ * finishes decoding, save each result as it completes.
  *
  * Deliberately not wired through [ai.localstudio.core.engine.Orchestrator] —
- * this is a way to exercise [WhisperCppRuntime]/[ai.localstudio.app.whisper.WhisperCppSpeechModel]
- * directly, the same way [ChatActivity]'s mic button already talks to
- * `WhisperEngine` directly rather than through the router.
+ * this is a way to exercise [ai.localstudio.app.whisper.WhisperCppRuntime]/
+ * [ai.localstudio.app.whisper.WhisperCppSpeechModel] directly, the same way
+ * [ChatActivity]'s mic button already talks to `WhisperEngine` directly
+ * rather than through the router.
  */
 class TranscribeActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityTranscribeBinding
     private lateinit var container: AppContainer
-    private lateinit var transcriber: WhisperFileTranscriber
     private val adapter = ResultAdapter()
     private val results = mutableListOf<Result>()
     private var job: Job? = null
@@ -75,7 +74,6 @@ class TranscribeActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         container = AppContainer.get(this)
-        transcriber = WhisperFileTranscriber(container.whisperCppRuntime as WhisperCppRuntime, container.whisperStore)
 
         binding.transcribeResults.layoutManager = LinearLayoutManager(this)
         binding.transcribeResults.adapter = adapter
@@ -98,7 +96,10 @@ class TranscribeActivity : AppCompatActivity() {
         // Batch lifecycle, not per-file: the model stays loaded across every
         // file in this run and is only released when this screen is actually
         // done, matching docs/13-asr-pipeline-migration.md's "load once" rule.
-        transcriber.release()
+        // (Also freed under memory pressure regardless — see
+        // AppContainer.releaseWhisperEngines — for the case where the
+        // screen is merely backgrounded, not destroyed.)
+        container.whisperFileTranscriber.release()
     }
 
     private fun displayName(uri: Uri): String =
@@ -130,7 +131,7 @@ class TranscribeActivity : AppCompatActivity() {
 
     private suspend fun runOne(result: Result, seed: WhisperModelSeed) {
         try {
-            val transcript = transcriber.transcribe(result.uri, seed, language = null) { segment: TranscriptSegment ->
+            val transcript = container.whisperFileTranscriber.transcribe(result.uri, seed, language = null) { segment: TranscriptSegment ->
                 // Fires as each segment is finalized, before the rest of the
                 // file has decoded — the concrete, on-screen version of the
                 // vertical slice's acceptance criterion.
@@ -162,7 +163,7 @@ class TranscribeActivity : AppCompatActivity() {
 
     private fun stop() {
         job?.cancel()
-        transcriber.requestCancel()
+        container.whisperFileTranscriber.requestCancel()
     }
 
     private fun setRunning(running: Boolean) {
