@@ -138,7 +138,7 @@ class ModelsActivity : AppCompatActivity() {
         when (container.downloads.stateOf(seed)) {
             is DownloadState.Installed -> useLocally(seed)
             is DownloadState.Running, is DownloadState.Resolving -> container.downloads.cancel(seed)
-            else -> container.downloads.start(seed)
+            else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
         }
     }
 
@@ -191,7 +191,7 @@ class ModelsActivity : AppCompatActivity() {
         when (container.whisperDownloads.stateOf(seed)) {
             is WhisperDownloadState.Installed -> useForVoice(seed)
             is WhisperDownloadState.Running -> container.whisperDownloads.cancel(seed)
-            else -> container.whisperDownloads.start(seed)
+            else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.whisperDownloads.start(seed) }
         }
     }
 
@@ -390,7 +390,7 @@ class ModelsActivity : AppCompatActivity() {
         when (container.experimentalEmbeddingDownloads.stateOf(spec)) {
             is ExperimentalDownloadState.Running, ExperimentalDownloadState.Resolving -> container.experimentalEmbeddingDownloads.cancel(spec)
             is ExperimentalDownloadState.Installed -> {}
-            else -> container.experimentalEmbeddingDownloads.start(spec)
+            else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.experimentalEmbeddingDownloads.start(spec) }
         }
     }
 
@@ -505,7 +505,7 @@ class ModelsActivity : AppCompatActivity() {
                 if (repo.contains('/')) {
                     val seed = LocalModels.custom(repo)
                     if (customSeeds.none { it.id == seed.id }) customSeeds += seed
-                    container.downloads.start(seed)
+                    NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
                     render()
                 } else {
                     Toast.makeText(this, R.string.models_custom_bad_format, Toast.LENGTH_SHORT).show()

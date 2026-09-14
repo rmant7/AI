@@ -84,6 +84,13 @@
     <string name="settings_section_providers">Providers</string>
     <string name="settings_section_generation">Generation</string>
     <string name="settings_section_device">Device</string>
+    <string name="settings_section_downloads">Downloads</string>
+    <string name="settings_download_policy_hint">Applies to every download this app makes — chat models, voice models, and the embedding model.</string>
+    <string name="settings_download_policy_wifi_only">Wi-Fi only</string>
+    <string name="settings_download_policy_wifi_and_mobile">Wi-Fi + mobile data</string>
+    <string name="settings_download_policy_ask_every_time">Ask every time</string>
+    <string name="settings_auto_download">Download recommended models automatically</string>
+    <string name="settings_auto_download_hint">Right now, this only applies to the semantic-memory embedding model — it downloads itself in the background once memory is enabled. A manual tap on Download is never affected by this.</string>
     <string name="settings_section_advanced">Advanced</string>
     <string name="settings_whisper_installed">Installed: %1$s</string>
     <string name="settings_whisper_none">Not installed</string>
@@ -138,6 +145,9 @@
     <string name="models_embedding_downloading">%1$s of %2$s</string>
     <string name="models_catalog_header">Catalog (for reference)</string>
     <string name="model_download">Download</string>
+    <string name="download_confirm_title">Download now?</string>
+    <string name="download_confirm_message_metered">You\'re not on Wi-Fi — this will use mobile data. Download anyway?</string>
+    <string name="download_confirm_message_ask">Downloads are set to ask every time (Settings → Downloads). Start this one now?</string>
     <string name="model_delete">Delete</string>
     <string name="model_cancel">Cancel</string>
     <string name="model_use">Use</string>

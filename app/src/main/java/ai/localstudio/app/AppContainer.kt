@@ -383,6 +383,19 @@ class AppContainer private constructor(private val context: Context) {
             if (!LlamaBridge.isAvailable) return@launch
 
             if (!experimentalEmbeddingStore.isInstalled(spec)) {
+                // settings.autoDownloadEnabled/downloadPolicy: this is the
+                // one download in the app nobody explicitly asked for on
+                // this run — a background task starting it on its own,
+                // rather than a Download button someone just tapped. Both
+                // gates are checked fresh here, not once at app start, so a
+                // policy changed in Settings after this task launched but
+                // before it reaches this line still takes effect.
+                if (!settings.autoDownloadEnabled ||
+                    !NetworkPolicy.autoDownloadAllowed(settings.downloadPolicy, NetworkPolicy.isUnmetered(context))
+                ) {
+                    appLog.record("SEMANTIC_MEMORY", "auto-download of ${spec.title} skipped by download settings; memory stays lexical-only for now")
+                    return@launch
+                }
                 experimentalEmbeddingDownloads.start(spec)
                 experimentalEmbeddingDownloads.state.first { states ->
                     val s = states[spec.id]

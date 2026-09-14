@@ -109,6 +109,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.experimentalEmbeddingsButton.setOnClickListener {
             startActivity(Intent(this, ExperimentalEmbeddingsActivity::class.java))
         }
+        setupDownloadPolicy()
 
         lifecycleScope.launch { container.whisperDownloads.state.collect { renderWhisper() } }
         renderWhisper()
@@ -154,6 +155,25 @@ class SettingsActivity : AppCompatActivity() {
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+    }
+
+    private fun setupDownloadPolicy() {
+        val checkedId = when (settings.downloadPolicy) {
+            Settings.DownloadPolicy.WIFI_ONLY -> R.id.downloadPolicyWifiOnly
+            Settings.DownloadPolicy.WIFI_AND_MOBILE -> R.id.downloadPolicyWifiAndMobile
+            Settings.DownloadPolicy.ASK_EVERY_TIME -> R.id.downloadPolicyAskEveryTime
+        }
+        binding.downloadPolicyGroup.check(checkedId)
+        binding.downloadPolicyGroup.setOnCheckedChangeListener { _, id ->
+            settings.downloadPolicy = when (id) {
+                R.id.downloadPolicyWifiAndMobile -> Settings.DownloadPolicy.WIFI_AND_MOBILE
+                R.id.downloadPolicyAskEveryTime -> Settings.DownloadPolicy.ASK_EVERY_TIME
+                else -> Settings.DownloadPolicy.WIFI_ONLY
+            }
+        }
+
+        binding.autoDownloadCheck.isChecked = settings.autoDownloadEnabled
+        binding.autoDownloadCheck.setOnCheckedChangeListener { _, checked -> settings.autoDownloadEnabled = checked }
     }
 
     private fun renderWhisper() {

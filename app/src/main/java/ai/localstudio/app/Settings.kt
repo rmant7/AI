@@ -100,6 +100,36 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_HF_TOKEN, "").orEmpty().trim()
         set(value) = prefs.edit().putString(KEY_HF_TOKEN, value.trim()).apply()
 
+    /**
+     * One policy shared by every download engine this app has — chat
+     * models ([ai.localstudio.app.models.ModelDownloads]), Whisper
+     * ([ai.localstudio.app.whisper.WhisperDownloads]), and the embedding
+     * model ([ai.localstudio.app.llama.ExperimentalEmbeddingDownloads]) —
+     * rather than three independent settings nobody would find all of, or
+     * remember to keep in sync. [WIFI_ONLY] is the default: every download
+     * this app makes is at least tens of megabytes, and defaulting to
+     * "spend the user's mobile data budget without asking" is not a
+     * reasonable first impression.
+     */
+    enum class DownloadPolicy { WIFI_ONLY, WIFI_AND_MOBILE, ASK_EVERY_TIME }
+
+    var downloadPolicy: DownloadPolicy
+        get() = prefs.getString(KEY_DOWNLOAD_POLICY, null)
+            ?.let { name -> DownloadPolicy.entries.firstOrNull { it.name == name } }
+            ?: DownloadPolicy.WIFI_ONLY
+        set(value) = prefs.edit().putString(KEY_DOWNLOAD_POLICY, value.name).apply()
+
+    /**
+     * Governs only *automatic* downloads a background task starts on its
+     * own initiative — today, that is exactly
+     * [ai.localstudio.app.AppContainer]'s own E5_BASE fetch. A manual tap
+     * on a Download button anywhere in the app is never gated by this; it
+     * is always the user's own explicit action, regardless of this flag.
+     */
+    var autoDownloadEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_DOWNLOAD, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_DOWNLOAD, value).apply()
+
     var memoryEnabled: Boolean
         get() = prefs.getBoolean(KEY_MEMORY, true)
         set(value) = prefs.edit().putBoolean(KEY_MEMORY, value).apply()
@@ -108,8 +138,9 @@ class Settings(context: Context) {
      * Independent of [memoryEnabled]: turning this off keeps long-term
      * memory itself on (facts are still extracted, stored, and found by
      * lexical search) while gating out only the semantic half — see
-     * [ai.localstudio.app.llama.LazyMemoryEmbedder.enabled], which this
-     * flows into. Defaults to true so an existing install gains semantic
+     * [ai.localstudio.app.llama.LazyMemoryEmbedder]'s own `isEnabled`
+     * constructor parameter, which reads this live. Defaults to true so an
+     * existing install gains semantic
      * retrieval automatically once [AppContainer] downloads and loads the
      * embedder, with no extra step required.
      */
@@ -212,6 +243,8 @@ class Settings(context: Context) {
         const val KEY_COMPARE_MODE = "compareMode"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
+        const val KEY_DOWNLOAD_POLICY = "downloadPolicy"
+        const val KEY_AUTO_DOWNLOAD = "autoDownloadEnabled"
         const val KEY_TEMPERATURE = "temperature"
         const val KEY_TOP_P = "topP"
         const val KEY_TOP_K = "topK"

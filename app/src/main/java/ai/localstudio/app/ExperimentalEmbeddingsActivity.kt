@@ -108,7 +108,7 @@ class ExperimentalEmbeddingsActivity : AppCompatActivity() {
             when (state) {
                 is ExperimentalDownloadState.Running, is ExperimentalDownloadState.Resolving ->
                     container.experimentalEmbeddingDownloads.cancel(spec)
-                else -> container.experimentalEmbeddingDownloads.start(spec)
+                else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.experimentalEmbeddingDownloads.start(spec) }
             }
         }
 

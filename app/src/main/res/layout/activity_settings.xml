@@ -291,6 +291,62 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="24dp"
+            android:text="@string/settings_section_downloads"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="@string/settings_download_policy_hint"
+            android:textSize="12sp" />
+
+        <RadioGroup
+            android:id="@+id/downloadPolicyGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/downloadPolicyWifiOnly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_download_policy_wifi_only" />
+
+            <RadioButton
+                android:id="@+id/downloadPolicyWifiAndMobile"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_download_policy_wifi_and_mobile" />
+
+            <RadioButton
+                android:id="@+id/downloadPolicyAskEveryTime"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_download_policy_ask_every_time" />
+
+        </RadioGroup>
+
+        <CheckBox
+            android:id="@+id/autoDownloadCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_auto_download" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="2dp"
+            android:text="@string/settings_auto_download_hint"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
             android:text="@string/settings_section_advanced"
             android:textColor="?attr/colorPrimary"
             android:textSize="16sp"

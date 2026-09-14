@@ -86,6 +86,13 @@
     <string name="settings_section_providers">Провайдеры</string>
     <string name="settings_section_generation">Генерация</string>
     <string name="settings_section_device">Устройство</string>
+    <string name="settings_section_downloads">Загрузки</string>
+    <string name="settings_download_policy_hint">Применяется ко всем загрузкам в приложении — чат-модели, голосовые модели и модель эмбеддингов.</string>
+    <string name="settings_download_policy_wifi_only">Только Wi-Fi</string>
+    <string name="settings_download_policy_wifi_and_mobile">Wi-Fi + мобильный интернет</string>
+    <string name="settings_download_policy_ask_every_time">Спрашивать каждый раз</string>
+    <string name="settings_auto_download">Скачивать рекомендуемые модели автоматически</string>
+    <string name="settings_auto_download_hint">Сейчас это касается только модели эмбеддингов для семантической памяти — она скачивается сама в фоне после включения памяти. На ручной тап по «Скачать» это не влияет.</string>
     <string name="settings_section_advanced">Дополнительно</string>
     <string name="settings_whisper_installed">Установлена: %1$s</string>
     <string name="settings_whisper_none">Не установлена</string>
@@ -140,6 +147,9 @@
     <string name="models_embedding_downloading">%1$s из %2$s</string>
     <string name="models_catalog_header">Каталог (справочно)</string>
     <string name="model_download">Скачать</string>
+    <string name="download_confirm_title">Скачать сейчас?</string>
+    <string name="download_confirm_message_metered">Вы не в Wi-Fi — будет использован мобильный интернет. Скачать всё равно?</string>
+    <string name="download_confirm_message_ask">Загрузки настроены спрашивать каждый раз (Настройки → Загрузки). Начать эту сейчас?</string>
     <string name="model_delete">Удалить</string>
     <string name="model_cancel">Отменить</string>
     <string name="model_use">Использовать</string>
