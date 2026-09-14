@@ -16,6 +16,8 @@ import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.SpeechModelHandle
 import ai.localstudio.core.runtime.StreamingSpeechSession
 import ai.localstudio.whisper.WhisperBridge
+import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
@@ -46,6 +49,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * worker (which frees what it produced once it finishes).
  */
 class WhisperCppRuntime(
+    /** Application context, held for the process lifetime — used only to resolve `content://` URIs (see [WhisperCppSpeechModel.audioSourceFor]). */
+    private val context: Context,
     private val threads: Int = WhisperBridge.defaultThreads(),
     private val log: (tag: String, message: String) -> Unit = { _, _ -> },
 ) : ModelRuntime {
@@ -93,7 +98,7 @@ class WhisperCppRuntime(
         }
         log("WHISPER_LOAD", "${file.name}: ready in ${loadMs}ms")
 
-        return WhisperCppSpeechModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, threads, log)
+        return WhisperCppSpeechModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, threads, context, log)
     }
 }
 
@@ -117,6 +122,7 @@ internal class WhisperCppSpeechModel(
     private val bridge: WhisperBridge,
     private val handle: Long,
     private val threads: Int,
+    private val context: Context,
     private val log: (tag: String, message: String) -> Unit,
 ) : SpeechModelHandle {
 
@@ -168,42 +174,49 @@ internal class WhisperCppSpeechModel(
         }
 
         try {
-            val segments = mutableListOf<TranscriptSegment>()
-            val window = PcmBuffer()
-            var offsetSamples = 0L
+            // Explicit, not inherited from the caller: a caller on
+            // Dispatchers.Main (a UI screen driving this straight off a
+            // button click, e.g. TranscribeActivity) must not have whisper's
+            // blocking native calls run in-line on the main thread just
+            // because nothing here forced them elsewhere.
+            return withContext(Dispatchers.Default) {
+                val segments = mutableListOf<TranscriptSegment>()
+                val window = PcmBuffer()
+                var offsetSamples = 0L
 
-            suspend fun runWindow(samples: ShortArray) {
-                if (samples.isEmpty()) return
-                val floats = FloatArray(samples.size) { samples[it] / 32768f }
-                val offsetMs = offsetSamples * 1000 / SAMPLE_RATE
-                val sink = WhisperBridge.SegmentSink { text, startMs, endMs ->
-                    if (text.isNotBlank()) {
-                        val segment = TranscriptSegment(text = text, startMs = offsetMs + startMs, endMs = offsetMs + endMs)
-                        segments += segment
-                        onSegment(segment)
+                suspend fun runWindow(samples: ShortArray) {
+                    if (samples.isEmpty()) return
+                    val floats = FloatArray(samples.size) { samples[it] / 32768f }
+                    val offsetMs = offsetSamples * 1000 / SAMPLE_RATE
+                    val sink = WhisperBridge.SegmentSink { text, startMs, endMs ->
+                        if (text.isNotBlank()) {
+                            val segment = TranscriptSegment(text = text, startMs = offsetMs + startMs, endMs = offsetMs + endMs)
+                            segments += segment
+                            onSegment(segment)
+                        }
+                    }
+                    WhisperBridge.nativeOpMutex.withLock {
+                        bridge.nativeTranscribe(handle, floats, threads, lang, sink)
+                    }
+                    offsetSamples += samples.size
+                }
+
+                for (chunk in channel) {
+                    if (cancelRequested.get()) break
+                    window.append(chunk)
+                    while (window.size >= WINDOW_SAMPLES) {
+                        runWindow(window.take(WINDOW_SAMPLES))
+                        if (cancelRequested.get()) break
                     }
                 }
-                WhisperBridge.nativeOpMutex.withLock {
-                    bridge.nativeTranscribe(handle, floats, threads, lang, sink)
-                }
-                offsetSamples += samples.size
-            }
+                if (!cancelRequested.get()) runWindow(window.takeAll())
 
-            for (chunk in channel) {
-                if (cancelRequested.get()) break
-                window.append(chunk)
-                while (window.size >= WINDOW_SAMPLES) {
-                    runWindow(window.take(WINDOW_SAMPLES))
-                    if (cancelRequested.get()) break
-                }
+                Transcript(
+                    text = segments.joinToString(" ") { it.text }.trim(),
+                    language = lang.takeIf { it != "auto" },
+                    segments = segments,
+                )
             }
-            if (!cancelRequested.get()) runWindow(window.takeAll())
-
-            return Transcript(
-                text = segments.joinToString(" ") { it.text }.trim(),
-                language = lang.takeIf { it != "auto" },
-                segments = segments,
-            )
         } finally {
             producer.cancel()
         }
@@ -322,15 +335,16 @@ internal class WhisperCppSpeechModel(
     }
 
     private fun audioSourceFor(audio: AudioRef): AudioSource {
-        // Same convention as OpenAiRuntime.RemoteSpeechModel.audioFile(): a
-        // file:// URI is unwrapped to a bare path, anything else (a plain
-        // path, or an http(s) URL MediaExtractor can fetch progressively) is
-        // passed straight through. A content:// URI needs an Android Context
-        // to resolve and isn't produced by any caller yet — see
-        // docs/13-asr-pipeline-migration.md's TODO list.
-        val path = runCatching { URI.create(audio.uri) }.getOrNull()
-            ?.takeIf { it.scheme == "file" }
-            ?.path
-        return MediaCodecAudioSource.forPathOrUrl(path ?: audio.uri)
+        val parsed = runCatching { URI.create(audio.uri) }.getOrNull()
+        return when (parsed?.scheme) {
+            // A SAF/file-picker URI (TranscribeActivity) — needs a Context to
+            // resolve through ContentResolver, unlike a plain file path or URL.
+            "content" -> MediaCodecAudioSource.forUri(context, Uri.parse(audio.uri))
+            // Same convention as OpenAiRuntime.RemoteSpeechModel.audioFile():
+            // a file:// URI is unwrapped to a bare path.
+            "file" -> MediaCodecAudioSource.forPathOrUrl(parsed.path ?: audio.uri)
+            // A plain path, or an http(s) URL MediaExtractor can fetch progressively.
+            else -> MediaCodecAudioSource.forPathOrUrl(audio.uri)
+        }
     }
 }

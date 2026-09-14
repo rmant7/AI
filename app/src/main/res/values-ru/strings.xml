@@ -29,6 +29,7 @@
     <string name="menu_history">История чатов</string>
     <string name="menu_share_chat">Поделиться чатом</string>
     <string name="menu_log">Журнал ошибок</string>
+    <string name="menu_transcribe">Транскрибация файлов</string>
     <string name="message_copy">Скопировать сообщение</string>
     <string name="message_copied">Скопировано</string>
     <string name="message_attached_image">Прикреплённое изображение</string>
@@ -83,6 +84,20 @@
     <string name="files_unknown_chat">Другие файлы (без привязки к чату)</string>
     <string name="files_deleted_chat">Удалённый чат</string>
     <string name="files_view_title">%1$s — распознанный текст</string>
+
+    <string name="transcribe_hint">Тестовый экран для vertical slice whisper.cpp (см. docs/13-asr-pipeline-migration.md). Выберите файл или папку и нажмите «Транскрибировать». Результат каждого файла сохраняется в .txt сразу после готовности — файлы обрабатываются по одному на одной загруженной модели.</string>
+    <string name="transcribe_pick_file">Выбрать файл</string>
+    <string name="transcribe_pick_folder">Выбрать папку</string>
+    <string name="transcribe_start">Транскрибировать</string>
+    <string name="transcribe_stop">Стоп</string>
+    <string name="transcribe_no_model">Модель whisper не установлена — сначала скачайте её на экране «Модели».</string>
+    <string name="transcribe_empty">Выберите файл или папку для транскрибации.</string>
+    <string name="transcribe_folder_found">Найдено медиафайлов: %1$d</string>
+    <string name="transcribe_status_pending">В очереди</string>
+    <string name="transcribe_status_running">Идёт транскрибация…</string>
+    <string name="transcribe_status_done">Готово, сохранено как %1$s</string>
+    <string name="transcribe_status_error">Ошибка: %1$s</string>
+    <string name="transcribe_status_cancelled">Отменено</string>
 
     <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
     <string name="settings_whisper_manage">Открыть модели → Голос</string>

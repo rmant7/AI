@@ -27,6 +27,7 @@
     <string name="menu_history">Chat history</string>
     <string name="menu_share_chat">Share chat</string>
     <string name="menu_log">Error log</string>
+    <string name="menu_transcribe">Transcribe files</string>
     <string name="message_copy">Copy message</string>
     <string name="message_copied">Copied</string>
     <string name="message_attached_image">Attached image</string>
@@ -81,6 +82,20 @@
     <string name="files_unknown_chat">Other files (not linked to a chat)</string>
     <string name="files_deleted_chat">Deleted chat</string>
     <string name="files_view_title">%1$s — recognized text</string>
+
+    <string name="transcribe_hint">Test screen for the whisper.cpp vertical slice (see docs/13-asr-pipeline-migration.md). Pick a file or a folder, then Transcribe. Each result is saved as a .txt next to the others once its file finishes — files transcribe one at a time against a single loaded model.</string>
+    <string name="transcribe_pick_file">Pick file</string>
+    <string name="transcribe_pick_folder">Pick folder</string>
+    <string name="transcribe_start">Transcribe</string>
+    <string name="transcribe_stop">Stop</string>
+    <string name="transcribe_no_model">No whisper model installed — download one on the Models screen first.</string>
+    <string name="transcribe_empty">Pick a file or a folder to transcribe.</string>
+    <string name="transcribe_folder_found">%1$d media file(s) found</string>
+    <string name="transcribe_status_pending">Queued</string>
+    <string name="transcribe_status_running">Transcribing…</string>
+    <string name="transcribe_status_done">Done, saved as %1$s</string>
+    <string name="transcribe_status_error">Error: %1$s</string>
+    <string name="transcribe_status_cancelled">Cancelled</string>
 
     <string name="settings_whisper_model">Speech recognition model (offline)</string>
     <string name="settings_whisper_manage">Open Models → Voice</string>

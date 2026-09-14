@@ -702,7 +702,7 @@ class AppContainer private constructor(private val context: Context) {
      * shared instance, unlike [LlamaCppRuntime] which is rebuilt per call:
      * nothing about it varies per request the way llama's context size does.
      */
-    val whisperCppRuntime: ModelRuntime = WhisperCppRuntime(log = appLog::record)
+    val whisperCppRuntime: ModelRuntime = WhisperCppRuntime(context = context, log = appLog::record)
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

@@ -148,6 +148,8 @@ dependencies {
 
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    // TranscribeActivity's folder picker: recursively walks a SAF tree Uri.
+    implementation("androidx.documentfile:documentfile:1.0.1")
     // Reads embedded orientation for an attached photo — BitmapFactory
     // ignores it, so downscaling+recompressing without this would rotate
     // sideways every image a phone camera saves as landscape bytes with a
