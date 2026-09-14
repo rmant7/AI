@@ -484,16 +484,27 @@ class AppContainer private constructor(private val context: Context) {
         // loaded. TRIM_MEMORY_RUNNING_LOW and up covers real pressure, both
         // foreground (RUNNING_LOW/RUNNING_CRITICAL — the exact levels a
         // still-visible, still-in-use app gets before being killed outright)
-        // and background; TRIM_MEMORY_RUNNING_MODERATE is deliberately
-        // excluded — it fires routinely and unloading on every one of those
-        // would make semantic search reload far more often than the RAM it
-        // actually saves is worth. onLowMemory() is the older, still-called-
-        // on-every-API-level fallback for the same "this is serious" signal.
+        // and background (BACKGROUND and up — the system actually starting
+        // to reclaim from backgrounded processes in LRU order). Two levels
+        // are deliberately excluded from that range, both because they fire
+        // routinely rather than signalling real pressure: RUNNING_MODERATE
+        // (below the threshold already) and UI_HIDDEN (20, inside the
+        // range but skipped explicitly) — UI_HIDDEN fires the instant the
+        // app is merely not visible, e.g. switching away for a second, with
+        // nothing to do with how much RAM is actually free; a live device
+        // log showed this firing (and reloading the model right after) on
+        // completely routine backgrounding, far more often than the RAM it
+        // saved was worth. onLowMemory() is the older, still-called-on-
+        // every-API-level fallback for the same "this is serious" signal.
         // Reloading afterward is the background task above's own job, the
         // next time it wakes up — this callback only ever frees, never loads.
         context.registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
-                if (level < android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) return
+                if (level < android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+                    level == android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
+                ) {
+                    return
+                }
                 CoroutineScope(Dispatchers.IO).launch { releaseEmbedderUnderMemoryPressure("trim level $level") }
             }
 
@@ -522,8 +533,9 @@ class AppContainer private constructor(private val context: Context) {
     /**
      * Test/diagnostic-only entry point: runs the exact unload
      * [onTrimMemory][android.content.ComponentCallbacks2.onTrimMemory]
-     * (TRIM_MEMORY_RUNNING_LOW and up) would under real system memory
-     * pressure — suspending, so an instrumentation test can await it
+     * would under real system memory pressure (see that function's own
+     * doc comment for exactly which levels qualify) — suspending, so an
+     * instrumentation test can await it
      * deterministically instead of racing the fire-and-forget coroutine the
      * real callback launches. Nothing in this app can force Android to
      * actually deliver TRIM_MEMORY_RUNNING_LOW from a test, so this is the
