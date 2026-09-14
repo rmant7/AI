@@ -143,11 +143,26 @@ VAD), было не интегрировано в архитектуру, рад
 
 - `SpeechModelHandle`: добавлен `startStreaming(language): StreamingSpeechSession`
   (обязателен для реализации — все существующие реализации обновлены).
-- Новый интерфейс `StreamingSpeechSession` (`core.runtime`).
+- Новый интерфейс `StreamingSpeechSession` (`core.runtime`) — контракт
+  `segments: Flow<TranscriptSegment>` явно задокументирован (partial vs
+  final различаются по `startMs`, см. «Прогресс по фазам» → Phase 3).
 - Новый интерфейс `AudioSource` (`core.audio`).
 - `WhisperBridge.nativeTranscribe` — добавлен параметр `sink: SegmentSink?`
   (без значения по умолчанию: `external fun` не поддерживает default-параметры).
 - `WhisperBridge.nativeCancel` — новый метод.
+- `WhisperCppSpeechModel.close()` — теперь берёт `nativeOpMutex` перед
+  `nativeFree` (было небезопасно относительно `startStreaming()`, см. Phase 3).
+
+## Новые файлы (обе ветки вместе)
+
+`core/audio/`: `AudioSource.kt`, `PcmMath.kt`, `PcmBuffer.kt` (+ тесты).
+`app/whisper/`: `MediaCodecAudioSource.kt`, `WhisperCppSpeechModel.kt`
+(содержит и `WhisperCppRuntime`), `WhisperFileTranscriber.kt`,
+`MediaFileUtils.kt`, `MicrophoneAudioSource.kt`, `WhisperCppMicSession.kt`.
+`app/`: `TranscribeActivity.kt` + `activity_transcribe.xml` +
+`item_transcribe_result.xml` + `ic_play_arrow.xml`/`ic_pause.xml`.
+`app/src/androidTest/.../whisper/`: `WhisperBenchmarkTest.kt`. Этот файл
+(`docs/13-asr-pipeline-migration.md`).
 
 ## Что не перенесено и почему
 
@@ -328,11 +343,16 @@ VAD), было не интегрировано в архитектуру, рад
 
 ## Benchmark
 
-**Не выполнялся.** В этой среде выполнения (облачный sandbox) нет
-физического Android-устройства — Pixel 10 Pro, RTF, first-result latency,
-RAM/CPU/battery/thermal и accuracy-замеры из задания требуют реального
-железа. Инфраструктура для замеров (сам `WhisperCppSpeechModel`, сегменты
-с таймстемпами) готова; сами цифры — предстоит снять на устройстве.
+**Результатов нет** (Pixel 10 Pro недоступен из этой среды выполнения) —
+**но инструмент готов и ждёт запуска**, не просто «предстоит написать»:
+`app/src/androidTest/.../whisper/WhisperBenchmarkTest.kt` (ветка
+`claude/asr-phase3-mic-streaming`). Он сам измеряет RTF, first-result
+latency, общее время и число сегментов на любом наборе аудиофайлов,
+которые вы положите на устройство — инструкция (`adb push`/`adb pull`,
+имя тестового класса для `connectedDebugAndroidTest`) прямо в doc-комменте
+класса. RAM/CPU/battery/thermal и accuracy (WER) этот тест не измеряет —
+честно указано там же, что и как снять параллельно (профайлер / `adb
+shell dumpsys`) или чем дополнить отдельно.
 
 ## Верификация в этой среде — и её пределы
 
