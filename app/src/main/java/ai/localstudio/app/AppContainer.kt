@@ -189,15 +189,18 @@ class AppContainer private constructor(private val context: Context) {
      * used — [RankingWeights]' own doc comment on that field explains why it
      * defaulted to 0.0 until now: no embedder was wired into the app, and
      * SEMANTIC_RETRIEVAL_DESIGN.md's step 9 wanted a real measurement, not a
-     * guess, before picking one. That measurement still doesn't exist yet;
-     * this is a deliberately modest starting value (well under
-     * [RankingWeights.taskRelevance]'s 0.30) rather than a tuned one — safe
-     * to ship ahead of it because [semanticMemoryEmbedder] not being ready
-     * yet, or the embedder having no vector for a given item, both leave
+     * guess, before picking one. That measurement now exists — see
+     * [SEMANTIC_RANKING_WEIGHT]'s own doc comment for the actual benchmark
+     * numbers behind this value. Still not fully tuned (no A/B run against
+     * this app's own real usage yet, only the standalone retrieval
+     * benchmark), so it stays well under [RankingWeights.taskRelevance]'s
+     * 0.30 rather than matching or exceeding it. Safe regardless of tuning:
+     * [semanticMemoryEmbedder] not being ready yet, or the embedder having
+     * no vector for a given item, both leave
      * [ai.localstudio.commercialmemory.ContextCandidate.semanticScore] null,
      * which [ai.localstudio.commercialmemory.HeuristicContextRanker]
      * already treats as contributing nothing — so this weight is inert
-     * until real coverage exists, exactly like it was at 0.0.
+     * until real coverage exists, whatever it's set to.
      */
     val memoryExperimentRunner = MemoryExperimentRunner(
         AppMemory(memory),
@@ -1149,10 +1152,25 @@ class AppContainer private constructor(private val context: Context) {
         // forgetConversationMemory().
         private const val CONVERSATION_MEMORY_FORGET_LIMIT = 10_000
 
-        // See memoryExperimentRunner's own doc comment for why this specific
-        // value, and why shipping it non-zero ahead of a real measurement is
-        // still safe.
-        private const val SEMANTIC_RANKING_WEIGHT = 0.20
+        // Benchmark-informed starting weight, not a finally-optimized one —
+        // see memoryExperimentRunner's own doc comment for why it's still
+        // deliberately conservative despite the benchmark's own numbers
+        // (below) looking strong. Source: benchmark/e5_base_benchmark.ipynb
+        // in Mobile_mem0 (multilingual-e5-base, Q4_K_M, mean pooling,
+        // query:/passage: prefixes), 92 positive queries + 10 negatives,
+        // lexical vs semantic on the same dataset:
+        //   Overall  Recall@1  Recall@5  Recall@10  MRR
+        //   lexical     0.500     0.598      0.620   0.543
+        //   semantic    0.848     0.946      0.946   0.892
+        //   Recall@1 by category: exact 0.778->0.944, identifier 1.000->1.000
+        //   (tied, not worse), low_overlap 0.176->0.471, morphology
+        //   0.500->0.950, synonym 0.200->0.933, paraphrase 0.600->0.867.
+        //   avg cosine: positive=0.841, negative=0.753 (gap 0.088).
+        // No A/B tuning against this app's own real usage has run yet —
+        // that is a different, still-open measurement (ExperimentLogger's
+        // real data, per SEMANTIC_RETRIEVAL_DESIGN.md's step 9) — so this
+        // is a starting point the benchmark supports, not a final value.
+        private const val SEMANTIC_RANKING_WEIGHT = 0.30
 
         // How many memory records embedPending() backfills per pass — see the
         // semantic-memory background task in init{}. One pass at this size is
