@@ -53,6 +53,19 @@ class WhisperCppMicSession(
 
     val isLoaded: Boolean get() = loaded != null
 
+    /**
+     * Set when [start]'s mic-read loop stops because [source]`.stream()`
+     * threw, not because the caller asked it to via [finish]/[cancel].
+     * `StreamingSpeechSession.segments` has no way to carry a cause through
+     * completion (see its own doc comment — it just completes), so this is
+     * the side channel: after collecting the [Flow] [start] returned ends,
+     * check this to tell "the session stopped because it was told to" from
+     * "the session died and the caller should say something about it".
+     * Cleared at the start of every [start] call.
+     */
+    var lastError: Throwable? = null
+        private set
+
     private suspend fun ensureLoaded(seed: WhisperModelSeed): WhisperCppSpeechModel {
         loaded?.let { if (loadedSeedId == seed.id) return it }
         loaded?.close()
@@ -88,6 +101,7 @@ class WhisperCppMicSession(
      */
     suspend fun start(seed: WhisperModelSeed, source: AudioSource, language: String? = null): Flow<TranscriptSegment> {
         cancel()
+        lastError = null
         val handle = ensureLoaded(seed)
         val session = handle.startStreaming(language)
         activeSession = session
@@ -112,6 +126,7 @@ class WhisperCppMicSession(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                lastError = e
                 session.cancel()
             }
         }

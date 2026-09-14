@@ -106,6 +106,7 @@
     <string name="transcribe_mic_stop">Стоп</string>
     <string name="transcribe_mic_listening">Слушаю…</string>
     <string name="transcribe_mic_idle">Не активно</string>
+    <string name="transcribe_mic_error">Сессия микрофона остановлена: %1$s</string>
 
     <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
     <string name="settings_whisper_manage">Открыть модели → Голос</string>

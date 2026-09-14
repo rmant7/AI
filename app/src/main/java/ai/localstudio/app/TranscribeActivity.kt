@@ -273,9 +273,18 @@ class TranscribeActivity : AppCompatActivity() {
             }
             // The Flow can complete on its own (the session finished/was
             // cancelled from elsewhere, e.g. onPause) without stopMic() ever
-            // running — keep the button/status in sync either way.
+            // running — keep the button/status in sync either way. If it
+            // stopped because the mic loop actually failed (AudioRecord
+            // couldn't init, permission revoked mid-session, ...) rather
+            // than a normal finish()/cancel(), say so instead of just
+            // silently going idle — see WhisperCppMicSession.lastError's
+            // own doc comment for why this is the only way to tell the two
+            // apart.
             micActive = false
             renderMicState()
+            container.whisperMicSession.lastError?.let { error ->
+                Toast.makeText(this@TranscribeActivity, getString(R.string.transcribe_mic_error, error.message ?: error.toString()), Toast.LENGTH_LONG).show()
+            }
         }
     }
 

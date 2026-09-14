@@ -104,6 +104,7 @@
     <string name="transcribe_mic_stop">Stop</string>
     <string name="transcribe_mic_listening">Listening…</string>
     <string name="transcribe_mic_idle">Idle</string>
+    <string name="transcribe_mic_error">Mic session stopped: %1$s</string>
 
     <string name="settings_whisper_model">Speech recognition model (offline)</string>
     <string name="settings_whisper_manage">Open Models → Voice</string>
