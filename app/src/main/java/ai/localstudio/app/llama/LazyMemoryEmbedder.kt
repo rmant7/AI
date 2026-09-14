@@ -22,8 +22,18 @@ import ai.localstudio.memory.MemoryEmbedder
  * the input) is never actually reachable from real use — it exists only so
  * this class satisfies [MemoryEmbedder]'s contract without a partial-init
  * flag leaking into that interface.
+ *
+ * [isEnabled] is the same degradation, triggered by a person instead of a
+ * load still in progress — the Memory screen's own "Semantic retrieval"
+ * switch. Read fresh on every call rather than cached, the same way
+ * [ai.localstudio.app.Settings]'s other flags are read live elsewhere in
+ * this app: flipping the switch takes effect on the very next call, with
+ * no restart, no [set]/reload, and no separate sync step for [AppContainer]
+ * to remember. [isReady] still reports whether the real model is loaded
+ * (a *download-and-load* question, the Models screen's own concern),
+ * independent of whether it is currently allowed to answer.
  */
-class LazyMemoryEmbedder : MemoryEmbedder {
+class LazyMemoryEmbedder(private val isEnabled: () -> Boolean = { true }) : MemoryEmbedder {
 
     @Volatile
     private var delegate: MemoryEmbedder? = null
@@ -38,8 +48,8 @@ class LazyMemoryEmbedder : MemoryEmbedder {
     override val dimension: Int get() = delegate?.dimension ?: 0
 
     override suspend fun embedForQuery(query: String): FloatArray =
-        delegate?.embedForQuery(query) ?: FloatArray(0)
+        if (isEnabled()) delegate?.embedForQuery(query) ?: FloatArray(0) else FloatArray(0)
 
     override suspend fun embedForStorage(texts: List<String>): List<FloatArray> =
-        delegate?.embedForStorage(texts) ?: emptyList()
+        if (isEnabled()) delegate?.embedForStorage(texts) ?: emptyList() else emptyList()
 }

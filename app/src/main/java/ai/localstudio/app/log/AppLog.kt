@@ -13,9 +13,9 @@ import java.util.Locale
 /**
  * A small on-disk log of errors the app has hit, entirely separate from
  * logcat — which a phone's owner has no ordinary way to read or copy off a
- * device. The whole point of this is a report a user CAN get out: open
- * Settings → "Журнал ошибок", tap "Скопировать", paste it wherever it needs
- * to go for someone else to actually diagnose it.
+ * device. The whole point of this is a report a user CAN get out: open the
+ * chat's own overflow menu → "Журнал ошибок", tap "Скопировать", paste it
+ * wherever it needs to go for someone else to actually diagnose it.
  *
  * Deliberately flat, human-readable text rather than structured data — this
  * is read by a person, not parsed by code.

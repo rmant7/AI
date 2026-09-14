@@ -43,7 +43,7 @@
             android:name=".ExperimentalEmbeddingsActivity"
             android:exported="false"
             android:label="@string/embed_screen_title"
-            android:parentActivityName=".ModelsActivity" />
+            android:parentActivityName=".SettingsActivity" />
 
         <activity
             android:name=".GenerationSettingsActivity"
@@ -64,6 +64,12 @@
             android:parentActivityName=".ChatActivity" />
 
         <activity
+            android:name=".MemoryActivity"
+            android:exported="false"
+            android:label="@string/memory_title"
+            android:parentActivityName=".ChatActivity" />
+
+        <activity
             android:name=".ApiKeysActivity"
             android:exported="false"
             android:label="@string/settings_api_keys_manage"
@@ -73,7 +79,7 @@
             android:name=".LogActivity"
             android:exported="false"
             android:label="@string/settings_log"
-            android:parentActivityName=".SettingsActivity" />
+            android:parentActivityName=".ChatActivity" />
 
         <service
             android:name=".models.ModelDownloadService"

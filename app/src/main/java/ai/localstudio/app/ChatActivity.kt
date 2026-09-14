@@ -190,8 +190,9 @@ class ChatActivity : AppCompatActivity() {
         menu.add(0, MENU_FILES, 2, R.string.menu_files)
         menu.add(0, MENU_SETTINGS, 3, R.string.menu_settings)
         menu.add(0, MENU_HISTORY, 4, R.string.menu_history)
-        menu.add(0, MENU_SHARE_CHAT, 5, R.string.menu_share_chat)
-        menu.add(0, MENU_CLEAR, 6, R.string.menu_clear)
+        menu.add(0, MENU_LOG, 5, R.string.menu_log)
+        menu.add(0, MENU_SHARE_CHAT, 6, R.string.menu_share_chat)
+        menu.add(0, MENU_CLEAR, 7, R.string.menu_clear)
         return true
     }
 
@@ -217,9 +218,7 @@ class ChatActivity : AppCompatActivity() {
         }
 
         MENU_MEMORY -> {
-            container.settings.memoryEnabled = !container.settings.memoryEnabled
-            invalidateOptionsMenu()
-            updateStatus()
+            startActivity(Intent(this, MemoryActivity::class.java))
             true
         }
 
@@ -230,6 +229,11 @@ class ChatActivity : AppCompatActivity() {
 
         MENU_HISTORY -> {
             showHistory()
+            true
+        }
+
+        MENU_LOG -> {
+            startActivity(Intent(this, LogActivity::class.java))
             true
         }
 
@@ -1092,8 +1096,9 @@ class ChatActivity : AppCompatActivity() {
         const val MENU_FILES = 3
         const val MENU_SETTINGS = 4
         const val MENU_HISTORY = 5
-        const val MENU_SHARE_CHAT = 6
-        const val MENU_CLEAR = 7
+        const val MENU_LOG = 6
+        const val MENU_SHARE_CHAT = 7
+        const val MENU_CLEAR = 8
 
         // Was temporarily raised to 30 minutes to measure real on-device
         // timing for heavier local models before picking a production value

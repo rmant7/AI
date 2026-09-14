@@ -21,7 +21,11 @@ import org.junit.runner.RunWith
  * task depends on: every call before [LazyMemoryEmbedder.set] degrades to
  * empty results (the same "no embedder configured" fallback
  * `ai.localstudio.memory.SemanticRetrieval.candidates` already treats as
- * lexical-only), and every call after it delegates correctly.
+ * lexical-only), every call after it delegates correctly, and the Memory
+ * screen's own "Semantic retrieval" switch (wired through the `isEnabled`
+ * constructor parameter) degrades the same way as "not ready yet" even
+ * once a real embedder is set — instantly, on the next call, with no
+ * re-[set] needed.
  */
 @RunWith(AndroidJUnit4::class)
 class LazyMemoryEmbedderTest {
@@ -66,6 +70,36 @@ class LazyMemoryEmbedderTest {
         runBlocking {
             assertArrayEquals(queryVector, lazy.embedForQuery("any query"), 0f)
             assertEquals(storageVectors, lazy.embedForStorage(listOf("any text")))
+        }
+    }
+
+    @Test
+    fun disabled_degrades_to_empty_even_with_a_real_embedder_set() {
+        var enabled = true
+        val lazy = LazyMemoryEmbedder(isEnabled = { enabled })
+        val real = FakeEmbedder(
+            modelId = "multilingual-e5-base-q4km",
+            dimension = 768,
+            queryVector = floatArrayOf(0.1f, 0.2f, 0.3f),
+            storageVectors = listOf(floatArrayOf(0.4f, 0.5f, 0.6f)),
+        )
+        lazy.set(real)
+        enabled = false
+
+        // isReady still reports the real model as loaded — turning semantic
+        // retrieval off is not the same question as whether the model is
+        // resident, see the class's own doc comment.
+        assertTrue(lazy.isReady)
+
+        runBlocking {
+            assertArrayEquals(FloatArray(0), lazy.embedForQuery("any query"), 0f)
+            assertTrue(lazy.embedForStorage(listOf("any text")).isEmpty())
+        }
+
+        // Flipping back takes effect on the very next call, no re-set().
+        enabled = true
+        runBlocking {
+            assertArrayEquals(floatArrayOf(0.1f, 0.2f, 0.3f), lazy.embedForQuery("any query"), 0f)
         }
     }
 }

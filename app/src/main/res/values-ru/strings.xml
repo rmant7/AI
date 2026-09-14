@@ -28,11 +28,12 @@
     <string name="menu_clear">Новый чат</string>
     <string name="menu_history">История чатов</string>
     <string name="menu_share_chat">Поделиться чатом</string>
+    <string name="menu_log">Журнал ошибок</string>
     <string name="message_copy">Скопировать сообщение</string>
     <string name="message_copied">Скопировано</string>
     <string name="message_attached_image">Прикреплённое изображение</string>
     <string name="chat_share_empty">Чат пуст — нечем делиться</string>
-    <string name="chat_interrupted">Ответ не получен — генерация не завершилась (сбой приложения или его закрытие до ответа). Подробности могут быть в Настройки → Журнал ошибок. Попробуйте отправить сообщение ещё раз.</string>
+    <string name="chat_interrupted">Ответ не получен — генерация не завершилась (сбой приложения или его закрытие до ответа). Подробности могут быть в журнале ошибок (меню чата → Журнал ошибок). Попробуйте отправить сообщение ещё раз.</string>
     <string name="history_empty">Пока нет сохранённых чатов</string>
     <string name="history_delete">Удалить</string>
     <string name="history_rename">Переименовать</string>
@@ -42,6 +43,19 @@
     <string name="history_subtitle">%1$d сообщ. · %2$s</string>
     <string name="memory_on">Память: вкл</string>
     <string name="memory_off">Память: выкл</string>
+    <string name="memory_title">Память</string>
+    <string name="memory_long_term">Долговременная память</string>
+    <string name="memory_long_term_hint">Запоминает факты и решения между разговорами. Отключение останавливает и извлечение новых воспоминаний, и поиск по уже сохранённым.</string>
+    <string name="memory_semantic">Семантический поиск</string>
+    <string name="memory_semantic_hint">Находит подходящие воспоминания по смыслу, а не только по совпадающим словам — с помощью модели эмбеддингов на устройстве. При отключении остаётся только поиск по словам; долговременная память при этом продолжает работать.</string>
+    <string name="memory_model_header">Модель эмбеддингов</string>
+    <string name="memory_model_not_downloaded">%1$s ещё не скачана.</string>
+    <string name="memory_model_disabled">%1$s скачана, но семантический поиск выше выключен.</string>
+    <string name="memory_model_ready">%1$s скачана и загружена — семантический поиск активен.</string>
+    <string name="memory_model_loading">%1$s скачана, но ещё не загружена — это происходит автоматически вскоре после включения памяти.</string>
+    <string name="memory_manage_model">Управление моделью эмбеддингов</string>
+    <string name="memory_index_header">Индекс</string>
+    <string name="memory_index_status">%1$d / %2$d воспоминаний проиндексировано</string>
 
     <string name="chat_attach">Файл</string>
     <string name="chat_mic">Голос</string>
@@ -69,6 +83,10 @@
 
     <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
     <string name="settings_whisper_manage">Открыть модели → Голос</string>
+    <string name="settings_section_providers">Провайдеры</string>
+    <string name="settings_section_generation">Генерация</string>
+    <string name="settings_section_device">Устройство</string>
+    <string name="settings_section_advanced">Дополнительно</string>
     <string name="settings_whisper_installed">Установлена: %1$s</string>
     <string name="settings_whisper_none">Не установлена</string>
     <string name="settings_whisper_error">Ошибка: %1$s</string>
@@ -98,6 +116,10 @@
     <string name="log_copy">Скопировать</string>
     <string name="log_clear">Очистить</string>
     <string name="log_clear_confirm">Удалить весь журнал ошибок? Это нельзя отменить.</string>
+    <string name="log_build_line">Версия: %1$s (код %2$d) · Коммит: %3$s · CI-сборка: %4$s</string>
+    <string name="log_device_line">%1$s · Android %2$s (API %3$d) · %4$s</string>
+    <string name="log_cpu_features">CPU-фичи llama.cpp: %1$s</string>
+    <string name="log_cpu_unavailable">llama.cpp недоступен на этом устройстве (не та архитектура процессора).</string>
     <string name="api_keys_summary_none">Ключей в пуле нет — используется поле выше</string>
     <string name="api_keys_summary_ready">Ключей в пуле: %1$d</string>
     <string name="api_keys_summary_partial">Ключей в пуле: %1$d, на паузе: %2$d</string>
@@ -108,7 +130,14 @@
     <string name="models_title">Модели</string>
     <string name="models_category_text">Чат</string>
     <string name="models_category_voice">Голос</string>
+    <string name="models_category_embedding">Эмбеддинги</string>
+    <string name="embed_status_loaded">Загружена ✓</string>
+    <string name="embed_status_not_loaded">Не загружена (включите семантический поиск в Памяти)</string>
     <string name="models_local_header">Локальные модели — работают без сети</string>
+    <string name="models_embedding_header">Модель эмбеддингов для семантической памяти</string>
+    <string name="models_embedding_subtitle">%1$d измерений · используется для семантического поиска по памяти, никогда для чата</string>
+    <string name="models_embedding_not_downloaded">Не скачана</string>
+    <string name="models_embedding_downloading">%1$s из %2$s</string>
     <string name="models_catalog_header">Каталог (справочно)</string>
     <string name="model_download">Скачать</string>
     <string name="model_delete">Удалить</string>
@@ -127,7 +156,7 @@
     <string name="models_orphans_subtitle">Найдено файлов: %1$d, общий размер ~%2$s. Текущая версия приложения их не использует — вероятно, остались от другой версии или ветки разработки.</string>
     <string name="models_orphans_delete">Удалить (%1$s)</string>
     <string name="models_experimental_embeddings_title">Эксперимент: модели эмбеддингов</string>
-    <string name="models_experimental_embeddings_subtitle">Ручное скачивание и проверка моделей для семантического поиска в памяти. Base загружается автоматически и реально используется в поиске; этот экран — для ручной проверки её (или будущих кандидатов).</string>
+    <string name="models_experimental_embeddings_subtitle">Ручное скачивание и проверка моделей-кандидатов для семантического поиска в памяти — не нужно для обычного использования. Base уже загружается автоматически (см. Память); этот экран — для ручной проверки её или будущих кандидатов.</string>
     <string name="models_experimental_embeddings_open">Открыть</string>
     <string name="embed_screen_title">Экспериментальные модели эмбеддингов</string>
     <string name="embed_screen_explainer">Скачивание и проверка кандидата в модели эмбеддингов для семантического поиска по памяти. Эти модели никогда не используются в чате и не попадают в каталог моделей автоматически — скачайте модель, нажмите «Тест» и проверьте цифры ниже, прежде чем решать, годится ли она.</string>
@@ -152,10 +181,6 @@
     <string name="model_ram_warning">Эта модель превышает бюджет памяти для вашего устройства. Скорее всего система принудительно закроет приложение во время генерации ответа — без сообщения об ошибке, просто закроется. Продолжить всё равно?</string>
     <string name="model_ram_warning_continue">Всё равно использовать</string>
     <string name="dialog_ok">Понятно</string>
-    <string name="settings_about">О сборке</string>
-    <string name="settings_about_body">Версия: %1$s (код %2$d)\nКоммит: %3$s\nCI-сборка: %4$s\n\nСравните коммит с тем, что было отправлено в чате, чтобы убедиться, что это именно та сборка.</string>
-    <string name="settings_about_cpu">Проверено llama.cpp на этом устройстве:\n%1$s</string>
-    <string name="settings_about_cpu_unavailable">llama.cpp недоступен на этом устройстве (не та архитектура процессора).</string>
     <string name="dialog_cancel">Отмена</string>
     <string name="settings_ram">Бюджет памяти на модель, % от общей RAM</string>
     <string name="settings_ram_hint">60</string>

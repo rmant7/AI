@@ -31,12 +31,14 @@ import kotlinx.coroutines.launch
  * retrieval the way it used to.
  *
  * Deliberately not reachable from anywhere a normal user would find it by
- * accident beyond the one entry point in [ModelsActivity] — nothing this
- * screen does ever touches [ai.localstudio.app.models.LocalModels] or
- * switches the app's actual chat model. It exists purely so the person
- * running this manual verification can get a candidate model's own numbers
- * (dimension, cosine scores) before anyone decides whether it belongs in
- * production.
+ * accident beyond the one entry point, under Settings → Advanced (moved
+ * there from [ModelsActivity], which now only ever shows
+ * [ExperimentalEmbeddingModels.E5_BASE] under its own Embedding tab) —
+ * nothing this screen does ever touches
+ * [ai.localstudio.app.models.LocalModels] or switches the app's actual
+ * chat model. It exists purely so the person running this manual
+ * verification can get a candidate model's own numbers (dimension, cosine
+ * scores) before anyone decides whether it belongs in production.
  */
 class ExperimentalEmbeddingsActivity : AppCompatActivity() {
 

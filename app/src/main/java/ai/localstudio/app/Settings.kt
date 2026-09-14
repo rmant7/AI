@@ -105,6 +105,19 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_MEMORY, value).apply()
 
     /**
+     * Independent of [memoryEnabled]: turning this off keeps long-term
+     * memory itself on (facts are still extracted, stored, and found by
+     * lexical search) while gating out only the semantic half — see
+     * [ai.localstudio.app.llama.LazyMemoryEmbedder.enabled], which this
+     * flows into. Defaults to true so an existing install gains semantic
+     * retrieval automatically once [AppContainer] downloads and loads the
+     * embedder, with no extra step required.
+     */
+    var semanticMemoryEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SEMANTIC_MEMORY, true)
+        set(value) = prefs.edit().putBoolean(KEY_SEMANTIC_MEMORY, value).apply()
+
+    /**
      * Off by default: with 2+ providers enabled, the normal behaviour is
      * still the fallback chain (local first, cloud only if local fails) —
      * cheaper in battery and API quota. Turning this on sends the same
@@ -195,6 +208,7 @@ class Settings(context: Context) {
         const val KEY_ASR_MODEL = "asrModel"
         const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_MEMORY = "memoryEnabled"
+        const val KEY_SEMANTIC_MEMORY = "semanticMemoryEnabled"
         const val KEY_COMPARE_MODE = "compareMode"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"

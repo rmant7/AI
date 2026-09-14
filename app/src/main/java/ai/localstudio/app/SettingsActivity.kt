@@ -4,19 +4,15 @@ import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.view.Menu
-import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivitySettingsBinding
-import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.whisper.WhisperDownloadState
 import ai.localstudio.app.whisper.WhisperModels
 import kotlinx.coroutines.launch
@@ -96,12 +92,22 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent(this, GenerationSettingsActivity::class.java))
         }
         // Voice models live in the Models screen next to the chat models now,
-        // not in a corner of Settings — this only points there.
+        // not in a corner of Settings — this only points there. Deep-links
+        // straight to the Voice tab: its own toggle button is hidden
+        // alongside the mic (see activity_models.xml's comment), so without
+        // this a tap here would always land on Text with no way to switch.
         binding.whisperManageButton.setOnClickListener {
-            startActivity(Intent(this, ModelsActivity::class.java))
+            startActivity(ModelsActivity.intent(this, ModelsActivity.Category.VOICE))
         }
         binding.apiKeysButton.setOnClickListener {
             startActivity(ApiKeysActivity.intent(this, settings.providerId))
+        }
+        // Manual, phone-only verification for a candidate embedding model —
+        // moved here from Models (which now only ever shows the one
+        // production model, E5_BASE) so ordinary use of Models never has to
+        // scroll past a broken candidate (E5_SMALL) to reach it.
+        binding.experimentalEmbeddingsButton.setOnClickListener {
+            startActivity(Intent(this, ExperimentalEmbeddingsActivity::class.java))
         }
 
         lifecycleScope.launch { container.whisperDownloads.state.collect { renderWhisper() } }
@@ -225,65 +231,8 @@ class SettingsActivity : AppCompatActivity() {
         })
     }
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(0, MENU_ABOUT, 0, R.string.settings_about)
-        menu.add(0, MENU_LOG, 1, R.string.settings_log)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        MENU_ABOUT -> {
-            showAbout()
-            true
-        }
-
-        MENU_LOG -> {
-            startActivity(Intent(this, LogActivity::class.java))
-            true
-        }
-
-        else -> super.onOptionsItemSelected(item)
-    }
-
-    /** Exactly "is this the build I was just sent" — the git commit an APK was built from, not a version number nobody bumps. */
-    private fun showAbout() {
-        val base = getString(
-            R.string.settings_about_body,
-            BuildConfig.VERSION_NAME,
-            BuildConfig.VERSION_CODE,
-            BuildConfig.GIT_SHA,
-            BuildConfig.CI_RUN,
-        )
-        // llama_print_system_info() just formats compile-time flags — no
-        // model load involved — so this is cheap even including the native
-        // library's first System.loadLibrary() call, and worth having up
-        // front: whether dotprod/i8mm/fp16 were actually detected for this
-        // device's CPU is exactly what settles "is this slow because of the
-        // build, or because the hardware itself can't go faster".
-        val cpuInfo = if (LlamaBridge.isAvailable) {
-            runCatching { LlamaBridge().nativeSystemInfo() }.getOrNull()
-        } else {
-            null
-        }
-        val cpuLine = "\n\n" + if (cpuInfo.isNullOrBlank()) {
-            getString(R.string.settings_about_cpu_unavailable)
-        } else {
-            getString(R.string.settings_about_cpu, cpuInfo)
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.settings_about)
-            .setMessage(base + cpuLine)
-            .setPositiveButton(R.string.dialog_ok, null)
-            .show()
-    }
-
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
-    }
-
-    private companion object {
-        const val MENU_ABOUT = 1
-        const val MENU_LOG = 2
     }
 }

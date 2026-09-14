@@ -19,6 +19,9 @@ import androidx.recyclerview.widget.RecyclerView
 import ai.localstudio.app.databinding.ActivityModelsBinding
 import ai.localstudio.app.databinding.ItemLocalModelBinding
 import ai.localstudio.app.databinding.ItemModelBinding
+import ai.localstudio.app.llama.EmbeddingModelSpec
+import ai.localstudio.app.llama.ExperimentalDownloadState
+import ai.localstudio.app.llama.ExperimentalEmbeddingModels
 import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.LocalModelSeed
@@ -31,11 +34,13 @@ import ai.localstudio.core.registry.ModelFit
 import kotlinx.coroutines.launch
 
 /**
- * Every model the app can run, grouped by what it is *for* — chat models and
- * voice models are one catalog under a task switcher, the way Edge Gallery
- * organises its own. Voice models used to be buried in Settings, which made
- * them feel like a different kind of thing than the chat models they sit
- * beside conceptually.
+ * Every model the app can run, grouped by what it is *for* — chat models,
+ * voice models and the embedding model are one catalog under a task
+ * switcher, the way Edge Gallery organises its own. Voice models used to be
+ * buried in Settings, which made them feel like a different kind of thing
+ * than the chat models they sit beside conceptually; the embedding model
+ * used to live inside the Text tab for the same reason it shouldn't have —
+ * see [Category.EMBEDDING].
  *
  * Image and agent categories are the reason [Category] is an enum rather than
  * a boolean: adding one is a new entry and a new row builder, not a rewrite.
@@ -47,7 +52,15 @@ import kotlinx.coroutines.launch
  */
 class ModelsActivity : AppCompatActivity() {
 
-    enum class Category { TEXT, VOICE }
+    /**
+     * [EMBEDDING] is [ai.localstudio.app.llama.ExperimentalEmbeddingModels.E5_BASE]
+     * only — the app's one production semantic-memory model, not a chat
+     * model a user could pick to answer with. It used to sit as a plain row
+     * at the bottom of [TEXT], which is exactly the "another model to
+     * choose between" framing this tab exists to avoid: nothing here ever
+     * changes [Settings.chatModel].
+     */
+    enum class Category { TEXT, VOICE, EMBEDDING }
 
     private lateinit var binding: ActivityModelsBinding
     private lateinit var container: AppContainer
@@ -71,9 +84,28 @@ class ModelsActivity : AppCompatActivity() {
         binding.models.layoutManager = LinearLayoutManager(this)
         binding.models.adapter = adapter
 
+        // Deep-linked here (e.g. Settings' Whisper "Manage" button, or
+        // Memory's "Manage" link) rather than always landing on Text —
+        // opening on the wrong tab and making the user re-tap defeats the
+        // point of a direct link.
+        when (intent.getStringExtra(EXTRA_CATEGORY)) {
+            Category.VOICE.name -> {
+                category = Category.VOICE
+                binding.categoryToggle.check(R.id.categoryVoice)
+            }
+            Category.EMBEDDING.name -> {
+                category = Category.EMBEDDING
+                binding.categoryToggle.check(R.id.categoryEmbedding)
+            }
+        }
+
         binding.categoryToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
-            category = if (checkedId == R.id.categoryVoice) Category.VOICE else Category.TEXT
+            category = when (checkedId) {
+                R.id.categoryVoice -> Category.VOICE
+                R.id.categoryEmbedding -> Category.EMBEDDING
+                else -> Category.TEXT
+            }
             render()
         }
 
@@ -86,6 +118,7 @@ class ModelsActivity : AppCompatActivity() {
 
         lifecycleScope.launch { container.downloads.state.collect { render() } }
         lifecycleScope.launch { container.whisperDownloads.state.collect { render() } }
+        lifecycleScope.launch { container.experimentalEmbeddingDownloads.state.collect { render() } }
         render()
     }
 
@@ -191,7 +224,13 @@ class ModelsActivity : AppCompatActivity() {
     private fun render() {
         val device = container.device
         binding.deviceText.text = describeDevice(device)
-        adapter.submit(if (category == Category.VOICE) voiceRows(device) else textRows(device))
+        adapter.submit(
+            when (category) {
+                Category.VOICE -> voiceRows(device)
+                Category.EMBEDDING -> embeddingRows()
+                Category.TEXT -> textRows(device)
+            },
+        )
     }
 
     private fun textRows(device: DeviceProfile): List<Row> = buildList {
@@ -278,27 +317,91 @@ class ModelsActivity : AppCompatActivity() {
         }
 
         add(Row.Custom)
+    }
 
-        // Manual, phone-only verification for a candidate embedding model —
-        // see ExperimentalEmbeddingsActivity's own doc comment. Deliberately
-        // last and visually a plain row rather than promoted like the models
-        // above it: nothing tapped here ever changes the app's actual chat
-        // model.
+    // ── Embedding model ────────────────────────────────────────────────────
+
+    /**
+     * [ExperimentalEmbeddingModels.E5_BASE] only — not E5_SMALL, which never
+     * loads at all (see its own doc comment) and stays reachable purely as
+     * an experimental candidate under Settings → Advanced, not here. This
+     * is the app's one production semantic-memory model, shown with the
+     * two things "installed" conflates for a chat model but genuinely don't
+     * for this one: whether the GGUF is on disk, and whether it's actually
+     * the loaded embedder memory retrieval is using right now (see
+     * [AppContainer.semanticEmbedderReady] — a downloaded-but-not-yet-loaded
+     * or downloaded-but-disabled-in-Memory-settings model is a real,
+     * distinct state, not a rounding error).
+     */
+    private fun embeddingRows(): List<Row> = buildList {
+        add(Row.Header(getString(R.string.models_embedding_header)))
+
+        val spec = ExperimentalEmbeddingModels.E5_BASE
+        val state = container.experimentalEmbeddingDownloads.stateOf(spec)
+        val installed = state is ExperimentalDownloadState.Installed
+
         add(
             Row.Model(
-                title = getString(R.string.models_experimental_embeddings_title),
-                subtitle = getString(R.string.models_experimental_embeddings_subtitle),
+                title = spec.title,
+                subtitle = getString(R.string.models_embedding_subtitle, spec.dimension),
                 selected = false,
-                status = null,
-                progress = null,
-                indeterminate = false,
-                primaryLabel = getString(R.string.models_experimental_embeddings_open),
-                primaryEnabled = true,
-                secondaryLabel = null,
-                onPrimary = { startActivity(android.content.Intent(this@ModelsActivity, ExperimentalEmbeddingsActivity::class.java)) },
-                onSecondary = {},
+                status = embeddingStatus(state),
+                progress = (state as? ExperimentalDownloadState.Running)?.progress?.fraction,
+                indeterminate = state is ExperimentalDownloadState.Resolving,
+                primaryLabel = when (state) {
+                    is ExperimentalDownloadState.Installed -> getString(R.string.model_state_installed)
+                    is ExperimentalDownloadState.Running, ExperimentalDownloadState.Resolving -> getString(R.string.model_cancel)
+                    is ExperimentalDownloadState.Failed -> getString(R.string.model_retry)
+                    ExperimentalDownloadState.Idle -> getString(R.string.model_download)
+                },
+                primaryEnabled = !installed,
+                secondaryLabel = when (state) {
+                    is ExperimentalDownloadState.Failed -> getString(R.string.model_details)
+                    is ExperimentalDownloadState.Installed -> getString(R.string.model_delete)
+                    else -> null
+                },
+                onPrimary = { onEmbeddingPrimary(spec) },
+                onSecondary = { onEmbeddingSecondary(spec) },
             ),
         )
+    }
+
+    private fun embeddingStatus(state: ExperimentalDownloadState): String = when (state) {
+        is ExperimentalDownloadState.Installed -> {
+            val loaded = if (container.semanticEmbedderReady) {
+                getString(R.string.embed_status_loaded)
+            } else {
+                getString(R.string.embed_status_not_loaded)
+            }
+            "${getString(R.string.model_state_installed)} · ${size(container.experimentalEmbeddingStore.installedSize(ExperimentalEmbeddingModels.E5_BASE))}\n$loaded"
+        }
+        is ExperimentalDownloadState.Resolving -> getString(R.string.model_state_resolving, ExperimentalEmbeddingModels.E5_BASE.repoId)
+        is ExperimentalDownloadState.Running ->
+            getString(
+                R.string.models_embedding_downloading,
+                size(state.progress.bytesDownloaded),
+                if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?",
+            )
+        is ExperimentalDownloadState.Failed -> getString(R.string.model_state_error, state.message.lineSequence().first())
+        ExperimentalDownloadState.Idle -> getString(R.string.models_embedding_not_downloaded)
+    }
+
+    private fun onEmbeddingPrimary(spec: EmbeddingModelSpec) {
+        when (container.experimentalEmbeddingDownloads.stateOf(spec)) {
+            is ExperimentalDownloadState.Running, ExperimentalDownloadState.Resolving -> container.experimentalEmbeddingDownloads.cancel(spec)
+            is ExperimentalDownloadState.Installed -> {}
+            else -> container.experimentalEmbeddingDownloads.start(spec)
+        }
+    }
+
+    private fun onEmbeddingSecondary(spec: EmbeddingModelSpec) {
+        when (val state = container.experimentalEmbeddingDownloads.stateOf(spec)) {
+            is ExperimentalDownloadState.Failed -> showDetails(spec.title, state.message)
+            else -> {
+                container.experimentalEmbeddingDownloads.delete(spec)
+                render()
+            }
+        }
     }
 
     /**
@@ -571,8 +674,14 @@ class ModelsActivity : AppCompatActivity() {
         }
     }
 
-    private companion object {
-        const val TYPE_HEADER = 0
-        const val TYPE_MODEL = 1
+    companion object {
+        private const val TYPE_HEADER = 0
+        private const val TYPE_MODEL = 1
+
+        /** [Category.name], read by [onCreate] to open on a specific tab — see [intent]. */
+        const val EXTRA_CATEGORY = "category"
+
+        fun intent(context: android.content.Context, category: Category): android.content.Intent =
+            android.content.Intent(context, ModelsActivity::class.java).putExtra(EXTRA_CATEGORY, category.name)
     }
 }

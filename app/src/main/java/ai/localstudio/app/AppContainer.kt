@@ -94,15 +94,17 @@ class AppContainer private constructor(private val context: Context) {
     /**
      * Fronts [memory]'s semantic half. Constructing this is cheap and
      * synchronous (no native call) — the actual GGUF load that fills it in
-     * happens off the main thread, in [init]'s own background task, and only
-     * once [ExperimentalEmbeddingModels.E5_BASE] has actually been
-     * downloaded and manually verified via the "Experimental" screen (see
-     * [ai.localstudio.app.ExperimentalEmbeddingsActivity]). Every call made
-     * to this before that finishes degrades to the same lexical-only
-     * behavior [memory] already had with no embedder configured at all —
-     * see [LazyMemoryEmbedder]'s own doc comment.
+     * happens off the main thread, in [init]'s own background task, which
+     * downloads [ExperimentalEmbeddingModels.E5_BASE] automatically the
+     * first time memory is enabled (see that task's own doc comment).
+     * Every call made to this before that finishes degrades to the same
+     * lexical-only behavior [memory] already had with no embedder
+     * configured at all — see [LazyMemoryEmbedder]'s own doc comment.
      */
-    private val semanticMemoryEmbedder = LazyMemoryEmbedder()
+    private val semanticMemoryEmbedder = LazyMemoryEmbedder(isEnabled = { settings.semanticMemoryEnabled })
+
+    /** Whether semantic retrieval is actually usable right now — the Memory screen's own status line, and nothing else's, needs this. */
+    val semanticEmbedderReady: Boolean get() = semanticMemoryEmbedder.isReady
 
     /**
      * [FileSemanticIndex] is a small binary sidecar file, cheap to construct
@@ -148,6 +150,22 @@ class AppContainer private constructor(private val context: Context) {
     )
 
     /**
+     * (embedded, total) for the Memory screen's own "Index: N / M embedded"
+     * line — total is every item [memory] holds that could ever be
+     * embedded, embedded is that count minus whatever [semanticMemoryIndex]
+     * itself still reports missing a vector for. Reads both fresh on every
+     * call rather than caching: this backs a status line someone opens
+     * Memory to check mid-backfill, not a value worth the complexity of
+     * keeping incrementally in sync with [semanticMemoryEmbedder]'s own
+     * background progress.
+     */
+    suspend fun semanticIndexStatus(): Pair<Int, Int> {
+        val all = memory.all()
+        val missing = semanticMemoryIndex.missing(all.map { it.id })
+        return (all.size - missing.size) to all.size
+    }
+
+    /**
      * Stage 3's measurement harness (see :commercial-memory), wired to the
      * real app for the first time: every turn's retrieve→rank→budget→select
      * pass is logged as one JSON line here, in the same directory chat
@@ -161,7 +179,7 @@ class AppContainer private constructor(private val context: Context) {
      * wireless debugging is exactly the kind of thing that reliably works
      * right up until the one time you need it. [appLog] is already the
      * existing "get a report off this phone with no cable and no dev tools"
-     * path (Settings → Журнал ошибок → Скопировать), so this rides that
+     * path (chat menu → Журнал ошибок → Скопировать), so this rides that
      * same, already-working mechanism instead of asking for a second one.
      */
     private val memoryExperimentLogger = object : ExperimentLogger {
@@ -403,9 +421,21 @@ class AppContainer private constructor(private val context: Context) {
             // calling the embedder) — this just keeps semantic coverage from
             // permanently falling behind, without needing every write path
             // in the app to remember to call it itself.
+            //
+            // Skipped while settings.semanticMemoryEnabled is off, not just
+            // "allowed to run but pointless": semanticMemoryEmbedder's own
+            // embedForStorage() degrades to an empty list while disabled
+            // (see LazyMemoryEmbedder's isEnabled), and SemanticRetrieval.
+            // embedPending() indexes that list back onto its input by
+            // position — an empty list against a non-empty backlog is an
+            // out-of-bounds read there, not a graceful no-op. Checking here
+            // is what keeps that contract intact without weakening it on
+            // the library side.
             while (true) {
-                runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
-                    .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }
+                if (settings.semanticMemoryEnabled) {
+                    runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
+                        .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }
+                }
                 delay(SEMANTIC_BACKFILL_INTERVAL_MS)
             }
         }

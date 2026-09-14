@@ -13,6 +13,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/settings_language"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="16sp"
             android:textStyle="bold" />
 
         <Spinner
@@ -36,6 +38,15 @@
             android:paddingBottom="4dp"
             android:textSize="12sp"
             android:textStyle="italic" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
+            android:text="@string/settings_section_providers"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
         <CheckBox
             android:id="@+id/compareModeCheck"
@@ -146,8 +157,10 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="16dp"
+            android:paddingTop="24dp"
             android:text="@string/settings_chat_model"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="16sp"
             android:textStyle="bold" />
 
         <AutoCompleteTextView
@@ -165,6 +178,15 @@
             android:paddingTop="4dp"
             android:text="@string/settings_chat_model_hint"
             android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
+            android:text="@string/settings_section_generation"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
         <TextView
             android:layout_width="match_parent"
@@ -204,6 +226,15 @@
             android:paddingTop="4dp"
             android:text="@string/settings_generation_hint"
             android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
+            android:text="@string/settings_section_device"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
         <TextView
             android:layout_width="match_parent"
@@ -255,6 +286,37 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="@string/settings_whisper_manage" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
+            android:text="@string/settings_section_advanced"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:text="@string/models_experimental_embeddings_title"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="2dp"
+            android:text="@string/models_experimental_embeddings_subtitle"
+            android:textSize="12sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/experimentalEmbeddingsButton"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/models_experimental_embeddings_open" />
 
     </LinearLayout>
 

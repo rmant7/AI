@@ -1,15 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/logHeader"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurfaceVariant"
+        android:fontFamily="monospace"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="8dp"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textIsSelectable="true"
+        android:textSize="11sp"
+        tools:text="Version: 1.2.3 (code 45) · Commit: a1b2c3d · CI build: 166" />
 
     <TextView
         android:id="@+id/logHint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="?attr/colorSurfaceVariant"
-        android:padding="16dp"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="16dp"
         android:text="@string/log_hint"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="12sp" />

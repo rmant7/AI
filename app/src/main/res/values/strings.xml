@@ -26,11 +26,12 @@
     <string name="menu_clear">New chat</string>
     <string name="menu_history">Chat history</string>
     <string name="menu_share_chat">Share chat</string>
+    <string name="menu_log">Error log</string>
     <string name="message_copy">Copy message</string>
     <string name="message_copied">Copied</string>
     <string name="message_attached_image">Attached image</string>
     <string name="chat_share_empty">Chat is empty — nothing to share</string>
-    <string name="chat_interrupted">No reply was received — generation didn\'t finish (the app crashed or was closed before answering). Details may be in Settings → Error log. Try sending the message again.</string>
+    <string name="chat_interrupted">No reply was received — generation didn\'t finish (the app crashed or was closed before answering). Details may be in the error log (chat menu → Error log). Try sending the message again.</string>
     <string name="history_empty">No saved chats yet</string>
     <string name="history_delete">Delete</string>
     <string name="history_rename">Rename</string>
@@ -40,6 +41,19 @@
     <string name="history_subtitle">%1$d msg. · %2$s</string>
     <string name="memory_on">Memory: on</string>
     <string name="memory_off">Memory: off</string>
+    <string name="memory_title">Memory</string>
+    <string name="memory_long_term">Long-term memory</string>
+    <string name="memory_long_term_hint">Remembers facts and decisions across conversations. Turning this off stops both extracting new memories and searching existing ones.</string>
+    <string name="memory_semantic">Semantic retrieval</string>
+    <string name="memory_semantic_hint">Finds relevant memories by meaning, not just shared words — helped by an on-device embedding model. Turning this off falls back to lexical (word-overlap) search only; long-term memory itself stays on.</string>
+    <string name="memory_model_header">Embedding model</string>
+    <string name="memory_model_not_downloaded">%1$s isn\'t downloaded yet.</string>
+    <string name="memory_model_disabled">%1$s is downloaded, but semantic retrieval is off above.</string>
+    <string name="memory_model_ready">%1$s is downloaded and loaded — semantic retrieval is active.</string>
+    <string name="memory_model_loading">%1$s is downloaded but not loaded yet — this happens automatically shortly after memory is enabled.</string>
+    <string name="memory_manage_model">Manage embedding model</string>
+    <string name="memory_index_header">Index</string>
+    <string name="memory_index_status">%1$d / %2$d memories embedded</string>
 
     <string name="chat_attach">File</string>
     <string name="chat_mic">Voice</string>
@@ -67,6 +81,10 @@
 
     <string name="settings_whisper_model">Speech recognition model (offline)</string>
     <string name="settings_whisper_manage">Open Models → Voice</string>
+    <string name="settings_section_providers">Providers</string>
+    <string name="settings_section_generation">Generation</string>
+    <string name="settings_section_device">Device</string>
+    <string name="settings_section_advanced">Advanced</string>
     <string name="settings_whisper_installed">Installed: %1$s</string>
     <string name="settings_whisper_none">Not installed</string>
     <string name="settings_whisper_error">Error: %1$s</string>
@@ -96,6 +114,10 @@
     <string name="log_copy">Copy</string>
     <string name="log_clear">Clear</string>
     <string name="log_clear_confirm">Delete the entire error log? This can\'t be undone.</string>
+    <string name="log_build_line">Version: %1$s (code %2$d) · Commit: %3$s · CI build: %4$s</string>
+    <string name="log_device_line">%1$s · Android %2$s (API %3$d) · %4$s</string>
+    <string name="log_cpu_features">llama.cpp CPU features: %1$s</string>
+    <string name="log_cpu_unavailable">llama.cpp isn\'t available on this device (unsupported CPU architecture).</string>
     <string name="api_keys_summary_none">No keys in the pool — using the field above</string>
     <string name="api_keys_summary_ready">Keys in pool: %1$d</string>
     <string name="api_keys_summary_partial">Keys in pool: %1$d, paused: %2$d</string>
@@ -106,7 +128,14 @@
     <string name="models_title">Models</string>
     <string name="models_category_text">Chat</string>
     <string name="models_category_voice">Voice</string>
+    <string name="models_category_embedding">Embedding</string>
+    <string name="embed_status_loaded">Loaded ✓</string>
+    <string name="embed_status_not_loaded">Not loaded (enable Semantic retrieval in Memory)</string>
     <string name="models_local_header">Local models — work without a network</string>
+    <string name="models_embedding_header">Semantic memory embedding model</string>
+    <string name="models_embedding_subtitle">%1$d dimensions · used for semantic memory retrieval, never for chat</string>
+    <string name="models_embedding_not_downloaded">Not downloaded</string>
+    <string name="models_embedding_downloading">%1$s of %2$s</string>
     <string name="models_catalog_header">Catalog (for reference)</string>
     <string name="model_download">Download</string>
     <string name="model_delete">Delete</string>
@@ -125,7 +154,7 @@
     <string name="models_orphans_subtitle">Found %1$d files, ~%2$s total. The current app version doesn\'t use them — likely left over from another version or development branch.</string>
     <string name="models_orphans_delete">Delete (%1$s)</string>
     <string name="models_experimental_embeddings_title">Experimental: embedding models</string>
-    <string name="models_experimental_embeddings_subtitle">Manual download and sanity check for memory-search embedding models. Base loads automatically for real memory search; this screen is for verifying it (or a future candidate) by hand.</string>
+    <string name="models_experimental_embeddings_subtitle">Manual download and sanity check for candidate memory-search embedding models — not needed for ordinary use. Base already loads automatically for real memory search (see Memory); this is for verifying it, or a future candidate, by hand.</string>
     <string name="models_experimental_embeddings_open">Open</string>
     <string name="embed_screen_title">Experimental embedding models</string>
     <string name="embed_screen_explainer">Downloads and checks a candidate embedding model for semantic memory search. These models are never used for chat and are not added to the model catalog automatically — download one, tap Test, and check the numbers below before deciding whether it\'s any good.</string>
@@ -150,10 +179,6 @@
     <string name="model_ram_warning">This model exceeds the memory budget for your device. The system will most likely force-close the app while generating a response — with no error message, it will just close. Continue anyway?</string>
     <string name="model_ram_warning_continue">Use it anyway</string>
     <string name="dialog_ok">Got it</string>
-    <string name="settings_about">About this build</string>
-    <string name="settings_about_body">Version: %1$s (code %2$d)\nCommit: %3$s\nCI build: %4$s\n\nCompare the commit with what was posted in chat to confirm it\'s the right build.</string>
-    <string name="settings_about_cpu">llama.cpp checked on this device:\n%1$s</string>
-    <string name="settings_about_cpu_unavailable">llama.cpp isn\'t available on this device (unsupported CPU architecture).</string>
     <string name="dialog_cancel">Cancel</string>
     <string name="settings_ram">Memory budget per model, % of total RAM</string>
     <string name="settings_ram_hint">60</string>

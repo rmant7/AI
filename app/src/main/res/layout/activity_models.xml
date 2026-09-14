@@ -15,17 +15,17 @@
         android:textSize="12sp" />
 
     <!-- Task-type switcher, the way Edge Studio groups its catalog: one
-         capability per tab. Only Text and Voice exist today; Image and
-         Agents are the reason this is a toggle group and not a hardcoded
-         pair of buttons — a third/fourth entry is one more button, not a
-         restructure. -->
+         capability per tab. Image and Agents are the reason this is a
+         toggle group and not a hardcoded pair of buttons — a third/fourth
+         entry is one more button, not a restructure — [Category.EMBEDDING]
+         is the first of those. -->
     <!-- Voice category hidden alongside the mic button in activity_chat.xml
          — see that file's comment. The listener, the VOICE category enum,
-         and voiceRows() are all left wired in ModelsActivity.kt; only the
-         toggle that makes the category reachable is hidden, same as before. -->
+         and voiceRows() are all left wired in ModelsActivity.kt; only this
+         one button is hidden, same as before. The group itself is visible
+         again now that Embedding gives it a second real tab. -->
     <com.google.android.material.button.MaterialButtonToggleGroup
         android:id="@+id/categoryToggle"
-        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="12dp"
@@ -43,11 +43,20 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/categoryVoice"
+            android:visibility="gone"
             style="?attr/materialButtonOutlinedStyle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/models_category_voice" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/categoryEmbedding"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/models_category_embedding" />
 
     </com.google.android.material.button.MaterialButtonToggleGroup>
 
