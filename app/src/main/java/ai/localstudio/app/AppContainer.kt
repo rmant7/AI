@@ -41,6 +41,10 @@ import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
 import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
+import ai.localstudio.app.benchmark.BenchmarkOrchestrator
+import ai.localstudio.app.benchmark.BenchmarkReportStore
+import ai.localstudio.core.benchmark.BenchmarkRunner
+import ai.localstudio.core.benchmark.TranscriptionEngine
 import ai.localstudio.app.keys.BundledApiKeyStore
 import ai.localstudio.app.keys.BundledApiKeys
 import ai.localstudio.app.keys.PrefsApiKeyStore
@@ -79,6 +83,7 @@ import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.FileTranscriptionRunner
 import ai.localstudio.app.whisper.FileTranscriptionService
 import ai.localstudio.app.whisper.WhisperEngine
+import ai.localstudio.app.whisper.WhisperCppTranscriptionEngine
 import ai.localstudio.app.whisper.WhisperFileTranscriber
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
@@ -851,6 +856,44 @@ class AppContainer private constructor(private val context: Context) {
         transcriber = whisperFileTranscriber,
         context = context,
         onTranscriptionStarted = { FileTranscriptionService.ensureStarted(context) },
+    )
+
+    /**
+     * STT Benchmark (docs/16-stt-benchmark.md): every backend currently
+     * available to compare, resolved live rather than cached — a model can
+     * be downloaded or deleted between one read and the next, same
+     * reasoning [installedSeeds] already follows. Empty (never a crash)
+     * when no whisper model is installed; [BenchmarkActivity] surfaces that
+     * as [ai.localstudio.app.R.string.benchmark_no_engines] before a run is
+     * even started.
+     *
+     * A dedicated [WhisperCppTranscriptionEngine] instance, not
+     * [whisperFileTranscriber]/`whisperFallbackModel`/etc — see that
+     * class's own doc comment for why sharing a resident handle would
+     * corrupt the one number a benchmark exists to measure honestly
+     * (model_load_time).
+     */
+    val transcriptionEngines: List<TranscriptionEngine>
+        get() = listOfNotNull(
+            whisperStore.installedSeed(settings.whisperModelId)?.let { seed ->
+                WhisperCppTranscriptionEngine(whisperCppRuntime as WhisperCppRuntime, whisperStore, seed)
+            },
+        )
+
+    private val benchmarkReportStore = BenchmarkReportStore(context)
+
+    /**
+     * Owns the STT Benchmark run for the whole app, not for
+     * [BenchmarkActivity] — same reasoning [fileTranscriptionRunner]
+     * already follows: a run over hundreds of files across several engines
+     * can run far longer than the screen watching it is guaranteed to stay
+     * alive for.
+     */
+    val benchmarkOrchestrator = BenchmarkOrchestrator(
+        runner = BenchmarkRunner(),
+        reportStore = benchmarkReportStore,
+        engineProvider = { transcriptionEngines },
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
 
     /**

@@ -28,6 +28,19 @@
     <string name="menu_share_chat">Share chat</string>
     <string name="menu_log">Error log</string>
     <string name="menu_transcribe">Transcribe files</string>
+    <string name="menu_benchmark">STT Benchmark</string>
+
+    <string name="benchmark_hint">Picks a folder of audio files and runs every registered speech-to-text backend against every file, so their speed and output can be compared on identical input. See docs/16-stt-benchmark.md.</string>
+    <string name="benchmark_pick_folder">Pick folder</string>
+    <string name="benchmark_scanning">Scanning folder…</string>
+    <string name="benchmark_no_files">No supported audio files found in that folder.</string>
+    <string name="benchmark_files_found">%1$d files found · %2$s total audio · %3$s on disk</string>
+    <string name="benchmark_start">Run benchmark</string>
+    <string name="benchmark_cancel">Stop</string>
+    <string name="benchmark_running">Running %1$d / %2$d…</string>
+    <string name="benchmark_done">Done — saved as %1$s</string>
+    <string name="benchmark_failed">Benchmark failed: %1$s</string>
+    <string name="benchmark_no_engines">No transcription engines are available to benchmark.</string>
     <string name="message_copy">Copy message</string>
     <string name="message_copied">Copied</string>
     <string name="message_attached_image">Attached image</string>

@@ -30,6 +30,19 @@
     <string name="menu_share_chat">Поделиться чатом</string>
     <string name="menu_log">Журнал ошибок</string>
     <string name="menu_transcribe">Транскрибация файлов</string>
+    <string name="menu_benchmark">STT Benchmark</string>
+
+    <string name="benchmark_hint">Выбираешь папку с аудиофайлами — приложение прогоняет каждый файл через все зарегистрированные STT-движки, чтобы сравнить скорость и результат на одинаковом входе. См. docs/16-stt-benchmark.md.</string>
+    <string name="benchmark_pick_folder">Выбрать папку</string>
+    <string name="benchmark_scanning">Сканирование папки…</string>
+    <string name="benchmark_no_files">В этой папке не найдено поддерживаемых аудиофайлов.</string>
+    <string name="benchmark_files_found">Найдено файлов: %1$d · всего аудио: %2$s · на диске: %3$s</string>
+    <string name="benchmark_start">Запустить benchmark</string>
+    <string name="benchmark_cancel">Остановить</string>
+    <string name="benchmark_running">Выполняется %1$d / %2$d…</string>
+    <string name="benchmark_done">Готово — сохранено как %1$s</string>
+    <string name="benchmark_failed">Benchmark не удался: %1$s</string>
+    <string name="benchmark_no_engines">Нет доступных движков распознавания для benchmark.</string>
     <string name="message_copy">Скопировать сообщение</string>
     <string name="message_copied">Скопировано</string>
     <string name="message_attached_image">Прикреплённое изображение</string>

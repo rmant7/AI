@@ -88,6 +88,12 @@
             android:label="@string/menu_transcribe"
             android:parentActivityName=".ChatActivity" />
 
+        <activity
+            android:name=".BenchmarkActivity"
+            android:exported="false"
+            android:label="@string/menu_benchmark"
+            android:parentActivityName=".ChatActivity" />
+
         <service
             android:name=".models.ModelDownloadService"
             android:exported="false"
