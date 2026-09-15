@@ -60,7 +60,22 @@ class WhisperRegisteredSpeechModel(
     override suspend fun handle(): SpeechModelHandle = loadMutex.withLock {
         val seed = seedProvider() ?: error("No Whisper model installed")
         loaded?.let { if (loadedSeedId == seed.id) return@withLock it }
+        // Nulled immediately, not just closed: this method reloads a
+        // *different* seed (the check above only short-circuits on a
+        // matching one), so the native runtime.load() call below suspends
+        // for however long the new file takes — real device report: 31s
+        // for a 1.1GB model under memory pressure. If release() (memory
+        // pressure, non-suspend, deliberately unguarded by loadMutex —
+        // see its own doc comment) fires during that window, loaded still
+        // pointed at the handle just closed above, so release()'s own
+        // loaded?.close() closed the *same already-closed native handle*
+        // a second time — a double-free, and a real native crash
+        // (PROCESS_EXIT: native crash) traced back to exactly this
+        // sequence. Nulling here first means a concurrent release() sees
+        // nothing to close.
         loaded?.close()
+        loaded = null
+        loadedSeedId = null
 
         val file = whisperStore.modelFile(seed)
         val descriptor = ModelDescriptor(

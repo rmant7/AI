@@ -1,8 +1,11 @@
 package ai.localstudio.app.whisper
 
 import ai.localstudio.core.model.TranscriptSegment
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -125,6 +128,29 @@ class FileTranscriptionRunner(
         val safeName = sourceName.substringBeforeLast('.').ifBlank { "transcript" }
         val out = File(dir, "$safeName.txt")
         out.writeText(text)
+        // Reported directly: transcribing a folder of hundreds of files and
+        // then having to Share each one individually out of the app's own
+        // private storage isn't usable — every result needs to land
+        // somewhere reachable on its own, with no per-file action needed.
+        // MediaStore.Downloads is the scoped-storage-era way to do that
+        // without WRITE_EXTERNAL_STORAGE or any permission prompt: the app
+        // can always create files there under its own name. A collision
+        // (re-transcribing the same source) gets auto-renamed by MediaStore
+        // itself, not overwritten.
+        copyToDownloads(out.name, text)
         return out.name
+    }
+
+    private fun copyToDownloads(name: String, text: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        runCatching {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/")
+            }
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
+            context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+        }
     }
 }

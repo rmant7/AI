@@ -32,7 +32,13 @@ class WhisperFileTranscriber(
     /** Loads [seed] if it isn't already the one resident — reused across every subsequent call, same file or not. */
     private suspend fun ensureLoaded(seed: WhisperModelSeed): WhisperCppSpeechModel {
         loaded?.let { if (loadedSeedId == seed.id) return it }
+        // Nulled immediately, not just closed — see WhisperRegisteredSpeechModel.handle()'s
+        // own doc comment for the double-free this prevents: release() (memory
+        // pressure, unguarded) racing the native load below would otherwise
+        // close the same already-closed handle a second time.
         loaded?.close()
+        loaded = null
+        loadedSeedId = null
 
         val file = whisperStore.modelFile(seed)
         val descriptor = ModelDescriptor(
