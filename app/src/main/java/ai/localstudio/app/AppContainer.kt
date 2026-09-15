@@ -580,8 +580,8 @@ class AppContainer private constructor(private val context: Context) {
      * severe). Two different engines tolerate different tiers of it, because
      * they mean different things while "actively in use":
      *
-     * - The router's three models ([whisperFallbackModel]/[voskRuSpecialist]/
-     *   [voskEnSpecialist]) skip eviction below TRIM_MEMORY_RUNNING_CRITICAL
+     * - The router's four models ([whisperFallbackModel]/[whisperLidModel]/
+     *   [voskRuSpecialist]/[voskEnSpecialist]) skip eviction below TRIM_MEMORY_RUNNING_CRITICAL
      *   while [routerSessionActive] — a foreground, interactive feature that
      *   already stops itself on backgrounding (TranscribeActivity.onPause),
      *   so it only needs protecting from the *routine* signal (RUNNING_LOW,
@@ -640,6 +640,10 @@ class AppContainer private constructor(private val context: Context) {
         if (whisperFallbackModel.isLoaded && !skipRouterModels) {
             whisperFallbackModel.release()
             appLog.record("WHISPER", "router fallback model unloaded under memory pressure ($reason)")
+        }
+        if (whisperLidModel.isLoaded && !skipRouterModels) {
+            whisperLidModel.release()
+            appLog.record("WHISPER", "router LID model unloaded under memory pressure ($reason)")
         }
         if (voskRuSpecialist.isLoaded && !skipRouterModels) {
             voskRuSpecialist.release()
@@ -878,14 +882,41 @@ class AppContainer private constructor(private val context: Context) {
     /**
      * Whisper registered as the router's multilingual fallback — see
      * [WhisperRegisteredSpeechModel]'s own doc comment. Held separately
-     * (not just inside [speechModelRegistry]) so [speechLanguageIdentifier]
-     * below can reuse the exact same loaded handle rather than triggering
-     * a second, independent Whisper load.
+     * (not just inside [speechModelRegistry]) so callers with a loaded
+     * handle already in hand (there were none left once
+     * [speechLanguageIdentifier] stopped being one of them — see
+     * [whisperLidModel]'s own doc comment for why) can reuse it.
      */
     private val whisperFallbackModel = WhisperRegisteredSpeechModel(
         runtime = whisperCppRuntime as WhisperCppRuntime,
         whisperStore = whisperStore,
         seedProvider = { whisperStore.installedSeed(settings.whisperModelId) },
+    )
+
+    /**
+     * A dedicated, always-tiny model for the router's own language
+     * identification — deliberately NOT [whisperFallbackModel]/
+     * `settings.whisperModelId` (the user's actual transcription-quality
+     * pick). LID runs a full whisper pass every few seconds regardless of
+     * which language is active, and doing that with whatever heavy model
+     * the user picked for real transcription (large-turbo: 574MB, several
+     * seconds a pass) competed for the same global native mutex (see
+     * [ai.localstudio.whisper.WhisperBridge.nativeOpMutex]'s own doc
+     * comment) with both the router's own ASR and any concurrent file
+     * transcription. A real device report showed exactly this: a
+     * large-turbo file transcription "stuck" for minutes while the
+     * router's own LID, hammering that same heavy model every few
+     * seconds, starved everything else waiting on that one lock.
+     * [WhisperModels.TINY_ID] is this app's own auto-downloaded
+     * first-launch default — normally installed with no extra download UI
+     * needed, and cheap enough that a full pass costs a small fraction of
+     * what a heavier model would.
+     */
+    private val whisperLidModel = WhisperRegisteredSpeechModel(
+        runtime = whisperCppRuntime as WhisperCppRuntime,
+        whisperStore = whisperStore,
+        seedProvider = { whisperStore.installedSeed(WhisperModels.TINY_ID) },
+        id = "whisper-lid",
     )
 
     private val voskRuSpecialist = VoskRegisteredSpeechModel(context, VoskModels.byId("vosk-small-ru")!!, setOf(Language.RU))
@@ -906,7 +937,7 @@ class AppContainer private constructor(private val context: Context) {
         register(whisperFallbackModel)
     }
 
-    private val speechLanguageIdentifier = WhisperLanguageIdentifier { whisperFallbackModel.loadedWhisperModel() }
+    private val speechLanguageIdentifier = WhisperLanguageIdentifier { whisperLidModel.loadedWhisperModel() }
 
     /**
      * Shared router instance for the experimental routing demo (see
