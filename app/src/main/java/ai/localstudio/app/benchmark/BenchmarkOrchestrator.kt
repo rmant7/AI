@@ -34,8 +34,10 @@ class BenchmarkOrchestrator(
     private val reportStore: BenchmarkReportStore,
     private val engineProvider: () -> List<TranscriptionEngine>,
     private val scope: CoroutineScope,
-    /** Real device report: a run sat at "0 / 35" for minutes with nothing in the app's own log either — every status line also lands here under the "BENCHMARK" tag, so a run stuck on a slow load/file is diagnosable from Журнал ошибок without needing the screen open. */
+    /** Real device report: a run stuck on "0 / 35" for minutes with nothing in the app's own log either — every status line also lands here under the "BENCHMARK" tag, so a run stuck on a slow load/file is diagnosable from Журнал ошибок without needing the screen open. */
     private val appLog: AppLog,
+    /** Starts [ai.localstudio.app.benchmark.BenchmarkService] — a run over several GB-scale models can take many minutes, and without a foreground service the OS kills the whole process the moment the screen locks, same gap [ai.localstudio.app.whisper.FileTranscriptionRunner] already had fixed for it. A real device report: a run on the biggest installed model just vanished, mid-run, after a few minutes with the screen off. */
+    private val onBenchmarkStarted: () -> Unit = {},
 ) {
     private val _state = MutableStateFlow<BenchmarkUiState>(BenchmarkUiState.Idle)
     val state: StateFlow<BenchmarkUiState> = _state
@@ -44,6 +46,7 @@ class BenchmarkOrchestrator(
 
     fun start(files: List<BenchmarkAudioFile>) {
         if (job?.isActive == true || files.isEmpty()) return
+        onBenchmarkStarted()
         val engines = engineProvider()
         val total = files.size * engines.size
         _state.value = BenchmarkUiState.Running(completed = 0, total = total, status = "Starting…")

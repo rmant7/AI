@@ -43,6 +43,7 @@ import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.benchmark.BenchmarkOrchestrator
 import ai.localstudio.app.benchmark.BenchmarkReportStore
+import ai.localstudio.app.benchmark.BenchmarkService
 import ai.localstudio.core.benchmark.BenchmarkRunner
 import ai.localstudio.core.benchmark.TranscriptionEngine
 import ai.localstudio.app.keys.BundledApiKeyStore
@@ -909,6 +910,7 @@ class AppContainer private constructor(private val context: Context) {
         engineProvider = { transcriptionEngines },
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         appLog = appLog,
+        onBenchmarkStarted = { BenchmarkService.ensureStarted(context) },
     )
 
     /**

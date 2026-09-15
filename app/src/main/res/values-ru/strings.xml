@@ -320,6 +320,9 @@
     <string name="transcribe_notification_channel">Транскрипция файлов</string>
     <string name="transcribe_notification_title">Транскрипция</string>
     <string name="transcribe_notification_running">Транскрипция выполняется…</string>
+    <string name="benchmark_notification_channel">STT Benchmark</string>
+    <string name="benchmark_notification_title">Бенчмарк выполняется</string>
+    <string name="benchmark_notification_running">Сравнение STT-движков…</string>
     <string name="download_notification_whisper_progress">Whisper: %1$d%%</string>
 
     <string name="error_unsupported_file_type">Поддерживаются только .txt и .pdf</string>

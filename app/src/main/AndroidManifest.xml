@@ -104,6 +104,11 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".benchmark.BenchmarkService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Exposes only files/transcripts/ (see xml/transcript_file_paths.xml)
              as content:// URIs — TranscribeActivity's saved .txt transcripts
              live under this app's own private filesDir, unreachable by any
