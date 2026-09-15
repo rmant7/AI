@@ -895,7 +895,7 @@ class AppContainer private constructor(private val context: Context) {
             }
         }
 
-    private val benchmarkReportStore = BenchmarkReportStore(context)
+    private val benchmarkReportStore = BenchmarkReportStore(context, appLog)
 
     /**
      * Owns the STT Benchmark run for the whole app, not for

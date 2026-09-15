@@ -1,10 +1,12 @@
 package ai.localstudio.app.benchmark
 
+import ai.localstudio.app.log.AppLog
 import ai.localstudio.core.benchmark.BenchmarkDeviceInfo
 import ai.localstudio.core.benchmark.BenchmarkReport
 import ai.localstudio.core.benchmark.BenchmarkRunMetrics
 import ai.localstudio.core.benchmark.BenchmarkRunOutput
 import ai.localstudio.core.benchmark.BenchmarkStatus
+import ai.localstudio.core.util.describeForUser
 import android.app.ActivityManager
 import android.content.ContentValues
 import android.content.Context
@@ -33,7 +35,7 @@ import java.util.Locale
  *    produced against what Large produced for the same recording doesn't
  *    require digging through the combined JSON at all.
  */
-class BenchmarkReportStore(private val context: Context) {
+class BenchmarkReportStore(private val context: Context, private val appLog: AppLog) {
 
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
@@ -59,21 +61,31 @@ class BenchmarkReportStore(private val context: Context) {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(report.startedAtEpochMs))
         val name = "benchmark-$stamp.json"
         File(dir, name).writeText(text)
+        appLog.record("BENCHMARK", "saved internally as $name")
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            appLog.record("BENCHMARK", "Downloads copy skipped: API ${Build.VERSION.SDK_INT} < 29")
+            return name
+        }
         copyReportToDownloads(name, text)
-        copyPerModelTranscriptsToDownloads(report)
+        val (written, total) = copyPerModelTranscriptsToDownloads(report)
+        appLog.record("BENCHMARK", "Downloads: wrote $written/$total per-model transcript file(s) under Download/Transcripts/benchmark/")
         return name
     }
 
     private fun copyReportToDownloads(name: String, text: String) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         runCatching {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                 put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/benchmark/")
             }
-            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("contentResolver.insert returned null")
             context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                ?: error("openOutputStream returned null for $uri")
+        }.onFailure { e ->
+            appLog.record("BENCHMARK", "failed to copy $name to Download/Transcripts/benchmark/: ${e.describeForUser()}")
         }
     }
 
@@ -84,24 +96,40 @@ class BenchmarkReportStore(private val context: Context) {
      * reads naturally when each model's whole batch of output sits in its
      * own folder. Best-effort per file: one write failing (a name MediaStore
      * rejects, a full disk) must not lose every other file's already-written
-     * transcript, so each one is its own `runCatching`.
+     * transcript, so each one is its own `runCatching` — but every failure
+     * is still logged individually (a real device report showed why: a run
+     * that reported "Done" left no folder on disk at all, and nothing
+     * anywhere said why). Returns (written, total) for [save]'s own summary
+     * line.
      */
-    private fun copyPerModelTranscriptsToDownloads(report: BenchmarkReport) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+    private fun copyPerModelTranscriptsToDownloads(report: BenchmarkReport): Pair<Int, Int> {
+        var written = 0
+        var total = 0
         for (fileResult in report.files) {
             val baseName = fileResult.file.fileName.substringBeforeLast('.', fileResult.file.fileName)
             for (metrics in fileResult.results) {
+                total++
                 runCatching {
                     val values = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.txt")
                         put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
                         put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/benchmark/${metrics.modelId}/")
                     }
-                    val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return@runCatching
+                    val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        ?: error("contentResolver.insert returned null")
                     context.contentResolver.openOutputStream(uri)?.use { it.write(transcriptFileText(fileResult.file.fileName, metrics).toByteArray()) }
+                        ?: error("openOutputStream returned null for $uri")
+                }.onSuccess {
+                    written++
+                }.onFailure { e ->
+                    appLog.record(
+                        "BENCHMARK",
+                        "failed to write ${metrics.modelId}/$baseName.txt: ${e.describeForUser()}",
+                    )
                 }
             }
         }
+        return written to total
     }
 
     private fun transcriptFileText(fileName: String, metrics: BenchmarkRunMetrics): String {
