@@ -366,14 +366,27 @@ class ModelsActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Same three-state distinction as [MemoryActivity.renderModelStatus] —
+     * installed-but-not-ready means something different depending on *why*:
+     * off elsewhere in Settings vs. merely unloaded under memory pressure
+     * and about to reload on its own. This used to always say "enable
+     * Semantic retrieval in Memory" whenever [AppContainer.semanticEmbedderReady]
+     * was false, which was actively wrong the moment that toggle was
+     * already on and the model was just between a pressure-unload and its
+     * automatic reload — exactly what a real screenshot showed: this
+     * screen telling the user to enable a setting that Memory's own screen,
+     * at the same moment, showed already enabled.
+     */
     private fun embeddingStatus(state: ExperimentalDownloadState): String = when (state) {
         is ExperimentalDownloadState.Installed -> {
-            val loaded = if (container.semanticEmbedderReady) {
-                getString(R.string.embed_status_loaded)
-            } else {
-                getString(R.string.embed_status_not_loaded)
+            val statusLine = when {
+                !container.settings.memoryEnabled -> getString(R.string.embed_status_memory_off)
+                !container.settings.semanticMemoryEnabled -> getString(R.string.embed_status_semantic_off)
+                container.semanticEmbedderReady -> getString(R.string.embed_status_loaded)
+                else -> getString(R.string.embed_status_unloaded)
             }
-            "${getString(R.string.model_state_installed)} · ${size(container.experimentalEmbeddingStore.installedSize(ExperimentalEmbeddingModels.E5_BASE))}\n$loaded"
+            "${getString(R.string.model_state_installed)} · ${size(container.experimentalEmbeddingStore.installedSize(ExperimentalEmbeddingModels.E5_BASE))}\n$statusLine"
         }
         is ExperimentalDownloadState.Resolving -> getString(R.string.model_state_resolving, ExperimentalEmbeddingModels.E5_BASE.repoId)
         is ExperimentalDownloadState.Running ->

@@ -169,7 +169,9 @@
     <string name="models_category_voice">Голос</string>
     <string name="models_category_embedding">Эмбеддинги</string>
     <string name="embed_status_loaded">Загружена ✓</string>
-    <string name="embed_status_not_loaded">Не загружена (включите семантический поиск в Памяти)</string>
+    <string name="embed_status_memory_off">Не загружена — долговременная память выключена (настройки Памяти)</string>
+    <string name="embed_status_semantic_off">Не загружена — семантический поиск выключен (настройки Памяти)</string>
+    <string name="embed_status_unloaded">Временно выгружена — загрузится снова при необходимости</string>
     <string name="models_local_header">Локальные модели — работают без сети</string>
     <string name="models_embedding_header">Модель эмбеддингов для семантической памяти</string>
     <string name="models_embedding_subtitle">%1$d измерений · используется для семантического поиска по памяти, никогда для чата</string>

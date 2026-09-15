@@ -167,7 +167,9 @@
     <string name="models_category_voice">Voice</string>
     <string name="models_category_embedding">Embedding</string>
     <string name="embed_status_loaded">Loaded ✓</string>
-    <string name="embed_status_not_loaded">Not loaded (enable Semantic retrieval in Memory)</string>
+    <string name="embed_status_memory_off">Not loaded — Long-term memory is off (Memory settings)</string>
+    <string name="embed_status_semantic_off">Not loaded — Semantic retrieval is off (Memory settings)</string>
+    <string name="embed_status_unloaded">Temporarily unloaded — will reload when needed</string>
     <string name="models_local_header">Local models — work without a network</string>
     <string name="models_embedding_header">Semantic memory embedding model</string>
     <string name="models_embedding_subtitle">%1$d dimensions · used for semantic memory retrieval, never for chat</string>
