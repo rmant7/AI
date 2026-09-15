@@ -265,9 +265,80 @@ Bounded by kill criteria at each step, not committed as a roadmap item:
 4. Treat the whole thing as a bounded research spike with zero prior art
    to lean on, not a scheduled feature.
 
+## Hebrew quality: ivrit.ai, not a new backend
+
+Stock Whisper's Hebrew transcription quality is mediocre — this app's own
+router falls back to it for Hebrew (see docs/15-speech-routing.md) purely
+because no better specialist existed. ivrit.ai
+(https://huggingface.co/ivrit-ai) publishes continued-training fine-tunes
+of Whisper large-v3/large-v3-turbo on Hebrew (crowd-transcribe, crowd-
+recital, Knesset session data) as ready-made ggml `.bin` files — loadable
+by the exact same `WhisperCppTranscriptionEngine`/`WhisperCppRuntime` path
+every other Whisper size already uses, zero new native integration. Their
+own public leaderboard
+(https://huggingface.co/spaces/ivrit-ai/hebrew-transcription-leaderboard)
+independently shows it beating vanilla Whisper on Hebrew WER.
+
+Added to `WhisperModels.SEEDS` as `whisper-ivrit-large-turbo` (1.62GB) and
+`whisper-ivrit-large` (3.1GB) — both **fp16, not quantized** (ivrit.ai
+publishes no q5_0/q8_0 ggml variant as of this writing), so noticeably
+heavier than this catalog's own quantized stock `large`/`large-turbo`
+entries; `whisper-ivrit-large` in particular is the single largest model
+this catalog offers and a real memory-pressure risk on its own (see
+`transcriptionEngines`' tiny-first-then-largest ordering, which exists
+partly for exactly this kind of entry). URLs/sizes were cross-verified via
+ivrit.ai's own `asr-training` GitHub repo and matching SHA-256 hashes
+across several independent third-party consumers of the same file — not a
+live HTTP HEAD, since this project's own dev environment blocks
+`huggingface.co` at the network egress layer. Worth a one-time on-device
+sanity check (does it actually load) the first time either is installed.
+
+## sherpa-onnx: researched, not integrated this round
+
+Investigated as a second *backend* (unlike ivrit.ai, which is just another
+model on the existing whisper.cpp backend) after a suggestion to look at
+NVIDIA's multilingual models. Findings, for whoever picks this up next:
+
+- **Android integration is real**, comparable effort to this app's own
+  whisper.cpp JNI work — prebuilt per-release `.so` archives for
+  arm64-v8a/armeabi-v7a/x86/x86_64 plus a genuine Kotlin API source tree
+  you copy in (https://github.com/k2-fsa/sherpa-onnx). No official Maven/AAR
+  artifact from the project itself, though.
+- **NVIDIA models it exposes don't cover Hebrew.** Parakeet is English-only
+  (aside from `parakeet-tdt-0.6b-v3`'s 25 European languages, which does
+  include Russian); Canary covers EN/DE/FR/ES; none target Hebrew.
+- **Qwen3-ASR 0.6B** (937MB int8, not the ~1.95GB first assumed) supports
+  ~52 languages including Russian — but explicitly **not** Hebrew (a
+  Hebrew-support request is an open, unresolved upstream issue).
+- **Omnilingual ASR 300M** (Meta FAIR, ~348MB int8,
+  `csukuangfj/sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-2025-11-12`)
+  is the one model in this whole investigation that actually covers Hebrew
+  (`heb_Hebr`, confirmed present in the model's own primary language list)
+  — but it's CTC with no language model, so no punctuation or casing, and
+  no Hebrew-specific quality numbers exist anywhere yet. A real candidate,
+  not a strong one.
+- **QNN (Qualcomm) acceleration is inapplicable to this app's actual test
+  device.** The Pixel 10 Pro runs a Google Tensor G5, not a Qualcomm
+  Snapdragon — QNN model files are compiled per-Snapdragon-SoC and require
+  Qualcomm's Hexagon NPU, which Tensor chips don't have. This backend
+  cannot run on the device this project actually tests against, full stop.
+- **Memory model is a real concern, not just a size number.** Unlike
+  ggml/whisper.cpp (mmap-based, so the OS can reclaim pages under
+  pressure), sherpa-onnx's ONNX Runtime path does not mmap model weights
+  (an mmap request is an open, unimplemented upstream issue) and appears to
+  load substantially into heap — a 937MB model is a materially bigger OOM
+  risk than its on-disk size alone would suggest, on a device that has
+  already hit real memory pressure during this project's own testing.
+
+**Verdict**: worth a future round specifically for Omnilingual-300M (the
+only real Hebrew angle) or Parakeet/GigaAM for Russian — not for QNN speed
+or Qwen3-ASR's Hebrew coverage, both of which turned out not to apply here.
+Not started this round: ivrit.ai's zero-integration-cost fix was the
+obviously cheaper first move for the same Hebrew problem.
+
 ## What's deliberately not done this round
 
-- CTranslate2 or any other second backend — see above.
+- CTranslate2, sherpa-onnx, or any other second *backend* — see above.
 - Real-time microphone benchmarking — the spec explicitly asked for
   files-first; microphone mode reuses the same `TranscriptionEngine`
   abstraction later, per the architecture diagram above.

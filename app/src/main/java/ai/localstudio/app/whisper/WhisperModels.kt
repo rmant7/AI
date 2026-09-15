@@ -67,6 +67,33 @@ object WhisperModels {
             modelUrl = "$REPO/ggml-large-v3-q5_0.bin",
             approxSizeBytes = 1_181_000_000,
         ),
+        // ivrit.ai's own continued-training fine-tunes of large-v3/-turbo on
+        // Hebrew (crowd-transcribe/crowd-recital/Knesset data) — see
+        // docs/16-stt-benchmark.md's own note on why this exists: stock
+        // Whisper's Hebrew quality is mediocre, and ivrit.ai's own public
+        // leaderboard (huggingface.co/spaces/ivrit-ai/hebrew-transcription-leaderboard)
+        // independently shows it beating vanilla Whisper on Hebrew. Ships
+        // fp16, not quantized (ivrit.ai publishes no q5_0/q8_0 ggml variant
+        // as of this writing) — noticeably heavier than this catalog's own
+        // stock large entries above, which are quantized specifically to
+        // keep "large" installable at all (see this object's own doc
+        // comment). URLs/sizes here were cross-verified against ivrit.ai's
+        // own asr-training repo and several independent third-party
+        // consumers' matching SHA-256 hashes, not a live HTTP HEAD (this
+        // dev environment's network egress blocks huggingface.co outright)
+        // — verify once on-device if the file ever fails to load.
+        WhisperModelSeed(
+            id = "whisper-ivrit-large-turbo",
+            title = "ivrit.ai Whisper Large v3 Turbo (Hebrew)",
+            modelUrl = "https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ggml/resolve/main/ggml-model.bin",
+            approxSizeBytes = 1_624_555_275,
+        ),
+        WhisperModelSeed(
+            id = "whisper-ivrit-large",
+            title = "ivrit.ai Whisper Large v3 (Hebrew)",
+            modelUrl = "https://huggingface.co/ivrit-ai/whisper-large-v3-ggml/resolve/main/ggml-model.bin",
+            approxSizeBytes = 3_095_033_483,
+        ),
     )
 
     fun byId(id: String): WhisperModelSeed? = SEEDS.firstOrNull { it.id == id }
