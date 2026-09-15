@@ -1,6 +1,7 @@
 package ai.localstudio.core.benchmark
 
 import ai.localstudio.core.model.AudioRef
+import ai.localstudio.core.util.describeForUser
 
 /**
  * Runs every registered [TranscriptionEngine] against every selected file
@@ -77,7 +78,7 @@ class BenchmarkRunner(
                     warmInferenceMs = null,
                     warmUpFailed = true,
                     loadFailed = true,
-                    loadErrorMessage = e.message ?: e.toString(),
+                    loadErrorMessage = e.describeForUser(),
                 )
                 files.forEach { file ->
                     perFileMetrics.getValue(file) += BenchmarkRunMetrics(
@@ -92,7 +93,7 @@ class BenchmarkRunner(
                         rtf = null,
                         memoryMb = null,
                         status = BenchmarkStatus.ERROR,
-                        errorMessage = "engine failed to load: ${e.message ?: e}",
+                        errorMessage = "engine failed to load: ${e.describeForUser()}",
                     )
                     completed++
                     onProgress(completed, total)
@@ -196,7 +197,7 @@ class BenchmarkRunner(
                 rtf = null,
                 memoryMb = memorySamplerMb?.invoke(),
                 status = BenchmarkStatus.ERROR,
-                errorMessage = e.message ?: e.toString(),
+                errorMessage = e.describeForUser(),
             )
         }
     }

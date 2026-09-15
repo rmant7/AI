@@ -8,6 +8,7 @@ import ai.localstudio.app.whisper.MicrophoneAudioSource
 import ai.localstudio.app.whisper.TranscriptionResult
 import ai.localstudio.app.whisper.TranscriptionStatus
 import ai.localstudio.core.speech.StreamingRoutingSession
+import ai.localstudio.core.util.describeForUser
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -376,7 +377,7 @@ class TranscribeActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 voskActive = false
                 renderVoskState()
-                showErrorDialog(getString(R.string.transcribe_mic_error, e.message ?: e.toString()))
+                showErrorDialog(getString(R.string.transcribe_mic_error, e.describeForUser()))
                 return@launch
             }
             // Every emission already carries the full session text so far —
@@ -448,7 +449,7 @@ class TranscribeActivity : AppCompatActivity() {
                 throw e
             } catch (e: Exception) {
                 session.cancel()
-                showErrorDialog(getString(R.string.transcribe_mic_error, e.message ?: e.toString()))
+                showErrorDialog(getString(R.string.transcribe_mic_error, e.describeForUser()))
             }
         }
 
@@ -553,7 +554,7 @@ class TranscribeActivity : AppCompatActivity() {
             mediaPlayer = player
         } catch (e: Exception) {
             player.release()
-            Toast.makeText(this, getString(R.string.transcribe_play_failed, e.message ?: e.toString()), Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.transcribe_play_failed, e.describeForUser()), Toast.LENGTH_SHORT).show()
             stopPlayback()
         }
     }

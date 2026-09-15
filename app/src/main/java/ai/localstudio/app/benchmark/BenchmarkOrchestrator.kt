@@ -4,6 +4,7 @@ import ai.localstudio.core.benchmark.BenchmarkAudioFile
 import ai.localstudio.core.benchmark.BenchmarkReport
 import ai.localstudio.core.benchmark.BenchmarkRunner
 import ai.localstudio.core.benchmark.TranscriptionEngine
+import ai.localstudio.core.util.describeForUser
 import android.os.Debug
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -58,7 +59,7 @@ class BenchmarkOrchestrator(
                 val savedAs = reportStore.save(report)
                 _state.value = BenchmarkUiState.Done(report, savedAs)
             } catch (e: Exception) {
-                _state.value = BenchmarkUiState.Failed(e.message ?: e.toString())
+                _state.value = BenchmarkUiState.Failed(e.describeForUser())
             }
         }
     }

@@ -1,6 +1,7 @@
 package ai.localstudio.app.whisper
 
 import ai.localstudio.core.model.TranscriptSegment
+import ai.localstudio.core.util.describeForUser
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -113,7 +114,7 @@ class FileTranscriptionRunner(
             updateResult(uri) { it.copy(status = TranscriptionStatus.CANCELLED, savedAs = savedName ?: it.savedAs) }
             throw e
         } catch (e: Exception) {
-            updateResult(uri) { it.copy(status = TranscriptionStatus.ERROR, error = e.message ?: e.toString()) }
+            updateResult(uri) { it.copy(status = TranscriptionStatus.ERROR, error = e.describeForUser()) }
         }
     }
 
