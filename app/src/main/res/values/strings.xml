@@ -108,6 +108,7 @@
     <string name="transcribe_mic_error">Mic session stopped: %1$s</string>
     <string name="transcribe_vosk_section_title">LIVE MIC — VOSK (SPIKE)</string>
     <string name="transcribe_vosk_no_model">No Vosk model installed — download one on the Models screen first.</string>
+    <string name="transcribe_router_section_title">LIVE MIC — LANGUAGE ROUTER (EXPERIMENTAL)</string>
     <string name="transcribe_error_dialog_title">Error</string>
 
     <string name="settings_whisper_model">Speech recognition model (offline)</string>

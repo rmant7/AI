@@ -156,6 +156,25 @@ internal class WhisperCppSpeechModel(
         onSegment: (TranscriptSegment) -> Unit,
     ): Transcript = transcribeInternal(audio, language, onSegment)
 
+    /**
+     * A single, non-streaming auto-language transcription pass over
+     * [samples], used by [ai.localstudio.app.whisper.WhisperLanguageIdentifier]
+     * as a cheap proxy for a dedicated LID model — see that class's own doc
+     * comment for why (classifying the *text* whisper.cpp's own "auto"
+     * language mode produces, rather than a real language-ID model's
+     * output). Not part of [SpeechModelHandle]: whisper.cpp-specific,
+     * called only by that identifier.
+     */
+    suspend fun detectLanguage(samples: FloatArray): String {
+        if (samples.isEmpty()) return ""
+        var text = ""
+        val sink = WhisperBridge.SegmentSink { segmentText, _, _ -> text = (text + " " + segmentText).trim() }
+        WhisperBridge.nativeOpMutex.withLock {
+            bridge.nativeTranscribe(handle, samples, threads, "auto", sink)
+        }
+        return text
+    }
+
     private suspend fun transcribeInternal(
         audio: AudioRef,
         language: String?,

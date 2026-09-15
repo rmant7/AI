@@ -231,4 +231,62 @@
         android:textSize="13sp"
         android:visibility="gone" />
 
+    <!-- docs/15-speech-routing.md: the experimental language-routed live
+         mic — dispatches per detected language to whichever registered
+         specialist (Vosk RU/EN) or the Whisper fallback the router
+         chooses, instead of driving one fixed engine directly like the
+         two sections above. Each line is tagged [lang][modelId] so a
+         routing decision is visible, not just its output. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOutlineVariant" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:text="@string/transcribe_router_section_title"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/routerToggleButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/transcribe_mic_start" />
+
+        <TextView
+            android:id="@+id/routerStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/routerTranscriptText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxHeight="160dp"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="10dp"
+        android:scrollbars="vertical"
+        android:textIsSelectable="true"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
 </LinearLayout>

@@ -110,6 +110,7 @@
     <string name="transcribe_mic_error">Сессия микрофона остановлена: %1$s</string>
     <string name="transcribe_vosk_section_title">ЖИВОЙ МИКРОФОН — VOSK (SPIKE)</string>
     <string name="transcribe_vosk_no_model">Модель Vosk не установлена — сначала скачайте её на экране «Модели».</string>
+    <string name="transcribe_router_section_title">ЖИВОЙ МИКРОФОН — ЯЗЫКОВОЙ РОУТЕР (ЭКСПЕРИМЕНТ)</string>
     <string name="transcribe_error_dialog_title">Ошибка</string>
 
     <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>

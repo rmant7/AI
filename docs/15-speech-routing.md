@@ -129,12 +129,38 @@ file-style caller, and routing correctness under unfamiliar model ids (the
 structural check that nothing is secretly keyed to "vosk"/"whisper" by
 name).
 
-## Not yet done
+## Real wiring (device-testable)
 
-Wiring real Vosk RU/EN and Whisper (as the fallback) behind
-`RegisteredSpeechModel`, a `LanguageIdentifier` backed by a real model, and
-any UI to exercise the router live — tracked as follow-up work, not part
-of this foundation commit. Also explicitly out of scope for now (per the
-original request): ML-based model selection, benchmark-driven routing,
-dynamic model downloading, model ensembles, external JSON configuration
-(the registry is in-process/in-memory only), and a benchmark-mode UI.
+- **`ai.localstudio.app.whisper.WhisperRegisteredSpeechModel`** — Whisper as
+  the fallback, reusing `WhisperCppRuntime`'s existing load path (same
+  reload-on-seed-change policy as `WhisperCppMicSession`).
+- **`ai.localstudio.app.vosk.VoskRegisteredSpeechModel`/`VoskSpeechModel`** —
+  a *new*, push-based `SpeechModelHandle`/`StreamingSpeechSession` over
+  `org.vosk.Model`/`Recognizer`, distinct from the pull-based
+  `VoskSpeechRecognizer` the standalone Vosk spike (docs/14) already uses:
+  the router drives audio in via `acceptAudio`, so the model side has to
+  accept pushed chunks, not pull from its own `AudioSource`. Uses the same
+  installed `vosk-small-ru`/`vosk-small-en` seeds as the spike.
+- **`ai.localstudio.app.whisper.WhisperLanguageIdentifier`** — the "initial
+  implementation may use Whisper itself" LID: a quick whisper.cpp
+  auto-language pass over the LID window, classified by which Unicode
+  script (Cyrillic/Hebrew/Latin) dominates the resulting text. A real
+  proxy, not a placeholder — but not a dedicated LID model's output
+  either, and not cheap (a full whisper pass per window, hence
+  `AppContainer`'s several-second `lidStrideMs`).
+- **`AppContainer.speechModelRegistry`/`speechRouter`** — wires
+  `vosk-small-ru` (RU), `vosk-small-en` (EN), Whisper (fallback) with
+  `RoutingPolicy(fallbackModelId = "whisper-fallback")`. Both Vosk
+  specialists and the Whisper fallback are released under memory pressure
+  the same way every other engine in this app already is.
+- **`TranscribeActivity`**'s "LIVE MIC — LANGUAGE ROUTER (EXPERIMENTAL)"
+  section — mutually exclusive with the other two mic sections (one
+  microphone), each line prefixed `[language][modelId]` so a routing
+  decision is visible next to its output, not just the clean text.
+
+## Still not done
+
+ML-based model selection, benchmark-driven routing, dynamic model
+downloading, model ensembles, external JSON configuration (the registry is
+in-process/in-memory only), and a benchmark-mode UI — all explicitly out
+of scope per the original request.

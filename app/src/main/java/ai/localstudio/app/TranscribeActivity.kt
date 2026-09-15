@@ -7,6 +7,7 @@ import ai.localstudio.app.whisper.MediaFileUtils
 import ai.localstudio.app.whisper.MicrophoneAudioSource
 import ai.localstudio.app.whisper.WhisperModelSeed
 import ai.localstudio.core.model.TranscriptSegment
+import ai.localstudio.core.speech.StreamingRoutingSession
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -75,6 +76,13 @@ class TranscribeActivity : AppCompatActivity() {
     /** Vosk ASR spike (docs/14-vosk-spike.md) — see the "LIVE MIC — VOSK" section in activity_transcribe.xml and VoskSpeechRecognizer's own doc comment. Independent of [micActive]: the two sections never run at once (each start stops the other), but are otherwise unrelated code paths. */
     private var voskActive = false
 
+    /** docs/15-speech-routing.md's experimental language-routed mic — see the "LIVE MIC — LANGUAGE ROUTER" section in activity_transcribe.xml. Also mutually exclusive with the other two mic sections (same reasoning: one physical microphone). */
+    private var routerActive = false
+    private var routerSession: StreamingRoutingSession? = null
+
+    /** Unlike WhisperCppMicSession/VoskSpeechRecognizer, the router session has no built-in mic-read loop of its own to cancel on stop — this Activity drives AudioSource.stream itself (see startRouter), so it must track and cancel that job itself too. */
+    private var routerMicJob: Job? = null
+
     /** Set by whichever of [onMicToggleClicked]/[onVoskToggleClicked] triggered the permission request, so [requestMicPermission]'s callback starts the right engine once granted. */
     private var pendingMicStart: (() -> Unit)? = null
 
@@ -121,6 +129,7 @@ class TranscribeActivity : AppCompatActivity() {
         // reach it at all.
         binding.micTranscriptText.movementMethod = ScrollingMovementMethod()
         binding.voskTranscriptText.movementMethod = ScrollingMovementMethod()
+        binding.routerTranscriptText.movementMethod = ScrollingMovementMethod()
 
         binding.pickFileButton.setOnClickListener { pickFileLauncher.launch(arrayOf("audio/*", "video/*")) }
         binding.pickFolderButton.setOnClickListener { pickFolderLauncher.launch(null) }
@@ -129,10 +138,12 @@ class TranscribeActivity : AppCompatActivity() {
         binding.transcribeStopButton.setOnClickListener { stop() }
         binding.micToggleButton.setOnClickListener { onMicToggleClicked() }
         binding.voskToggleButton.setOnClickListener { onVoskToggleClicked() }
+        binding.routerToggleButton.setOnClickListener { onRouterToggleClicked() }
 
         render()
         renderMicState()
         renderVoskState()
+        renderRouterState()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -150,6 +161,7 @@ class TranscribeActivity : AppCompatActivity() {
         stopPlayback()
         if (micActive) stopMic()
         if (voskActive) stopVosk()
+        if (routerActive) stopRouter()
     }
 
     override fun onDestroy() {
@@ -249,6 +261,7 @@ class TranscribeActivity : AppCompatActivity() {
             return
         }
         if (voskActive) stopVosk()
+        if (routerActive) stopRouter()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startMic()
         } else {
@@ -330,6 +343,7 @@ class TranscribeActivity : AppCompatActivity() {
             return
         }
         if (micActive) stopMic()
+        if (routerActive) stopRouter()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startVosk()
         } else {
@@ -385,6 +399,85 @@ class TranscribeActivity : AppCompatActivity() {
     private fun renderVoskState() {
         binding.voskToggleButton.text = getString(if (voskActive) R.string.transcribe_mic_stop else R.string.transcribe_mic_start)
         binding.voskStatusText.text = getString(if (voskActive) R.string.transcribe_mic_listening else R.string.transcribe_mic_idle)
+    }
+
+    // ── Language-routed mic (docs/15-speech-routing.md) ───────────────────
+
+    private fun onRouterToggleClicked() {
+        if (routerActive) {
+            stopRouter()
+            return
+        }
+        if (micActive) stopMic()
+        if (voskActive) stopVosk()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startRouter()
+        } else {
+            pendingMicStart = ::startRouter
+            requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    private fun startRouter() {
+        routerActive = true
+        renderRouterState()
+        binding.routerTranscriptText.text = ""
+        binding.routerTranscriptText.visibility = View.VISIBLE
+
+        val session = container.speechRouter.start()
+        routerSession = session
+
+        // The mic-read loop and segment collection both need to run for as
+        // long as the session is active; source.stream()'s own suspend
+        // callback calls session.acceptAudio directly — same shape as
+        // WhisperCppMicSession/VoskSpeechRecognizer's own mic-read loops,
+        // except *this* loop lives here, not inside the session — see
+        // routerMicJob's own doc comment for why stopRouter must cancel it
+        // explicitly rather than relying on session.finish() alone.
+        routerMicJob = lifecycleScope.launch {
+            try {
+                MicrophoneAudioSource().stream { chunk -> session.acceptAudio(chunk) }
+                session.finish()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                session.cancel()
+                showErrorDialog(getString(R.string.transcribe_mic_error, e.message ?: e.toString()))
+            }
+        }
+
+        lifecycleScope.launch {
+            // Every segment already names which language/model produced
+            // it — see TranscriptSegment.language/modelId's own doc
+            // comment — which is the entire point of this section: seeing
+            // the router's own decisions, not just clean text.
+            session.segments.collect { segment ->
+                val tag = "[${segment.language ?: "?"}][${segment.modelId ?: "?"}]"
+                val line = "$tag ${segment.text}"
+                binding.routerTranscriptText.text =
+                    if (binding.routerTranscriptText.text.isNullOrBlank()) line else "${binding.routerTranscriptText.text}\n$line"
+            }
+            routerActive = false
+            routerSession = null
+            renderRouterState()
+        }
+    }
+
+    private fun stopRouter() {
+        val session = routerSession
+        routerActive = false
+        renderRouterState()
+        // Cancel the mic-read loop first (it lives here, not inside the
+        // session — see routerMicJob's own doc comment), then finish the
+        // session itself to flush whatever the active model has buffered.
+        routerMicJob?.cancel()
+        routerMicJob = null
+        if (session != null) lifecycleScope.launch { session.finish() }
+    }
+
+    private fun renderRouterState() {
+        binding.routerToggleButton.text = getString(if (routerActive) R.string.transcribe_mic_stop else R.string.transcribe_mic_start)
+        binding.routerStatusText.text = getString(if (routerActive) R.string.transcribe_mic_listening else R.string.transcribe_mic_idle)
     }
 
     /**

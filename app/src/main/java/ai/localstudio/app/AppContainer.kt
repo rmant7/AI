@@ -62,7 +62,17 @@ import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.vosk.VoskDownloads
+import ai.localstudio.app.vosk.VoskModels
+import ai.localstudio.app.vosk.VoskRegisteredSpeechModel
 import ai.localstudio.app.vosk.VoskSpeechRecognizer
+import ai.localstudio.app.whisper.WhisperLanguageIdentifier
+import ai.localstudio.app.whisper.WhisperRegisteredSpeechModel
+import ai.localstudio.core.speech.DefaultStreamingSpeechRouter
+import ai.localstudio.core.speech.InMemorySpeechModelRegistry
+import ai.localstudio.core.speech.Language
+import ai.localstudio.core.speech.RoutingPolicy
+import ai.localstudio.core.speech.SpeechModelRegistry
+import ai.localstudio.core.speech.StreamingSpeechRouter
 import ai.localstudio.app.whisper.WhisperCppMicSession
 import ai.localstudio.app.whisper.WhisperCppRuntime
 import ai.localstudio.app.whisper.WhisperDownloads
@@ -583,6 +593,18 @@ class AppContainer private constructor(private val context: Context) {
             voskRecognizer.release()
             appLog.record("VOSK", "recognizer unloaded under memory pressure ($reason)")
         }
+        if (whisperFallbackModel.isLoaded) {
+            whisperFallbackModel.release()
+            appLog.record("WHISPER", "router fallback model unloaded under memory pressure ($reason)")
+        }
+        if (voskRuSpecialist.isLoaded) {
+            voskRuSpecialist.release()
+            appLog.record("VOSK", "router RU specialist unloaded under memory pressure ($reason)")
+        }
+        if (voskEnSpecialist.isLoaded) {
+            voskEnSpecialist.release()
+            appLog.record("VOSK", "router EN specialist unloaded under memory pressure ($reason)")
+        }
     }
 
     /**
@@ -792,6 +814,58 @@ class AppContainer private constructor(private val context: Context) {
     val voskDownloads = VoskDownloads(
         context,
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+    )
+
+    /**
+     * Whisper registered as the router's multilingual fallback — see
+     * [WhisperRegisteredSpeechModel]'s own doc comment. Held separately
+     * (not just inside [speechModelRegistry]) so [speechLanguageIdentifier]
+     * below can reuse the exact same loaded handle rather than triggering
+     * a second, independent Whisper load.
+     */
+    private val whisperFallbackModel = WhisperRegisteredSpeechModel(
+        runtime = whisperCppRuntime as WhisperCppRuntime,
+        whisperStore = whisperStore,
+        seedProvider = { whisperStore.installedSeed(settings.whisperModelId) },
+    )
+
+    private val voskRuSpecialist = VoskRegisteredSpeechModel(context, VoskModels.byId("vosk-small-ru")!!, setOf(Language.RU))
+    private val voskEnSpecialist = VoskRegisteredSpeechModel(context, VoskModels.byId("vosk-small-en")!!, setOf(Language.EN))
+
+    /**
+     * docs/15-speech-routing.md's first configuration: RU/EN handled by
+     * their small Vosk specialists (reusing the exact seeds the Vosk spike
+     * — docs/14-vosk-spike.md — already downloads/tests), everything else
+     * (Hebrew, unknown, mixed, or either specialist failing/not installed)
+     * falling back to multilingual Whisper. Deliberately temporary — see
+     * that doc's own "the router should be able to switch ... simply by
+     * configuration/registration, no router code should change" note.
+     */
+    val speechModelRegistry: SpeechModelRegistry = InMemorySpeechModelRegistry().apply {
+        register(voskRuSpecialist)
+        register(voskEnSpecialist)
+        register(whisperFallbackModel)
+    }
+
+    private val speechLanguageIdentifier = WhisperLanguageIdentifier { whisperFallbackModel.loadedWhisperModel() }
+
+    /**
+     * Shared router instance for the experimental routing demo (see
+     * [ai.localstudio.app.TranscribeActivity]'s own "LIVE MIC — ROUTER"
+     * section) — a long-lived [CoroutineScope] of its own, not tied to any
+     * one screen, the same reasoning [whisperMicSession]/[voskRecognizer]
+     * already follow. `lidStrideMs` is several seconds, not the
+     * sub-second default: [WhisperLanguageIdentifier] runs a full whisper
+     * pass per evaluation, real CPU cost that must not compete with the
+     * active ASR model too often.
+     */
+    val speechRouter: StreamingSpeechRouter = DefaultStreamingSpeechRouter(
+        registry = speechModelRegistry,
+        languageIdentifier = speechLanguageIdentifier,
+        policy = RoutingPolicy(fallbackModelId = "whisper-fallback"),
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        lidWindowMs = 4_000,
+        lidStrideMs = 3_000,
     )
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
