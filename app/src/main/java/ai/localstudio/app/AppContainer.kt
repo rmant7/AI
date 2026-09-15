@@ -521,12 +521,11 @@ class AppContainer private constructor(private val context: Context) {
                 ) {
                     return
                 }
-                val critical = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
-                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("trim level $level", critical) }
+                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("trim level $level", level) }
             }
 
             override fun onLowMemory() {
-                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("onLowMemory", critical = true) }
+                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("onLowMemory", level = Int.MAX_VALUE) }
             }
 
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
@@ -564,32 +563,49 @@ class AppContainer private constructor(private val context: Context) {
      * load independently and are each just as capable of sitting resident
      * and uncounted through a real OOM as the LLM was.
      */
-    private suspend fun releaseMemoryUnderPressure(reason: String, critical: Boolean = true) {
+    private suspend fun releaseMemoryUnderPressure(reason: String, level: Int = Int.MAX_VALUE) {
         if (semanticMemoryEmbedder.isReady) {
             semanticMemoryEmbedder.unload()
             appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
         }
         releaseLocalModels()
-        releaseWhisperEngines(reason, critical)
+        releaseWhisperEngines(reason, level)
     }
 
     /**
-     * [critical] distinguishes a routine trim signal (TRIM_MEMORY_RUNNING_LOW
-     * — a real device log showed this firing constantly at ~1.4GB free,
-     * nowhere near an actual OOM) from a genuine one (RUNNING_CRITICAL and
-     * up, onLowMemory): only the router's own three models
-     * ([whisperFallbackModel]/[voskRuSpecialist]/[voskEnSpecialist]) skip
-     * eviction on the routine tier, and only while
-     * [routerSessionActive] says a session is actually using them right
-     * now — every other engine here, and the router's own models once
-     * pressure is actually critical, are released exactly as before. This
-     * is the fix for a real device report: the router forced an ~18s
-     * reload of its own fallback model mid-conversation because a routine
-     * trim signal evicted it while a session was still running. It is not
-     * a way to opt the router out of memory pressure handling — critical
-     * pressure still wins.
+     * [level] is the raw ComponentCallbacks2 trim level (Int.MAX_VALUE for
+     * onLowMemory/[simulateMemoryPressureForTesting], always the most
+     * severe). Two different engines tolerate different tiers of it, because
+     * they mean different things while "actively in use":
+     *
+     * - The router's three models ([whisperFallbackModel]/[voskRuSpecialist]/
+     *   [voskEnSpecialist]) skip eviction below TRIM_MEMORY_RUNNING_CRITICAL
+     *   while [routerSessionActive] — a foreground, interactive feature that
+     *   already stops itself on backgrounding (TranscribeActivity.onPause),
+     *   so it only needs protecting from the *routine* signal (RUNNING_LOW,
+     *   fired constantly on a real device at ~1.4GB free) that was never
+     *   close to an actual OOM. See this fix's own commit for the original
+     *   report: an ~18s reload forced mid-conversation.
+     * - [whisperFileTranscriber] skips eviction below TRIM_MEMORY_COMPLETE
+     *   while [fileTranscriptionActive] — a batch task that is *expected*
+     *   to keep running while the app is backgrounded (the user switches
+     *   away and comes back later), so it needs to tolerate BACKGROUND/
+     *   MODERATE, not just RUNNING_LOW. Real device report: a file finished
+     *   as "Done" with an empty transcript, saved as an empty .txt, because
+     *   [WhisperFileTranscriber.release] fired mid-transcription (BACKGROUND,
+     *   trim level 40) — its `requestCancel()` makes the transcription loop
+     *   quietly `break` and return whatever it has so far (nothing, if the
+     *   very first 30s window hadn't finished yet) rather than throwing, so
+     *   nothing in TranscribeActivity's own error handling ever saw this as
+     *   a failure. TRIM_MEMORY_COMPLETE (about to be killed regardless) and
+     *   onLowMemory still evict it — this is not a way to keep a file
+     *   transcription alive through an actual OOM, only through routine
+     *   backgrounding.
+     *
+     * Every other engine here has no "in use" concept to protect and is
+     * released on any qualifying level, exactly as before.
      */
-    private fun releaseWhisperEngines(reason: String, critical: Boolean = true) {
+    private fun releaseWhisperEngines(reason: String, level: Int = Int.MAX_VALUE) {
         if (whisperEngine.isLoaded) {
             whisperEngine.release()
             appLog.record("WHISPER", "main engine unloaded under memory pressure ($reason)")
@@ -598,7 +614,11 @@ class AppContainer private constructor(private val context: Context) {
             whisperPreviewEngine.release()
             appLog.record("WHISPER", "preview engine unloaded under memory pressure ($reason)")
         }
-        if (whisperFileTranscriber.isLoaded) {
+        val skipFileTranscriber = fileTranscriptionActive && level < android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        if (skipFileTranscriber) {
+            appLog.record("WHISPER", "file-transcriber kept resident through non-critical pressure ($reason); transcription is active")
+        }
+        if (whisperFileTranscriber.isLoaded && !skipFileTranscriber) {
             whisperFileTranscriber.release()
             appLog.record("WHISPER", "file-transcriber engine unloaded under memory pressure ($reason)")
         }
@@ -610,7 +630,7 @@ class AppContainer private constructor(private val context: Context) {
             voskRecognizer.release()
             appLog.record("VOSK", "recognizer unloaded under memory pressure ($reason)")
         }
-        val skipRouterModels = routerSessionActive && !critical
+        val skipRouterModels = routerSessionActive && level < android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
         if (skipRouterModels) {
             appLog.record("ROUTER", "router models kept resident through non-critical pressure ($reason); session is active")
         }
@@ -904,6 +924,21 @@ class AppContainer private constructor(private val context: Context) {
      */
     @Volatile
     var routerSessionActive: Boolean = false
+
+    /**
+     * Set by [ai.localstudio.app.TranscribeActivity] around its file-
+     * transcription batch job's lifetime — read by [releaseWhisperEngines]
+     * so [whisperFileTranscriber] survives routine backgrounding
+     * (TRIM_MEMORY_BACKGROUND/MODERATE — exactly what fires the instant the
+     * user switches away from a file transcription they expect to keep
+     * running unattended) instead of being silently evicted mid-file. See
+     * [releaseWhisperEngines]'s own doc comment for the real device report
+     * this fixes: a file reported "Done" with an empty saved transcript
+     * because eviction mid-transcription made the decode loop quietly stop
+     * early rather than throw.
+     */
+    @Volatile
+    var fileTranscriptionActive: Boolean = false
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

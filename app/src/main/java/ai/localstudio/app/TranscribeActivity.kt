@@ -219,6 +219,7 @@ class TranscribeActivity : AppCompatActivity() {
         if (results.isEmpty() || job?.isActive == true) return
 
         setRunning(true)
+        container.fileTranscriptionActive = true
         job = lifecycleScope.launch {
             try {
                 for (result in results) {
@@ -230,6 +231,7 @@ class TranscribeActivity : AppCompatActivity() {
                 }
             } finally {
                 setRunning(false)
+                container.fileTranscriptionActive = false
             }
         }
     }
