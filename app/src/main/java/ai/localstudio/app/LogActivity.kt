@@ -113,13 +113,25 @@ class LogActivity : AppCompatActivity() {
     }
 
     /**
+     * `llama_print_system_info()` only formats compile-time flags — cheap
+     * for a single call, including the native library's first
+     * [System.loadLibrary]. But [render] now re-runs every 2s (see this
+     * class's own doc comment on why), and these flags never change once
+     * the process is up — real device report: re-querying it on every
+     * single poll, on the main thread, added up to visible stutter/freezes
+     * across the whole app while a benchmark was simultaneously saturating
+     * the CPU with whisper.cpp inference. Computed once, lazily, instead.
+     */
+    private val cpuLine: String by lazy {
+        val cpuInfo = if (LlamaBridge.isAvailable) runCatching { LlamaBridge().nativeSystemInfo() }.getOrNull() else null
+        if (cpuInfo.isNullOrBlank()) getString(R.string.log_cpu_unavailable) else getString(R.string.log_cpu_features, cpuInfo)
+    }
+
+    /**
      * Version/commit/CI build, device model/OS/ABI, RAM, and whether
      * llama.cpp actually detected this CPU's dotprod/i8mm/fp16 support —
      * everything that used to require opening a separate "About this
-     * build" dialog before comparing it against a log. Cheap even including
-     * the native library's first [System.loadLibrary] call:
-     * `llama_print_system_info()` only formats compile-time flags, no model
-     * load involved.
+     * build" dialog before comparing it against a log.
      */
     private fun buildHeader(): String {
         val device = container.device
@@ -138,12 +150,6 @@ class LogActivity : AppCompatActivity() {
             Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
         )
         val ramLine = getString(R.string.device_ram_line, gb(device.totalRamBytes), gb(device.availableRamBytes))
-        val cpuInfo = if (LlamaBridge.isAvailable) runCatching { LlamaBridge().nativeSystemInfo() }.getOrNull() else null
-        val cpuLine = if (cpuInfo.isNullOrBlank()) {
-            getString(R.string.log_cpu_unavailable)
-        } else {
-            getString(R.string.log_cpu_features, cpuInfo)
-        }
         return listOf(buildLine, deviceLine, ramLine, cpuLine).joinToString("\n")
     }
 
