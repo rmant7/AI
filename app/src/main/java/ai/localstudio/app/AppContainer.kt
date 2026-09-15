@@ -908,6 +908,7 @@ class AppContainer private constructor(private val context: Context) {
         reportStore = benchmarkReportStore,
         engineProvider = { transcriptionEngines },
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        appLog = appLog,
     )
 
     /**

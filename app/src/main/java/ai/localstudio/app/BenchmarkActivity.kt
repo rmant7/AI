@@ -129,7 +129,8 @@ class BenchmarkActivity : AppCompatActivity() {
                 binding.benchmarkProgress.isIndeterminate = false
                 binding.benchmarkProgress.max = state.total.coerceAtLeast(1)
                 binding.benchmarkProgress.progress = state.completed
-                binding.benchmarkStatusText.text = getString(R.string.benchmark_running, state.completed, state.total)
+                val counter = getString(R.string.benchmark_running, state.completed, state.total)
+                binding.benchmarkStatusText.text = if (state.status.isBlank()) counter else "$counter\n${state.status}"
                 binding.benchmarkCancelButton.isEnabled = true
                 binding.benchmarkStartButton.isEnabled = false
                 binding.benchmarkPickFolderButton.isEnabled = false

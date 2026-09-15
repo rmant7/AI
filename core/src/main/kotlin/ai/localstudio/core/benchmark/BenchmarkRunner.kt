@@ -2,6 +2,7 @@ package ai.localstudio.core.benchmark
 
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.util.describeForUser
+import java.util.Locale
 
 /**
  * Runs every registered [TranscriptionEngine] against every selected file
@@ -51,6 +52,18 @@ class BenchmarkRunner(
          */
         memorySamplerMb: (() -> Long?)? = null,
         onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> },
+        /**
+         * A human-readable line for every state transition (load starting,
+         * warm-up starting, each file starting) — not just [onProgress]'s
+         * counter, which only advances once a whole (file, engine) pair
+         * finishes. A real device report is why this exists: a run showed
+         * "0 / 35" for minutes with nothing else on screen or in the app's
+         * own log, with no way to tell "still loading a 3GB model" from
+         * "stuck" from "one very long file is still transcribing." The
+         * caller decides what to do with each line (log it, show it) —
+         * this module stays free of any Android dependency either way.
+         */
+        onStatus: (String) -> Unit = {},
     ): BenchmarkRunOutput {
         val startedAt = clock()
         val engineSummaries = mutableListOf<BenchmarkEngineSummary>()
@@ -64,10 +77,12 @@ class BenchmarkRunner(
         val total = files.size * engines.size
 
         for (engine in engines) {
+            onStatus("Loading ${engine.displayName} (${engine.modelId})…")
             val loadStart = clock()
             val session = try {
                 engine.load()
             } catch (e: Exception) {
+                onStatus("${engine.displayName}: load failed — ${e.describeForUser()}")
                 engineSummaries += BenchmarkEngineSummary(
                     backendId = engine.backendId,
                     displayName = engine.displayName,
@@ -101,6 +116,7 @@ class BenchmarkRunner(
                 continue
             }
             val modelLoadMs = clock() - loadStart
+            onStatus("${engine.displayName}: loaded in ${modelLoadMs}ms")
 
             var warmInferenceMs: Long? = null
             var warmUpFailed = false
@@ -108,12 +124,15 @@ class BenchmarkRunner(
             if (warmSample == null) {
                 warmUpFailed = true
             } else {
+                onStatus("${engine.displayName}: warming up on ${warmSample.fileName}…")
                 val warmStart = clock()
                 try {
                     session.warmUp(AudioRef(uri = warmSample.uri, durationMs = warmSample.durationMs, sampleRate = warmSample.sampleRateHz))
                     warmInferenceMs = clock() - warmStart
+                    onStatus("${engine.displayName}: warm-up done in ${warmInferenceMs}ms")
                 } catch (e: Exception) {
                     warmUpFailed = true
+                    onStatus("${engine.displayName}: warm-up failed — ${e.describeForUser()}")
                 }
             }
 
@@ -130,8 +149,14 @@ class BenchmarkRunner(
             )
 
             try {
-                for (file in files) {
-                    perFileMetrics.getValue(file) += runOneTimed(engine, session, file, forcedLanguage, memorySamplerMb)
+                files.forEachIndexed { index, file ->
+                    onStatus("${engine.displayName}: ${file.fileName} (${index + 1}/${files.size})…")
+                    val metrics = runOneTimed(engine, session, file, forcedLanguage, memorySamplerMb)
+                    perFileMetrics.getValue(file) += metrics
+                    onStatus(
+                        "${engine.displayName}: ${file.fileName} — ${metrics.status}" +
+                            (metrics.rtf?.let { " (RTF ${"%.2f".format(Locale.ROOT, it)})" } ?: ""),
+                    )
                     completed++
                     onProgress(completed, total)
                 }

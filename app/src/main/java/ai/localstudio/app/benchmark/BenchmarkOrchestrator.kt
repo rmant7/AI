@@ -1,5 +1,6 @@
 package ai.localstudio.app.benchmark
 
+import ai.localstudio.app.log.AppLog
 import ai.localstudio.core.benchmark.BenchmarkAudioFile
 import ai.localstudio.core.benchmark.BenchmarkReport
 import ai.localstudio.core.benchmark.BenchmarkRunner
@@ -14,7 +15,8 @@ import kotlinx.coroutines.launch
 
 sealed interface BenchmarkUiState {
     data object Idle : BenchmarkUiState
-    data class Running(val completed: Int, val total: Int) : BenchmarkUiState
+    /** [status] is the latest [BenchmarkRunner.run] `onStatus` line — see that parameter's own doc comment for why this exists alongside [completed]/[total]: a real run can sit on the same (completed, total) pair for minutes while a big model loads or one file transcribes, with nothing else to show for it otherwise. */
+    data class Running(val completed: Int, val total: Int, val status: String = "") : BenchmarkUiState
     data class Done(val report: BenchmarkReport, val savedAs: String) : BenchmarkUiState
     data class Failed(val message: String) : BenchmarkUiState
 }
@@ -32,6 +34,8 @@ class BenchmarkOrchestrator(
     private val reportStore: BenchmarkReportStore,
     private val engineProvider: () -> List<TranscriptionEngine>,
     private val scope: CoroutineScope,
+    /** Real device report: a run sat at "0 / 35" for minutes with nothing in the app's own log either — every status line also lands here under the "BENCHMARK" tag, so a run stuck on a slow load/file is diagnosable from Журнал ошибок without needing the screen open. */
+    private val appLog: AppLog,
 ) {
     private val _state = MutableStateFlow<BenchmarkUiState>(BenchmarkUiState.Idle)
     val state: StateFlow<BenchmarkUiState> = _state
@@ -41,7 +45,9 @@ class BenchmarkOrchestrator(
     fun start(files: List<BenchmarkAudioFile>) {
         if (job?.isActive == true || files.isEmpty()) return
         val engines = engineProvider()
-        _state.value = BenchmarkUiState.Running(completed = 0, total = files.size * engines.size)
+        val total = files.size * engines.size
+        _state.value = BenchmarkUiState.Running(completed = 0, total = total, status = "Starting…")
+        appLog.record("BENCHMARK", "run starting: ${engines.size} engine(s) x ${files.size} file(s)")
         job = scope.launch {
             try {
                 val output = runner.run(
@@ -53,12 +59,22 @@ class BenchmarkOrchestrator(
                     // comment) rather than left implicit.
                     forcedLanguage = null,
                     memorySamplerMb = { Debug.getNativeHeapAllocatedSize() / (1024 * 1024) },
-                    onProgress = { completed, total -> _state.value = BenchmarkUiState.Running(completed, total) },
+                    onProgress = { completed, done ->
+                        val current = _state.value as? BenchmarkUiState.Running
+                        _state.value = BenchmarkUiState.Running(completed, done, current?.status.orEmpty())
+                    },
+                    onStatus = { status ->
+                        appLog.record("BENCHMARK", status)
+                        val current = _state.value as? BenchmarkUiState.Running
+                        _state.value = BenchmarkUiState.Running(current?.completed ?: 0, current?.total ?: total, status)
+                    },
                 )
                 val report = reportStore.buildReport(output, sharedTask = "transcribe", sharedForcedLanguage = null)
                 val savedAs = reportStore.save(report)
+                appLog.record("BENCHMARK", "run finished, saved as $savedAs")
                 _state.value = BenchmarkUiState.Done(report, savedAs)
             } catch (e: Exception) {
+                appLog.record("BENCHMARK", "run failed: ${e.describeForUser()}")
                 _state.value = BenchmarkUiState.Failed(e.describeForUser())
             }
         }
