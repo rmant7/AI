@@ -17,7 +17,6 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.text.method.ScrollingMovementMethod
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -83,6 +82,23 @@ class TranscribeActivity : AppCompatActivity() {
     /** Unlike WhisperCppMicSession/VoskSpeechRecognizer, the router session has no built-in mic-read loop of its own to cancel on stop — this Activity drives AudioSource.stream itself (see startRouter), so it must track and cancel that job itself too. */
     private var routerMicJob: Job? = null
 
+    /**
+     * One line per utterance, not one line per emission: a model's own
+     * StreamingSpeechSession re-emits the *same* utterance repeatedly while
+     * it is still growing (every revision keeping the same startMs — see
+     * TranscribeActivity's other mic sections for the same contract), and
+     * the router forwards every one of those onward unchanged. Appending
+     * each as a new line (the original code) meant a single sentence being
+     * recognized turned into a wall of near-duplicate lines that blew past
+     * routerTranscriptText's height well before a second language ever got
+     * a chance to appear on screen — indistinguishable from "the router
+     * only transcribes English" if you never scrolled past it. Keyed by
+     * (modelId, startMs) rather than just startMs, since a model switch can
+     * itself land on the same startMs a moment apart.
+     */
+    private var routerLines = mutableListOf<String>()
+    private var routerCurrentLineKey: String? = null
+
     /** Set by whichever of [onMicToggleClicked]/[onVoskToggleClicked] triggered the permission request, so [requestMicPermission]'s callback starts the right engine once granted. */
     private var pendingMicStart: (() -> Unit)? = null
 
@@ -129,12 +145,6 @@ class TranscribeActivity : AppCompatActivity() {
         // this list lays out to its full content height instead of fighting
         // the parent for a bounded scrollable region.
         binding.transcribeResults.isNestedScrollingEnabled = false
-        // maxHeight (see activity_transcribe.xml) only bounds the box —
-        // without this, text past that height was clipped with no way to
-        // reach it at all.
-        binding.micTranscriptText.movementMethod = ScrollingMovementMethod()
-        binding.voskTranscriptText.movementMethod = ScrollingMovementMethod()
-        binding.routerTranscriptText.movementMethod = ScrollingMovementMethod()
 
         binding.pickFileButton.setOnClickListener { pickFileLauncher.launch(arrayOf("audio/*", "video/*")) }
         binding.pickFolderButton.setOnClickListener { pickFolderLauncher.launch(null) }
@@ -443,6 +453,8 @@ class TranscribeActivity : AppCompatActivity() {
         renderRouterState()
         binding.routerTranscriptText.text = ""
         binding.routerTranscriptText.visibility = View.VISIBLE
+        routerLines = mutableListOf()
+        routerCurrentLineKey = null
 
         val session = container.speechRouter.start()
         routerSession = session
@@ -474,8 +486,14 @@ class TranscribeActivity : AppCompatActivity() {
             session.segments.collect { segment ->
                 val tag = "[${segment.language ?: "?"}][${segment.modelId ?: "?"}]"
                 val line = "$tag ${segment.text}"
-                binding.routerTranscriptText.text =
-                    if (binding.routerTranscriptText.text.isNullOrBlank()) line else "${binding.routerTranscriptText.text}\n$line"
+                val key = "${segment.modelId}|${segment.startMs}"
+                if (key == routerCurrentLineKey && routerLines.isNotEmpty()) {
+                    routerLines[routerLines.size - 1] = line
+                } else {
+                    routerLines += line
+                    routerCurrentLineKey = key
+                }
+                binding.routerTranscriptText.text = routerLines.joinToString("\n")
             }
             routerActive = false
             container.routerSessionActive = false

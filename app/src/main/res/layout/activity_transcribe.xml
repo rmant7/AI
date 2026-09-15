@@ -176,17 +176,19 @@
 
     </LinearLayout>
 
-    <!-- maxHeight keeps this from squeezing transcribeResults above off the
-         screen; ScrollingMovementMethod (set in TranscribeActivity) is what
-         makes text past that height reachable instead of just clipped. -->
+    <!-- No maxHeight/scrollbars: this whole screen is one ScrollView now
+         (see the root element's own comment) — a bounded box with its own
+         ScrollingMovementMethod nested inside an outer scrolling container
+         is a well-known Android gesture conflict (the outer ScrollView
+         wins the drag, so content past the inner box's height becomes
+         unreachable) — simply growing to wrap_content and letting the
+         single outer ScrollView handle it avoids that entirely. -->
     <TextView
         android:id="@+id/micTranscriptText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:maxHeight="120dp"
         android:paddingHorizontal="16dp"
         android:paddingBottom="10dp"
-        android:scrollbars="vertical"
         android:textIsSelectable="true"
         android:textSize="13sp"
         android:visibility="gone" />
@@ -240,10 +242,8 @@
         android:id="@+id/voskTranscriptText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:maxHeight="120dp"
         android:paddingHorizontal="16dp"
         android:paddingBottom="10dp"
-        android:scrollbars="vertical"
         android:textIsSelectable="true"
         android:textSize="13sp"
         android:visibility="gone" />
@@ -298,10 +298,8 @@
         android:id="@+id/routerTranscriptText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:maxHeight="160dp"
         android:paddingHorizontal="16dp"
         android:paddingBottom="10dp"
-        android:scrollbars="vertical"
         android:textIsSelectable="true"
         android:textSize="13sp"
         android:visibility="gone" />
