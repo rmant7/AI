@@ -2,6 +2,7 @@ package ai.localstudio.app
 
 import ai.localstudio.app.databinding.ActivityTranscribeBinding
 import ai.localstudio.app.databinding.ItemTranscribeResultBinding
+import ai.localstudio.app.vosk.VoskModelStore
 import ai.localstudio.app.whisper.MediaFileUtils
 import ai.localstudio.app.whisper.MicrophoneAudioSource
 import ai.localstudio.app.whisper.WhisperModelSeed
@@ -70,8 +71,16 @@ class TranscribeActivity : AppCompatActivity() {
     /** Phase 3 test harness state — see the "LIVE MIC" section in activity_transcribe.xml and WhisperCppMicSession's own doc comment. */
     private var micActive = false
 
+    /** Vosk ASR spike (docs/14-vosk-spike.md) — see the "LIVE MIC — VOSK" section in activity_transcribe.xml and VoskSpeechRecognizer's own doc comment. Independent of [micActive]: the two sections never run at once (each start stops the other), but are otherwise unrelated code paths. */
+    private var voskActive = false
+
+    /** Set by whichever of [onMicToggleClicked]/[onVoskToggleClicked] triggered the permission request, so [requestMicPermission]'s callback starts the right engine once granted. */
+    private var pendingMicStart: (() -> Unit)? = null
+
     private val requestMicPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startMic() else Toast.makeText(this, R.string.chat_mic_permission, Toast.LENGTH_SHORT).show()
+        val start = pendingMicStart
+        pendingMicStart = null
+        if (granted) start?.invoke() else Toast.makeText(this, R.string.chat_mic_permission, Toast.LENGTH_SHORT).show()
     }
 
     private val pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -110,6 +119,7 @@ class TranscribeActivity : AppCompatActivity() {
         // without this, text past that height was clipped with no way to
         // reach it at all.
         binding.micTranscriptText.movementMethod = ScrollingMovementMethod()
+        binding.voskTranscriptText.movementMethod = ScrollingMovementMethod()
 
         binding.pickFileButton.setOnClickListener { pickFileLauncher.launch(arrayOf("audio/*", "video/*")) }
         binding.pickFolderButton.setOnClickListener { pickFolderLauncher.launch(null) }
@@ -117,9 +127,11 @@ class TranscribeActivity : AppCompatActivity() {
         binding.transcribeStartButton.setOnClickListener { start() }
         binding.transcribeStopButton.setOnClickListener { stop() }
         binding.micToggleButton.setOnClickListener { onMicToggleClicked() }
+        binding.voskToggleButton.setOnClickListener { onVoskToggleClicked() }
 
         render()
         renderMicState()
+        renderVoskState()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -136,6 +148,7 @@ class TranscribeActivity : AppCompatActivity() {
         // live mic recording still listening into the background.
         stopPlayback()
         if (micActive) stopMic()
+        if (voskActive) stopVosk()
     }
 
     override fun onDestroy() {
@@ -153,6 +166,7 @@ class TranscribeActivity : AppCompatActivity() {
         CoroutineScope(Dispatchers.IO).launch {
             container.whisperFileTranscriber.release()
             container.whisperMicSession.release()
+            container.voskRecognizer.release()
         }
     }
 
@@ -233,9 +247,11 @@ class TranscribeActivity : AppCompatActivity() {
             stopMic()
             return
         }
+        if (voskActive) stopVosk()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startMic()
         } else {
+            pendingMicStart = ::startMic
             requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
@@ -303,6 +319,71 @@ class TranscribeActivity : AppCompatActivity() {
     private fun renderMicState() {
         binding.micToggleButton.text = getString(if (micActive) R.string.transcribe_mic_stop else R.string.transcribe_mic_start)
         binding.micStatusText.text = getString(if (micActive) R.string.transcribe_mic_listening else R.string.transcribe_mic_idle)
+    }
+
+    // ── Vosk ASR spike (docs/14-vosk-spike.md) ────────────────────────────
+
+    private fun onVoskToggleClicked() {
+        if (voskActive) {
+            stopVosk()
+            return
+        }
+        if (micActive) stopMic()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startVosk()
+        } else {
+            pendingMicStart = ::startVosk
+            requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    private fun startVosk() {
+        if (!VoskModelStore.isInstalled(this)) {
+            Toast.makeText(this, R.string.transcribe_vosk_no_model, Toast.LENGTH_LONG).show()
+            return
+        }
+        val modelDir = VoskModelStore.modelDir(this)
+        voskActive = true
+        renderVoskState()
+        binding.voskTranscriptText.text = ""
+        binding.voskTranscriptText.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            // Model(path)/Recognizer construction throw a checked IOException
+            // on a missing/corrupt model directory — very much a live
+            // possibility for a manually adb-pushed spike model — which
+            // would otherwise crash the app right here instead of just
+            // failing this one start attempt.
+            val transcripts = try {
+                container.voskRecognizer.start(modelDir.absolutePath, MicrophoneAudioSource())
+            } catch (e: Exception) {
+                voskActive = false
+                renderVoskState()
+                Toast.makeText(this@TranscribeActivity, getString(R.string.transcribe_mic_error, e.message ?: e.toString()), Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            // Every emission already carries the full session text so far —
+            // see VoskSpeechRecognizer.start's own doc comment for why this
+            // needs none of WhisperCppMicSession's startMs-matching.
+            transcripts.collect { transcript ->
+                binding.voskTranscriptText.text = transcript.text
+            }
+            voskActive = false
+            renderVoskState()
+            container.voskRecognizer.lastError?.let { error ->
+                Toast.makeText(this@TranscribeActivity, getString(R.string.transcribe_mic_error, error.message ?: error.toString()), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun stopVosk() {
+        container.voskRecognizer.finish()
+        voskActive = false
+        renderVoskState()
+    }
+
+    private fun renderVoskState() {
+        binding.voskToggleButton.text = getString(if (voskActive) R.string.transcribe_mic_stop else R.string.transcribe_mic_start)
+        binding.voskStatusText.text = getString(if (voskActive) R.string.transcribe_mic_listening else R.string.transcribe_mic_idle)
     }
 
     /**

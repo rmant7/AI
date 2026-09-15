@@ -427,13 +427,10 @@ class ModelsActivity : AppCompatActivity() {
     private fun voiceRows(device: DeviceProfile): List<Row> = buildList {
         add(Row.Header(getString(R.string.models_voice_header)))
         val selectedSeed = container.whisperStore.installedSeed(container.settings.whisperModelId)
-        val anyRunning = container.whisperDownloads.state.value.values
-            .any { it is WhisperDownloadState.Running }
 
         WhisperModels.SEEDS.forEach { seed ->
             val state = container.whisperDownloads.stateOf(seed)
             val selected = selectedSeed?.id == seed.id
-            val blocked = anyRunning && state is WhisperDownloadState.Idle
 
             add(
                 Row.Model(
@@ -451,7 +448,6 @@ class ModelsActivity : AppCompatActivity() {
                             )
                         state is WhisperDownloadState.Failed ->
                             getString(R.string.model_state_error, state.message.lineSequence().first())
-                        blocked -> getString(R.string.model_state_wait_other)
                         else -> null
                     },
                     progress = (state as? WhisperDownloadState.Running)?.progress?.fraction,
@@ -463,7 +459,7 @@ class ModelsActivity : AppCompatActivity() {
                         is WhisperDownloadState.Failed -> getString(R.string.model_retry)
                         WhisperDownloadState.Idle -> getString(R.string.model_download)
                     },
-                    primaryEnabled = !(state is WhisperDownloadState.Installed && selected) && !blocked,
+                    primaryEnabled = !(state is WhisperDownloadState.Installed && selected),
                     secondaryLabel = when (state) {
                         is WhisperDownloadState.Failed -> getString(R.string.model_details)
                         is WhisperDownloadState.Installed -> getString(R.string.model_delete)

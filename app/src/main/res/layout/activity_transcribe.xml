@@ -174,4 +174,61 @@
         android:textSize="13sp"
         android:visibility="gone" />
 
+    <!-- Vosk ASR spike (docs/14-vosk-spike.md): a second, independent live
+         mic section, driving VoskSpeechRecognizer directly. Deliberately
+         separate from the Whisper LIVE MIC section above rather than a
+         shared toggle — this way trying Vosk can never regress the
+         already-working Whisper mic path above it. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOutlineVariant" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:text="@string/transcribe_vosk_section_title"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/voskToggleButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/transcribe_mic_start" />
+
+        <TextView
+            android:id="@+id/voskStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/voskTranscriptText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxHeight="120dp"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="10dp"
+        android:scrollbars="vertical"
+        android:textIsSelectable="true"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
 </LinearLayout>

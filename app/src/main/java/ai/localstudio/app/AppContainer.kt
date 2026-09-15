@@ -61,6 +61,7 @@ import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
+import ai.localstudio.app.vosk.VoskSpeechRecognizer
 import ai.localstudio.app.whisper.WhisperCppMicSession
 import ai.localstudio.app.whisper.WhisperCppRuntime
 import ai.localstudio.app.whisper.WhisperDownloads
@@ -577,6 +578,10 @@ class AppContainer private constructor(private val context: Context) {
             whisperMicSession.release()
             appLog.record("WHISPER", "mic session unloaded under memory pressure ($reason)")
         }
+        if (voskRecognizer.isLoaded) {
+            voskRecognizer.release()
+            appLog.record("VOSK", "recognizer unloaded under memory pressure ($reason)")
+        }
     }
 
     /**
@@ -771,6 +776,16 @@ class AppContainer private constructor(private val context: Context) {
      * [releaseMemoryUnderPressure] can free it too.
      */
     val whisperMicSession = WhisperCppMicSession(whisperCppRuntime as WhisperCppRuntime, whisperStore)
+
+    /**
+     * Vosk ASR spike (docs/14-vosk-spike.md): a second, independent live-mic
+     * path, tried as a candidate for replacing [whisperMicSession]'s
+     * re-transcribe-the-growing-buffer approach. Shared the same way
+     * [whisperMicSession] is, so [releaseMemoryUnderPressure] can free its
+     * model too, and so [ai.localstudio.app.TranscribeActivity] can reuse
+     * one instance across recordings instead of reloading the model each time.
+     */
+    val voskRecognizer = VoskSpeechRecognizer()
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

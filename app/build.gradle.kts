@@ -163,6 +163,13 @@ dependencies {
     // Text-file / PDF attachment → RAG context.
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
+    // Vosk ASR spike (docs/14-vosk-spike.md): Maven Central only, no local
+    // AAR, no custom JNI — a real Kaldi-based streaming recognizer, tried
+    // as a candidate for replacing whisper.cpp's re-transcribe-the-buffer
+    // approach as the live-mic path, with Whisper kept untouched as the
+    // slower/high-quality final pass.
+    implementation("com.alphacephei:vosk-android:0.3.75")
+
     // Renders the assistant's markdown (lists, **bold**, code) as formatted
     // text instead of the raw asterisks and hashes an LLM's output is full of.
     implementation("io.noties.markwon:core:4.6.2")

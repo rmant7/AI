@@ -106,6 +106,8 @@
     <string name="transcribe_mic_listening">Listening…</string>
     <string name="transcribe_mic_idle">Idle</string>
     <string name="transcribe_mic_error">Mic session stopped: %1$s</string>
+    <string name="transcribe_vosk_section_title">LIVE MIC — VOSK (SPIKE)</string>
+    <string name="transcribe_vosk_no_model">No Vosk model found. Push one first — see docs/14-vosk-spike.md.</string>
 
     <string name="settings_whisper_model">Speech recognition model (offline)</string>
     <string name="settings_whisper_manage">Open Models → Voice</string>
