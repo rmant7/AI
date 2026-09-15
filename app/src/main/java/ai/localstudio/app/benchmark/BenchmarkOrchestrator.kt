@@ -117,6 +117,7 @@ class BenchmarkOrchestrator(
         // structure — see BenchmarkPerformanceTrend's own doc comment for
         // why that distinction matters for a degradation measurement.
         val orderedRtfs = mutableListOf<Double>()
+        var isFirstEngine = true
         job = scope.launch {
             try {
                 val output = runner.run(
@@ -150,7 +151,12 @@ class BenchmarkOrchestrator(
                     // load — not avoiding it — is exactly what those two
                     // modes are meant to be compared under (requirement #5).
                     beforeEngine = {
-                        if (mode == BenchmarkPerformanceMode.COOL_DOWN) {
+                        // Real device report: this fires before every
+                        // engine, the first one included — without the
+                        // isFirstEngine check, COOL_DOWN burned a full fixed
+                        // delay before the run had even loaded its first
+                        // model, with nothing yet to cool down from.
+                        if (mode == BenchmarkPerformanceMode.COOL_DOWN && !isFirstEngine) {
                             thermalGuard.waitUntilSafe { message ->
                                 appLog.record("BENCHMARK", message)
                                 val current = _state.value as? BenchmarkUiState.Running
@@ -160,6 +166,7 @@ class BenchmarkOrchestrator(
                             _state.value = BenchmarkUiState.Running(current?.completed ?: 0, current?.total ?: total, "Cooling down…", mode)
                             delay(COOL_DOWN_MIN_DELAY_MS)
                         }
+                        isFirstEngine = false
                     },
                     onFileComplete = { _, file, metrics ->
                         // Persisted the moment each individual file finishes,
