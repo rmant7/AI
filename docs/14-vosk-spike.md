@@ -13,6 +13,24 @@ model manager as elaborate as Whisper's (RAM-fit labels, freshness checks,
 out to need it (see below) — but the catalogue itself stays a short,
 hand-picked list, not a general catalog system.
 
+## Known, likely-disqualifying limitation: no code-switching
+
+A single `Recognizer` is built against one model's fixed decoding graph
+(lexicon + language model for exactly one language) — there is no
+multilingual Vosk model and no way to switch languages *within* an
+utterance the way Whisper's shared multilingual vocabulary lets it degrade
+gracefully on code-switched speech. Running several `Recognizer`s in
+parallel (one per language) would only ever let you pick a result per
+*utterance*, never resolve a sentence that mixes languages word-to-word —
+and that logic doesn't exist here. Separately, Hebrew does not appear in
+Vosk's own language list at all
+(<https://alphacephei.com/vosk/models>), so a third language in the mix
+isn't just a code-switching problem — there may be no Hebrew model to load
+in the first place. If real speech mixes languages within a sentence (not
+just switches between separate recordings), this is very likely a hard
+blocker regardless of the rest of this spike's verdict — worth confirming
+against the actual models list before spending more time on this path.
+
 ## What's new
 
 - **Dependency**: `implementation("com.alphacephei:vosk-android:0.3.75")` in
@@ -27,8 +45,10 @@ hand-picked list, not a general catalog system.
   bookkeeping.
 - **`ai.localstudio.app.vosk.VoskModels`** — the small, hand-picked
   catalogue (`vosk-small-ru`, `vosk-small-en`, and a larger, more-accurate
-  `vosk-ru`), each pointing at the official zip on
-  <https://alphacephei.com/vosk/models>.
+  `vosk-ru`). Each seed carries a *list* of URLs, tried in order —
+  <https://alphacephei.com/vosk/models> first, then a Hugging Face mirror —
+  since `alphacephei.com` alone has been reported unreachable (DNS not
+  resolving, VPN or not) on a real device.
 - **`ai.localstudio.app.vosk.VoskModelStore`** — one directory per seed
   under app-private storage, plus `extract()` to unzip a downloaded model
   into it (stripping the single top-level directory every official archive
