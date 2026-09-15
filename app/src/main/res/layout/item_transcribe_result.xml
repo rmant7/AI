@@ -29,6 +29,12 @@
                 android:textSize="15sp"
                 android:textStyle="bold" />
 
+            <!-- app:tint on all three: ic_play_arrow/ic_copy are hardcoded
+                 #FF000000 with no tint of their own, so on this app's dark
+                 theme they render as black-on-near-black — effectively
+                 invisible, reported directly as "there's no play button"
+                 when it was there the whole time, just impossible to see.
+                 ?attr/colorOnSurface adapts to whichever theme is active. -->
             <ImageButton
                 android:id="@+id/resultPlayButton"
                 android:layout_width="32dp"
@@ -36,7 +42,8 @@
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/transcribe_play"
                 android:padding="6dp"
-                android:src="@drawable/ic_play_arrow" />
+                android:src="@drawable/ic_play_arrow"
+                app:tint="?attr/colorOnSurface" />
 
             <ImageButton
                 android:id="@+id/resultCopyButton"
@@ -46,7 +53,8 @@
                 android:contentDescription="@string/message_copy"
                 android:padding="6dp"
                 android:src="@drawable/ic_copy"
-                android:visibility="gone" />
+                android:visibility="gone"
+                app:tint="?attr/colorOnSurface" />
 
             <ImageButton
                 android:id="@+id/resultShareButton"
@@ -56,7 +64,8 @@
                 android:contentDescription="@string/transcribe_share"
                 android:padding="6dp"
                 android:src="@android:drawable/ic_menu_share"
-                android:visibility="gone" />
+                android:visibility="gone"
+                app:tint="?attr/colorOnSurface" />
 
         </LinearLayout>
 
