@@ -873,12 +873,26 @@ class AppContainer private constructor(private val context: Context) {
      * corrupt the one number a benchmark exists to measure honestly
      * (model_load_time).
      */
+    /**
+     * Every *installed* Whisper size, not just [settings.whisperModelId]'s
+     * one pick — comparing sizes/quantizations against each other is the
+     * whole point once CTranslate2 is off the table as a second backend
+     * (see docs/16-stt-benchmark.md's own note on this). Order is
+     * deliberate, not scan order: Tiny first (cheapest, fastest way to
+     * confirm the whole run works at all), then largest-to-smallest
+     * through the rest — this run's biggest, riskiest load happens early,
+     * right after a known-good baseline, rather than last after whatever
+     * memory pressure the smaller models already added.
+     */
     val transcriptionEngines: List<TranscriptionEngine>
-        get() = listOfNotNull(
-            whisperStore.installedSeed(settings.whisperModelId)?.let { seed ->
+        get() {
+            val installed = WhisperModels.SEEDS.filter { whisperStore.isInstalled(it) }
+            val tiny = installed.filter { it.id == WhisperModels.TINY_ID }
+            val restLargestFirst = installed.filterNot { it.id == WhisperModels.TINY_ID }.sortedByDescending { it.approxSizeBytes }
+            return (tiny + restLargestFirst).map { seed ->
                 WhisperCppTranscriptionEngine(whisperCppRuntime as WhisperCppRuntime, whisperStore, seed)
-            },
-        )
+            }
+        }
 
     private val benchmarkReportStore = BenchmarkReportStore(context)
 

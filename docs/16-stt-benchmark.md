@@ -73,24 +73,43 @@ source file already is (no engine in this app resamples independently, so
 this is inherently shared, not something the runner has to force) and the
 same task (`"transcribe"`, the only task whisper.cpp is exercised for here
 — recorded on `BenchmarkReport.sharedTask` rather than left implicit).
-Where a parameter genuinely can't be forced identical across engines yet
-(there is currently only one engine, so this hasn't been tested against a
-real second implementation), the intent is to record the actual value per
-engine in `BenchmarkRunMetrics` rather than pretend it was unified —
-`threads`, `precision`, and `forcedLanguage`/`detectedLanguage` already
-work this way.
+Where a parameter genuinely can't be forced identical across engines (the
+whisper.cpp size/quantization ladder already exercises this: each size has
+its own `precision`, some quantized and some not — see `WhisperModels`),
+the actual value is recorded per engine in `BenchmarkRunMetrics` rather
+than pretended to be unified — `threads`, `precision`, and
+`forcedLanguage`/`detectedLanguage` all work this way.
 
 ### Warm-up, load time, and steady-state kept separate
 
-Every engine is loaded and warmed up (one throwaway inference) *before* any
-file is transcribed by *any* engine, not interleaved per file — so a slow
-load for one engine is never charged against another's numbers, and a
-cold-start cost never leaks into the per-file steady-state timings.
-`BenchmarkEngineSummary` carries `modelLoadMs` and `warmInferenceMs`
-separately. An engine whose load or warm-up fails does not abort the whole
-run — its rows simply report `BenchmarkStatus.ERROR` for every file, so a
-backend that couldn't be set up shows up as a documented failure, not a
-silent gap in a report read weeks later.
+Every engine is loaded and warmed up (one throwaway inference) before any
+of its files are transcribed, and a cold-start cost never leaks into the
+per-file steady-state timings. `BenchmarkEngineSummary` carries
+`modelLoadMs` and `warmInferenceMs` separately. An engine whose load or
+warm-up fails does not abort the whole run — its rows simply report
+`BenchmarkStatus.ERROR` for every file, so a backend that couldn't be set
+up shows up as a documented failure, not a silent gap in a report read
+weeks later.
+
+### One engine resident at a time
+
+`BenchmarkRunner` loads an engine, runs it against every file, and
+**releases it before the next engine's own load starts** — never two
+engines' sessions held open simultaneously. This matters concretely for
+Whisper's own size ladder: `AppContainer.transcriptionEngines` compares
+every *installed* Whisper size (Tiny through Large), and holding several
+of those resident at once — up to ~2.9GB of weights alone across all six,
+before any inference buffers — is real memory pressure on a phone that's
+also running everything else the user has open. Sequencing one model at a
+time keeps peak memory to roughly one model's own footprint regardless of
+how many sizes are being compared.
+
+Order is deliberate, not scan order: **Tiny first** (cheapest, fastest way
+to confirm the whole run works before committing to a long one), then
+**largest-to-smallest** through the rest — the run's single biggest,
+riskiest load happens early, right after a known-good baseline, rather
+than last, after whatever memory pressure the smaller models already
+added.
 
 ### What's measured
 
@@ -128,18 +147,24 @@ fresh one after a model or engine update, per the original requirement.
 
 ### Output
 
-Saved as pretty-printed JSON to `filesDir/benchmarks/benchmark-<timestamp>.json`
-(internal, always) and mirrored to `Download/Benchmarks/` via `MediaStore`
-on API 29+ (best-effort, same convention `FileTranscriptionRunner` already
-uses for transcripts) — reachable without digging into the app's private
-storage. Sharing a saved report from `BenchmarkActivity` goes through the
-app's existing `FileProvider` (`xml/transcript_file_paths.xml`, now scoped
-to both `transcripts/` and `benchmarks/`).
+Saved three ways (`BenchmarkReportStore.save`):
 
-Per-backend transcript text travels *inside* the JSON
-(`BenchmarkRunMetrics.transcriptText`), not as separate `.txt` files —
-deliberately, to avoid multiplying file count by backend count on a
-hundreds-of-files run.
+1. The full JSON internally, to `filesDir/benchmarks/benchmark-<timestamp>.json`
+   — always, regardless of API level; this is what `BenchmarkActivity`'s
+   own Share button reads, via the app's existing `FileProvider`
+   (`xml/transcript_file_paths.xml`, scoped to both `transcripts/` and
+   `benchmarks/`).
+2. The same JSON, mirrored to `Download/Transcripts/benchmark/` via
+   `MediaStore` on API 29+ (best-effort) — the single reproducible record
+   of the whole run.
+3. One plain-text file per (engine, audio file), under
+   `Download/Transcripts/benchmark/<modelId>/<audio file name>.txt` —
+   containing a short metrics header (status, processing time, RTF, native
+   heap reading) followed by the transcript itself, or the error message
+   for a failed run. Organized **by model**, not by source file: this is
+   what makes "what did Tiny produce for this recording vs. what did Large
+   produce" a matter of opening two folders side by side, without digging
+   through the combined JSON.
 
 ### Summary table
 

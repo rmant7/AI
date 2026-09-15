@@ -3,19 +3,29 @@ package ai.localstudio.core.benchmark
 import ai.localstudio.core.model.AudioRef
 
 /**
- * Runs every registered [TranscriptionEngine] against every selected file,
- * in the same order for every engine, and returns the raw measurements —
- * see [BenchmarkReport] for the full, reproducible shape this feeds into
- * (device/app metadata is attached by the caller, not here: this class has
- * no Android dependency, deliberately, the same reasoning the rest of
- * `core` already follows).
+ * Runs every registered [TranscriptionEngine] against every selected file
+ * and returns the raw measurements — see [BenchmarkReport] for the full,
+ * reproducible shape this feeds into (device/app metadata is attached by
+ * the caller, not here: this class has no Android dependency, deliberately,
+ * the same reasoning the rest of `core` already follows).
  *
- * **Ordering, on purpose**: every engine is loaded and warmed up (see
- * [TranscriptionEngine.load]/[TranscriptionEngineSession.warmUp]) *before*
- * any file is transcribed by *any* engine — not interleaved — so a slow
- * load for engine B never gets charged against engine A's own numbers, and
- * so [onProgress] reflects genuine per-file work throughout the file loop
- * rather than including load time.
+ * **One engine fully resident at a time, on purpose.** Each engine is
+ * loaded, warmed up (see [TranscriptionEngine.load]/
+ * [TranscriptionEngineSession.warmUp]), run against every file, and
+ * released *before the next engine's own [TranscriptionEngine.load] call
+ * starts* — never two engines' sessions held open at once. Comparing
+ * several on-device model sizes (e.g. every installed Whisper size, from
+ * Tiny to Large) is exactly this benchmark's own point; holding all of them
+ * resident simultaneously would mean several hundred MB to multiple GB of
+ * native weights (plus each one's own inference buffers) loaded at the same
+ * time, on a phone already running everything else the user has open. This
+ * is what real memory pressure during a multi-model run looks like — this
+ * ordering is what avoids it, not just a nice-to-have.
+ *
+ * Per-file results across engines still land in the same order every file
+ * was scanned in ([BenchmarkFileResult] per file, holding one
+ * [BenchmarkRunMetrics] per engine) — callers do not see or need to care
+ * that engines were processed one at a time internally.
  *
  * **A failed load or warm-up does not abort the run**: that engine's rows
  * simply report [BenchmarkStatus.ERROR] for every file rather than
@@ -43,7 +53,14 @@ class BenchmarkRunner(
     ): BenchmarkRunOutput {
         val startedAt = clock()
         val engineSummaries = mutableListOf<BenchmarkEngineSummary>()
-        val sessions = LinkedHashMap<TranscriptionEngine, TranscriptionEngineSession?>()
+        // Keyed by identity, not content — two engines can legitimately
+        // share every field (same backend, same model, different instance)
+        // and still need separate result lists.
+        val perFileMetrics = LinkedHashMap<BenchmarkAudioFile, MutableList<BenchmarkRunMetrics>>()
+        files.forEach { perFileMetrics[it] = mutableListOf() }
+
+        var completed = 0
+        val total = files.size * engines.size
 
         for (engine in engines) {
             val loadStart = clock()
@@ -62,7 +79,24 @@ class BenchmarkRunner(
                     loadFailed = true,
                     loadErrorMessage = e.message ?: e.toString(),
                 )
-                sessions[engine] = null
+                files.forEach { file ->
+                    perFileMetrics.getValue(file) += BenchmarkRunMetrics(
+                        backendId = engine.backendId,
+                        backendVersion = engine.backendVersion,
+                        modelId = engine.modelId,
+                        precision = engine.precision,
+                        threads = null,
+                        forcedLanguage = forcedLanguage,
+                        detectedLanguage = null,
+                        processingMs = 0,
+                        rtf = null,
+                        memoryMb = null,
+                        status = BenchmarkStatus.ERROR,
+                        errorMessage = "engine failed to load: ${e.message ?: e}",
+                    )
+                    completed++
+                    onProgress(completed, total)
+                }
                 continue
             }
             val modelLoadMs = clock() - loadStart
@@ -93,42 +127,26 @@ class BenchmarkRunner(
                 warmUpFailed = warmUpFailed,
                 loadFailed = false,
             )
-            sessions[engine] = session
-        }
 
-        val fileResults = mutableListOf<BenchmarkFileResult>()
-        var completed = 0
-        val total = files.size * engines.size
-
-        for (file in files) {
-            val perEngine = mutableListOf<BenchmarkRunMetrics>()
-            for (engine in engines) {
-                val session = sessions[engine]
-                perEngine += if (session == null) {
-                    BenchmarkRunMetrics(
-                        backendId = engine.backendId,
-                        backendVersion = engine.backendVersion,
-                        modelId = engine.modelId,
-                        precision = engine.precision,
-                        threads = null,
-                        forcedLanguage = forcedLanguage,
-                        detectedLanguage = null,
-                        processingMs = 0,
-                        rtf = null,
-                        memoryMb = null,
-                        status = BenchmarkStatus.ERROR,
-                        errorMessage = "engine failed to load",
-                    )
-                } else {
-                    runOneTimed(engine, session, file, forcedLanguage, memorySamplerMb)
+            try {
+                for (file in files) {
+                    perFileMetrics.getValue(file) += runOneTimed(engine, session, file, forcedLanguage, memorySamplerMb)
+                    completed++
+                    onProgress(completed, total)
                 }
-                completed++
-                onProgress(completed, total)
+            } finally {
+                // Always released before the next engine's own load() call —
+                // see this class's own doc comment on why that ordering is
+                // the actual point, not just cleanup. `finally` so a file
+                // loop that throws (it shouldn't — runOneTimed catches its
+                // own exceptions — but a bug here must not leave this
+                // engine's model resident through the rest of the run) still
+                // frees it.
+                session.release()
             }
-            fileResults += BenchmarkFileResult(file, perEngine)
         }
 
-        sessions.values.forEach { it?.release() }
+        val fileResults = files.map { file -> BenchmarkFileResult(file, perFileMetrics.getValue(file)) }
 
         return BenchmarkRunOutput(
             startedAtEpochMs = startedAt,
@@ -176,7 +194,7 @@ class BenchmarkRunner(
                 detectedLanguage = null,
                 processingMs = elapsed,
                 rtf = null,
-                memoryMb = null,
+                memoryMb = memorySamplerMb?.invoke(),
                 status = BenchmarkStatus.ERROR,
                 errorMessage = e.message ?: e.toString(),
             )
