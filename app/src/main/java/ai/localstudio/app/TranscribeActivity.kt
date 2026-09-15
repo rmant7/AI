@@ -20,6 +20,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -34,7 +35,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -66,9 +69,13 @@ class TranscribeActivity : AppCompatActivity() {
     private val results = mutableListOf<Result>()
     private var job: Job? = null
 
-    /** The source clip currently loaded for playback, so a row can tell whether it's the one showing a pause icon. */
+    /** The source clip currently loaded into the shared player bar (see selectAndPlay). */
     private var playingUri: Uri? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var playerTickerJob: Job? = null
+
+    /** True while the user has a finger on playerSeekBar — the ticker must not fight a drag by resetting progress out from under it. */
+    private var playerSeekBarDragging = false
 
     /** Phase 3 test harness state — see the "LIVE MIC" section in activity_transcribe.xml and WhisperCppMicSession's own doc comment. */
     private var micActive = false
@@ -155,6 +162,19 @@ class TranscribeActivity : AppCompatActivity() {
         binding.micToggleButton.setOnClickListener { onMicToggleClicked() }
         binding.voskToggleButton.setOnClickListener { onVoskToggleClicked() }
         binding.routerToggleButton.setOnClickListener { onRouterToggleClicked() }
+        binding.playerPlayPauseButton.setOnClickListener { togglePlayerPlayPause() }
+        binding.playerSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser) binding.playerTimeText.text = formatPlayerTime(progress, mediaPlayer?.duration ?: 0)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {
+                playerSeekBarDragging = true
+            }
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                playerSeekBarDragging = false
+                mediaPlayer?.seekTo(seekBar.progress)
+            }
+        })
 
         render()
         renderMicState()
@@ -536,23 +556,36 @@ class TranscribeActivity : AppCompatActivity() {
     }
 
     /**
-     * Plays [uri] straight from its own SAF/file source — no decode through
-     * [ai.localstudio.app.whisper.MediaCodecAudioSource], deliberately: the
-     * point is to hear the *original* clip next to the transcript, not a
-     * resampled copy of what whisper.cpp actually received.
+     * Loads and plays [uri] straight from its own SAF/file source — no
+     * decode through [ai.localstudio.app.whisper.MediaCodecAudioSource],
+     * deliberately: the point is to hear the *original* clip next to the
+     * transcript, not a resampled copy of what whisper.cpp actually
+     * received. One shared player bar (see activity_transcribe.xml), not
+     * one per result row — only one file plays at a time (one
+     * MediaPlayer), so a real seek position belongs to a single control
+     * next to the file picker, not duplicated across rows and mixed in
+     * with transcription output.
      */
-    private fun togglePlayback(uri: Uri) {
+    private fun selectAndPlay(uri: Uri, name: String) {
         if (playingUri == uri) {
-            stopPlayback()
+            togglePlayerPlayPause()
             return
         }
         stopPlayback()
         playingUri = uri
-        render()
+        binding.playerBar.visibility = View.VISIBLE
+        binding.playerFileNameText.text = name
+        binding.playerSeekBar.progress = 0
+        binding.playerTimeText.text = formatPlayerTime(0, 0)
         val player = MediaPlayer()
         try {
             player.setDataSource(this, uri)
-            player.setOnPreparedListener { it.start() }
+            player.setOnPreparedListener {
+                it.start()
+                binding.playerSeekBar.max = it.duration.coerceAtLeast(0)
+                updatePlayerButton(playing = true)
+                startPlayerTicker()
+            }
             player.setOnCompletionListener { stopPlayback() }
             player.setOnErrorListener { _, _, _ -> stopPlayback(); true }
             player.prepareAsync()
@@ -564,11 +597,52 @@ class TranscribeActivity : AppCompatActivity() {
         }
     }
 
+    private fun togglePlayerPlayPause() {
+        val player = mediaPlayer ?: return
+        if (player.isPlaying) {
+            player.pause()
+            updatePlayerButton(playing = false)
+        } else {
+            player.start()
+            updatePlayerButton(playing = true)
+            startPlayerTicker()
+        }
+    }
+
+    private fun updatePlayerButton(playing: Boolean) {
+        binding.playerPlayPauseButton.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+        binding.playerPlayPauseButton.contentDescription = getString(if (playing) R.string.transcribe_pause else R.string.transcribe_play)
+    }
+
+    /** Polls MediaPlayer.currentPosition rather than relying on a callback — MediaPlayer has none for playback progress. Stops itself once playback is no longer running; startPlayerTicker restarts it whenever play resumes. */
+    private fun startPlayerTicker() {
+        playerTickerJob?.cancel()
+        playerTickerJob = lifecycleScope.launch {
+            while (isActive) {
+                val player = mediaPlayer
+                if (player == null || !player.isPlaying) break
+                if (!playerSeekBarDragging) binding.playerSeekBar.progress = player.currentPosition
+                binding.playerTimeText.text = formatPlayerTime(player.currentPosition, player.duration)
+                delay(300)
+            }
+        }
+    }
+
+    private fun formatPlayerTime(positionMs: Int, durationMs: Int): String {
+        fun format(ms: Int): String {
+            val totalSeconds = (ms / 1000).coerceAtLeast(0)
+            return "${totalSeconds / 60}:${(totalSeconds % 60).toString().padStart(2, '0')}"
+        }
+        return "${format(positionMs)} / ${format(durationMs)}"
+    }
+
     private fun stopPlayback() {
+        playerTickerJob?.cancel()
+        playerTickerJob = null
         mediaPlayer?.let { player -> runCatching { player.stop() }; player.release() }
         mediaPlayer = null
         playingUri = null
-        render()
+        binding.playerBar.visibility = View.GONE
     }
 
     private fun setRunning(running: Boolean) {
@@ -628,10 +702,11 @@ class TranscribeActivity : AppCompatActivity() {
                 binding.resultShareButton.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
                 binding.resultShareButton.setOnClickListener { shareResult(result) }
 
-                val isPlaying = playingUri == result.uri
-                binding.resultPlayButton.setImageResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
-                binding.resultPlayButton.contentDescription = getString(if (isPlaying) R.string.transcribe_pause else R.string.transcribe_play)
-                binding.resultPlayButton.setOnClickListener { togglePlayback(result.uri) }
+                // Tap the row to load it into the shared player bar (see
+                // activity_transcribe.xml) — no per-row play control here
+                // anymore, that's exactly what mixed playback into the
+                // transcription output.
+                binding.root.setOnClickListener { selectAndPlay(result.uri, result.name) }
             }
         }
     }
