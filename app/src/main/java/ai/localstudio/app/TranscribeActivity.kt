@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -131,9 +132,18 @@ class TranscribeActivity : AppCompatActivity() {
         if (uri == null) return@registerForActivityResult
         contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         val tree = DocumentFile.fromTreeUri(this, uri)
-        val files = tree?.let { MediaFileUtils.listMediaFilesRecursively(it) }.orEmpty()
-        container.fileTranscriptionRunner.setSource(files.map { file -> TranscriptionResult(file.uri, file.name ?: file.uri.toString()) })
-        binding.transcribeSourceText.text = getString(R.string.transcribe_folder_found, files.size)
+        // listMediaFilesRecursively is a plain synchronous walk over many
+        // ContentResolver/SAF calls — on a real folder (reported: ~500
+        // files) that is easily several seconds of work, and this callback
+        // runs on the main thread, so calling it in-line here froze the
+        // whole screen (reported as a black screen) for exactly that long.
+        binding.transcribeProgress.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            val files = withContext(Dispatchers.IO) { tree?.let { MediaFileUtils.listMediaFilesRecursively(it) }.orEmpty() }
+            container.fileTranscriptionRunner.setSource(files.map { file -> TranscriptionResult(file.uri, file.name ?: file.uri.toString()) })
+            binding.transcribeSourceText.text = getString(R.string.transcribe_folder_found, files.size)
+            binding.transcribeProgress.visibility = View.GONE
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -147,11 +157,6 @@ class TranscribeActivity : AppCompatActivity() {
 
         binding.transcribeResults.layoutManager = LinearLayoutManager(this)
         binding.transcribeResults.adapter = adapter
-        // wrap_content + no nested scrolling: the outer ScrollView
-        // (activity_transcribe.xml) is the only thing that scrolls now, so
-        // this list lays out to its full content height instead of fighting
-        // the parent for a bounded scrollable region.
-        binding.transcribeResults.isNestedScrollingEnabled = false
 
         binding.pickFileButton.setOnClickListener { pickFileLauncher.launch(arrayOf("audio/*", "video/*")) }
         binding.pickFolderButton.setOnClickListener { pickFolderLauncher.launch(null) }

@@ -1,26 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The whole screen scrolls as one unit: transcribeResults used to be the
-     only flexible-height child (layout_weight="1") in a non-scrolling,
-     match_parent LinearLayout, on the assumption that whatever sat below it
-     (the mic sections) would always fit in whatever space was left over.
-     Adding the router section (a third mic block) broke that assumption —
-     on a real device, content below the fold was simply unreachable, no
-     scrolling, nothing clipped-but-visible-via-gesture. transcribeResults
-     itself switches to wrap_content + nested scrolling disabled below, so
-     this single ScrollView is the only thing that scrolls. Plain framework
-     ScrollView, not androidx's NestedScrollView: nothing below actually
-     needs nested-scroll cooperation once transcribeResults' own nested
-     scrolling is disabled, so there is no reason to pull in the androidx
-     widget. -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Two independent scrolling regions, not one giant ScrollView wrapping
+     everything: transcribeResults can hold hundreds of files (a real
+     device report: a 472-file folder), and RecyclerView only recycles
+     off-screen rows correctly when it has a *bounded* height — wrap_content
+     inside a ScrollView forces it to lay out every single row at once,
+     which is both a severe performance problem and, past a few hundred
+     custom cards, broke rendering outright (4 of 472 rows shown, no way to
+     scroll to the rest). So transcribeResults keeps its own bounded,
+     properly-recycling internal scroll (weight="1", same as before this
+     screen grew a router section), and the mic/vosk/router test-harness
+     sections — always small, fixed content, never hundreds of items — get
+     their own separate scrollable area below it (also weight="1"). Plain
+     framework ScrollView for that second region: nothing inside it is
+     itself a scrolling child needing nested-scroll cooperation, so there's
+     no reason to pull in androidx's NestedScrollView. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
-
-<LinearLayout
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
     android:orientation="vertical">
 
     <TextView
@@ -175,26 +172,43 @@
         android:padding="16dp"
         android:text="@string/transcribe_empty" />
 
-    <!-- File-transcription results: kept directly below the controls that
-         produce them (source picker, Start/Stop) with nothing else between,
-         so a result stays visually attached to the file it belongs to
-         instead of being split across the mic test section below. -->
+    <!-- Bounded height (weight, not wrap_content) so RecyclerView actually
+         recycles off-screen rows instead of laying out the entire list at
+         once — see this file's own root comment for the real device report
+         that made this matter (472-file folder, only 4 rows ever
+         rendered). isNestedScrollingEnabled stays at its default (true):
+         it is a sibling of the mic-sections ScrollView below, not nested
+         inside it, so there is nothing here for it to cooperate with. -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/transcribeResults"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:padding="12dp" />
 
-    <!-- Phase 3 test harness (docs/13-asr-pipeline-migration.md): drives
-         WhisperCppMicSession/MicrophoneAudioSource directly, independent of
-         the file/folder batch controls above. Does not touch ChatActivity's
-         own (currently hidden) mic button or WhisperEngine at all. Kept
-         last so it never wedges itself between the file picker and its own
-         results above. -->
+    <!-- Phase 3 test harness (docs/13-asr-pipeline-migration.md) plus the
+         Vosk spike (docs/14) and the language router (docs/15): always
+         small, fixed content (three toggle buttons and their transcript
+         boxes), never hundreds of items like transcribeResults above, so
+         it gets its own independent scrollable region rather than sharing
+         transcribeResults' one — the whole reason that shared region
+         existed was to reach these sections below the fold, but nesting a
+         large RecyclerView inside it is what broke the file list. -->
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:background="?attr/colorOutlineVariant" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
 
     <TextView
         android:layout_width="match_parent"
@@ -231,13 +245,6 @@
 
     </LinearLayout>
 
-    <!-- No maxHeight/scrollbars: this whole screen is one ScrollView now
-         (see the root element's own comment) — a bounded box with its own
-         ScrollingMovementMethod nested inside an outer scrolling container
-         is a well-known Android gesture conflict (the outer ScrollView
-         wins the drag, so content past the inner box's height becomes
-         unreachable) — simply growing to wrap_content and letting the
-         single outer ScrollView handle it avoids that entirely. -->
     <TextView
         android:id="@+id/micTranscriptText"
         android:layout_width="match_parent"
@@ -359,6 +366,8 @@
         android:textSize="13sp"
         android:visibility="gone" />
 
-</LinearLayout>
+    </LinearLayout>
 
-</ScrollView>
+    </ScrollView>
+
+</LinearLayout>
