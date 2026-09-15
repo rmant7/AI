@@ -96,7 +96,9 @@
     <string name="transcribe_status_running">Transcribing…</string>
     <string name="transcribe_status_done">Done, saved as %1$s</string>
     <string name="transcribe_status_error">Error: %1$s</string>
+    <string name="transcribe_share">Share transcript</string>
     <string name="transcribe_status_cancelled">Cancelled</string>
+    <string name="transcribe_status_cancelled_saved">Cancelled, partial result saved as %1$s</string>
     <string name="transcribe_play">Play</string>
     <string name="transcribe_pause">Pause</string>
     <string name="transcribe_play_failed">Couldn\'t play this file: %1$s</string>

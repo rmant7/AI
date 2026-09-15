@@ -234,6 +234,12 @@ class TranscribeActivity : AppCompatActivity() {
             result.savedAs = savedName
         } catch (e: CancellationException) {
             result.status = Status.CANCELLED
+            // Whatever segments already arrived via onSegment before Stop was
+            // pressed are real transcript, not garbage — discarding them
+            // (the old behavior: CANCELLED with no save()) meant a long file
+            // stopped partway through showed neither text nor a saved file,
+            // even after minutes of real transcription work.
+            if (result.text.isNotBlank()) result.savedAs = save(result.name, result.text)
             throw e
         } catch (e: Exception) {
             result.status = Status.ERROR
@@ -563,12 +569,15 @@ class TranscribeActivity : AppCompatActivity() {
                     Status.RUNNING -> getString(R.string.transcribe_status_running)
                     Status.DONE -> getString(R.string.transcribe_status_done, result.savedAs ?: "")
                     Status.ERROR -> getString(R.string.transcribe_status_error, result.error ?: "")
-                    Status.CANCELLED -> getString(R.string.transcribe_status_cancelled)
+                    Status.CANCELLED -> result.savedAs?.let { getString(R.string.transcribe_status_cancelled_saved, it) }
+                        ?: getString(R.string.transcribe_status_cancelled)
                 }
                 binding.resultText.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
                 binding.resultText.text = result.text
                 binding.resultCopyButton.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
                 binding.resultCopyButton.setOnClickListener { copyToClipboard(result.text) }
+                binding.resultShareButton.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
+                binding.resultShareButton.setOnClickListener { shareText(result.text) }
 
                 val isPlaying = playingUri == result.uri
                 binding.resultPlayButton.setImageResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
@@ -576,6 +585,22 @@ class TranscribeActivity : AppCompatActivity() {
                 binding.resultPlayButton.setOnClickListener { togglePlayback(result.uri) }
             }
         }
+    }
+
+    /**
+     * The saved .txt lives under this app's own private filesDir — invisible
+     * to any file manager, Downloads app, or other app without root. Plain
+     * text share (same pattern as ChatActivity.shareChat()) is the actual
+     * way out: the system share sheet's own targets (Files, Drive, Telegram,
+     * ...) already know how to save that text as a file somewhere the user
+     * can reach, without this needing a FileProvider of its own.
+     */
+    private fun shareText(text: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.transcribe_share)))
     }
 
     private fun copyToClipboard(text: String) {

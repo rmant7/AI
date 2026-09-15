@@ -98,7 +98,9 @@
     <string name="transcribe_status_running">Идёт транскрибация…</string>
     <string name="transcribe_status_done">Готово, сохранено как %1$s</string>
     <string name="transcribe_status_error">Ошибка: %1$s</string>
+    <string name="transcribe_share">Поделиться расшифровкой</string>
     <string name="transcribe_status_cancelled">Отменено</string>
+    <string name="transcribe_status_cancelled_saved">Отменено, частичный результат сохранён как %1$s</string>
     <string name="transcribe_play">Воспроизвести</string>
     <string name="transcribe_pause">Пауза</string>
     <string name="transcribe_play_failed">Не удалось воспроизвести файл: %1$s</string>

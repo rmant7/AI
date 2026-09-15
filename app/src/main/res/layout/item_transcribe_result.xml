@@ -48,6 +48,16 @@
                 android:src="@drawable/ic_copy"
                 android:visibility="gone" />
 
+            <ImageButton
+                android:id="@+id/resultShareButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/transcribe_share"
+                android:padding="6dp"
+                android:src="@android:drawable/ic_menu_share"
+                android:visibility="gone" />
+
         </LinearLayout>
 
         <TextView
