@@ -1,8 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- The whole screen scrolls as one unit: transcribeResults used to be the
+     only flexible-height child (layout_weight="1") in a non-scrolling,
+     match_parent LinearLayout, on the assumption that whatever sat below it
+     (the mic sections) would always fit in whatever space was left over.
+     Adding the router section (a third mic block) broke that assumption —
+     on a real device, content below the fold was simply unreachable, no
+     scrolling, nothing clipped-but-visible-via-gesture. transcribeResults
+     itself switches to wrap_content + nested scrolling disabled below, so
+     this single ScrollView is the only thing that scrolls. Plain framework
+     ScrollView, not androidx's NestedScrollView: nothing below actually
+     needs nested-scroll cooperation once transcribeResults' own nested
+     scrolling is disabled, so there is no reason to pull in the androidx
+     widget. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fillViewport="true">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
     android:orientation="vertical">
 
     <TextView
@@ -109,8 +127,7 @@
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/transcribeResults"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="wrap_content"
         android:padding="12dp" />
 
     <!-- Phase 3 test harness (docs/13-asr-pipeline-migration.md): drives
@@ -290,3 +307,5 @@
         android:visibility="gone" />
 
 </LinearLayout>
+
+</ScrollView>

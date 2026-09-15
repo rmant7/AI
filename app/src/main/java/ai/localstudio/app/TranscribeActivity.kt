@@ -124,6 +124,11 @@ class TranscribeActivity : AppCompatActivity() {
 
         binding.transcribeResults.layoutManager = LinearLayoutManager(this)
         binding.transcribeResults.adapter = adapter
+        // wrap_content + no nested scrolling: the outer ScrollView
+        // (activity_transcribe.xml) is the only thing that scrolls now, so
+        // this list lays out to its full content height instead of fighting
+        // the parent for a bounded scrollable region.
+        binding.transcribeResults.isNestedScrollingEnabled = false
         // maxHeight (see activity_transcribe.xml) only bounds the box —
         // without this, text past that height was clipped with no way to
         // reach it at all.
@@ -244,8 +249,16 @@ class TranscribeActivity : AppCompatActivity() {
         } catch (e: Exception) {
             result.status = Status.ERROR
             result.error = e.message ?: e.toString()
+        } finally {
+            // Not a plain trailing call: the CancellationException branch
+            // above re-throws (it must, to actually cancel the loop in
+            // start()) — a render() placed after the try/catch instead of
+            // in finally would never run on that path, which is exactly why
+            // Stop looked like it did nothing: status/savedAs were updated
+            // in memory correctly, but the RecyclerView row was never told
+            // to redraw.
+            render()
         }
-        render()
     }
 
     private fun save(sourceName: String, text: String): String {
