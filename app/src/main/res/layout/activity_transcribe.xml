@@ -41,6 +41,15 @@
 
     </LinearLayout>
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/openVoiceModelsButton"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginBottom="4dp"
+        android:text="@string/transcribe_open_voice_models" />
+
     <TextView
         android:id="@+id/transcribeSourceText"
         android:layout_width="match_parent"
@@ -48,67 +57,6 @@
         android:paddingHorizontal="16dp"
         android:paddingBottom="8dp"
         android:textSize="13sp" />
-
-    <!-- Phase 3 test harness (docs/13-asr-pipeline-migration.md): drives
-         WhisperCppMicSession/MicrophoneAudioSource directly, independent of
-         the file/folder batch controls above. Does not touch ChatActivity's
-         own (currently hidden) mic button or WhisperEngine at all. -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="?attr/colorOutlineVariant" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingHorizontal="16dp"
-        android:paddingTop="10dp"
-        android:text="@string/transcribe_mic_section_title"
-        android:textColor="?attr/colorOnSurfaceVariant"
-        android:textSize="11sp"
-        android:textStyle="bold" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="8dp">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/micToggleButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/transcribe_mic_start" />
-
-        <TextView
-            android:id="@+id/micStatusText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:textSize="12sp" />
-
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/micTranscriptText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxHeight="120dp"
-        android:paddingHorizontal="16dp"
-        android:paddingBottom="10dp"
-        android:scrollbars="vertical"
-        android:textIsSelectable="true"
-        android:textSize="13sp"
-        android:visibility="gone" />
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="?attr/colorOutlineVariant" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -154,11 +102,76 @@
         android:padding="16dp"
         android:text="@string/transcribe_empty" />
 
+    <!-- File-transcription results: kept directly below the controls that
+         produce them (source picker, Start/Stop) with nothing else between,
+         so a result stays visually attached to the file it belongs to
+         instead of being split across the mic test section below. -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/transcribeResults"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:padding="12dp" />
+
+    <!-- Phase 3 test harness (docs/13-asr-pipeline-migration.md): drives
+         WhisperCppMicSession/MicrophoneAudioSource directly, independent of
+         the file/folder batch controls above. Does not touch ChatActivity's
+         own (currently hidden) mic button or WhisperEngine at all. Kept
+         last so it never wedges itself between the file picker and its own
+         results above. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOutlineVariant" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:text="@string/transcribe_mic_section_title"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/micToggleButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/transcribe_mic_start" />
+
+        <TextView
+            android:id="@+id/micStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <!-- maxHeight keeps this from squeezing transcribeResults above off the
+         screen; ScrollingMovementMethod (set in TranscribeActivity) is what
+         makes text past that height reachable instead of just clipped. -->
+    <TextView
+        android:id="@+id/micTranscriptText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxHeight="120dp"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="10dp"
+        android:scrollbars="vertical"
+        android:textIsSelectable="true"
+        android:textSize="13sp"
+        android:visibility="gone" />
 
 </LinearLayout>

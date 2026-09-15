@@ -88,6 +88,7 @@
     <string name="transcribe_hint">Тестовый экран для vertical slice whisper.cpp (см. docs/13-asr-pipeline-migration.md). Выберите файл или папку и нажмите «Транскрибировать». Результат каждого файла сохраняется в .txt сразу после готовности — файлы обрабатываются по одному на одной загруженной модели.</string>
     <string name="transcribe_pick_file">Выбрать файл</string>
     <string name="transcribe_pick_folder">Выбрать папку</string>
+    <string name="transcribe_open_voice_models">Выбрать голосовую модель</string>
     <string name="transcribe_start">Транскрибировать</string>
     <string name="transcribe_stop">Стоп</string>
     <string name="transcribe_no_model">Модель whisper не установлена — сначала скачайте её на экране «Модели».</string>

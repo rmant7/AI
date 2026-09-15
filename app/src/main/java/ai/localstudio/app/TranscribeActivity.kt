@@ -15,6 +15,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.text.method.ScrollingMovementMethod
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -105,9 +106,14 @@ class TranscribeActivity : AppCompatActivity() {
 
         binding.transcribeResults.layoutManager = LinearLayoutManager(this)
         binding.transcribeResults.adapter = adapter
+        // maxHeight (see activity_transcribe.xml) only bounds the box —
+        // without this, text past that height was clipped with no way to
+        // reach it at all.
+        binding.micTranscriptText.movementMethod = ScrollingMovementMethod()
 
         binding.pickFileButton.setOnClickListener { pickFileLauncher.launch(arrayOf("audio/*", "video/*")) }
         binding.pickFolderButton.setOnClickListener { pickFolderLauncher.launch(null) }
+        binding.openVoiceModelsButton.setOnClickListener { startActivity(ModelsActivity.intent(this, ModelsActivity.Category.VOICE)) }
         binding.transcribeStartButton.setOnClickListener { start() }
         binding.transcribeStopButton.setOnClickListener { stop() }
         binding.micToggleButton.setOnClickListener { onMicToggleClicked() }

@@ -86,6 +86,7 @@
     <string name="transcribe_hint">Test screen for the whisper.cpp vertical slice (see docs/13-asr-pipeline-migration.md). Pick a file or a folder, then Transcribe. Each result is saved as a .txt next to the others once its file finishes — files transcribe one at a time against a single loaded model.</string>
     <string name="transcribe_pick_file">Pick file</string>
     <string name="transcribe_pick_folder">Pick folder</string>
+    <string name="transcribe_open_voice_models">Choose voice model</string>
     <string name="transcribe_start">Transcribe</string>
     <string name="transcribe_stop">Stop</string>
     <string name="transcribe_no_model">No whisper model installed — download one on the Models screen first.</string>
