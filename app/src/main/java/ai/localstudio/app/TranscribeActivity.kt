@@ -467,6 +467,18 @@ class TranscribeActivity : AppCompatActivity() {
             routerSession = null
             renderRouterState()
         }
+
+        // RoutingDecision was already emitted for every LID window since the
+        // foundation commit, but nothing ever read it — there was no way to
+        // tell "the router looked at 3s of English and decided to stay on
+        // Russian" from "the router never even considered switching" without
+        // this. Every window, not just switches, so a stuck session is
+        // visible as a repeating reason rather than silence.
+        lifecycleScope.launch {
+            session.decisions.collect { decision ->
+                container.appLog.record("ROUTER", decision.reason)
+            }
+        }
     }
 
     private fun stopRouter() {
