@@ -1,5 +1,7 @@
 package ai.localstudio.core.model
 
+import ai.localstudio.core.speech.Language
+
 /** A reference to audio, never the samples themselves — buffers do not belong in a graph. */
 data class AudioRef(
     val uri: String,
@@ -30,6 +32,10 @@ data class TranscriptSegment(
     val endMs: Long,
     val speaker: String? = null,
     val confidence: Double? = null,
+    /** Set by a [ai.localstudio.core.speech.StreamingSpeechRouter] session — null for every other producer (existing Whisper/Vosk sessions, file transcription). Diagnostic: `[RU][vosk-ru] …` — see docs/15-speech-routing.md. */
+    val language: Language? = null,
+    /** The [ai.localstudio.core.speech.SpeechModelInfo.id] that produced this segment — same routing-only, diagnostic-only field as [language]. */
+    val modelId: String? = null,
 )
 
 /**
