@@ -177,7 +177,8 @@ class BenchmarkRunner(
                     perFileMetrics.getValue(file) += metrics
                     onStatus(
                         "${engine.displayName}: ${file.fileName} — ${metrics.status}" +
-                            (metrics.rtf?.let { " (RTF ${"%.2f".format(Locale.ROOT, it)})" } ?: ""),
+                            (metrics.rtf?.let { " (RTF ${"%.2f".format(Locale.ROOT, it)})" } ?: "") +
+                            (metrics.errorMessage?.let { " — $it" } ?: ""),
                     )
                     completed++
                     onProgress(completed, total)
