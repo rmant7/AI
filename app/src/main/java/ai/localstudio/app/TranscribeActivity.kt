@@ -5,8 +5,8 @@ import ai.localstudio.app.databinding.ItemTranscribeResultBinding
 import ai.localstudio.app.vosk.VoskModelStore
 import ai.localstudio.app.whisper.MediaFileUtils
 import ai.localstudio.app.whisper.MicrophoneAudioSource
-import ai.localstudio.app.whisper.WhisperModelSeed
-import ai.localstudio.core.model.TranscriptSegment
+import ai.localstudio.app.whisper.TranscriptionResult
+import ai.localstudio.app.whisper.TranscriptionStatus
 import ai.localstudio.core.speech.StreamingRoutingSession
 import android.Manifest
 import android.content.ClipData
@@ -37,6 +37,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -44,11 +45,15 @@ import java.io.File
 /**
  * Test harness for the whisper.cpp vertical slice
  * (docs/13-asr-pipeline-migration.md): pick a file or a folder, transcribe
- * it through [ai.localstudio.app.whisper.WhisperFileTranscriber] (which loads
- * the model once, via [ai.localstudio.app.AppContainer.whisperFileTranscriber],
+ * it through [ai.localstudio.app.whisper.WhisperFileTranscriber] (which
+ * loads the model once, via [ai.localstudio.app.AppContainer.whisperFileTranscriber],
  * and reuses it across every file), watch segments arrive before the file
- * finishes decoding, save each result as it completes. Also carries a
- * "LIVE MIC" section (Phase 3) driving
+ * finishes decoding, save each result as it completes. The actual batch
+ * job lives in [ai.localstudio.app.AppContainer.fileTranscriptionRunner],
+ * not this Activity — see that class's own doc comment for why: this
+ * screen only observes it and renders whatever it reports, so the run
+ * itself survives navigating away and back, or the Activity being
+ * recreated outright. Also carries a "LIVE MIC" section (Phase 3) driving
  * [ai.localstudio.app.whisper.WhisperCppMicSession] — a genuinely
  * incremental [ai.localstudio.core.runtime.SpeechModelHandle.startStreaming]
  * session fed by the microphone, independent of the file/folder controls
@@ -66,8 +71,6 @@ class TranscribeActivity : AppCompatActivity() {
     private lateinit var binding: ActivityTranscribeBinding
     private lateinit var container: AppContainer
     private val adapter = ResultAdapter()
-    private val results = mutableListOf<Result>()
-    private var job: Job? = null
 
     /** The source clip currently loaded into the shared player bar (see selectAndPlay). */
     private var playingUri: Uri? = null
@@ -119,11 +122,9 @@ class TranscribeActivity : AppCompatActivity() {
     private val pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
         contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        results.clear()
         val name = displayName(uri)
-        results += Result(uri, name)
+        container.fileTranscriptionRunner.setSource(listOf(TranscriptionResult(uri, name)))
         binding.transcribeSourceText.text = name
-        render()
     }
 
     private val pickFolderLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -131,10 +132,8 @@ class TranscribeActivity : AppCompatActivity() {
         contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         val tree = DocumentFile.fromTreeUri(this, uri)
         val files = tree?.let { MediaFileUtils.listMediaFilesRecursively(it) }.orEmpty()
-        results.clear()
-        files.forEach { file -> results += Result(file.uri, file.name ?: file.uri.toString()) }
+        container.fileTranscriptionRunner.setSource(files.map { file -> TranscriptionResult(file.uri, file.name ?: file.uri.toString()) })
         binding.transcribeSourceText.text = getString(R.string.transcribe_folder_found, files.size)
-        render()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -176,7 +175,15 @@ class TranscribeActivity : AppCompatActivity() {
             }
         })
 
-        render()
+        // The batch job itself lives in AppContainer.fileTranscriptionRunner
+        // now, not this Activity — see that class's own doc comment for why
+        // (Activity recreation under memory pressure used to silently wipe
+        // an in-progress transcription). This is purely an observer: every
+        // (results, running) pair fully determines what the screen shows.
+        lifecycleScope.launch {
+            combine(container.fileTranscriptionRunner.results, container.fileTranscriptionRunner.running) { results, running -> results to running }
+                .collect { (results, running) -> renderResults(results, running) }
+        }
         renderMicState()
         renderVoskState()
         renderRouterState()
@@ -202,18 +209,21 @@ class TranscribeActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Batch lifecycle, not per-file: the model stays loaded across every
-        // file in this run and is only released when this screen is actually
-        // done, matching docs/13-asr-pipeline-migration.md's "load once" rule.
-        // (Also freed under memory pressure regardless — see
-        // AppContainer.releaseWhisperEngines — for the case where the
-        // screen is merely backgrounded, not destroyed.)
+        // whisperFileTranscriber is NOT released here anymore: it now
+        // belongs to AppContainer.fileTranscriptionRunner, an application-
+        // scoped batch job that must survive this very Activity being
+        // destroyed (see FileTranscriptionRunner's own doc comment for why
+        // that recreation happens on completely ordinary navigation, not
+        // just backgrounding the whole app). It is freed the same way the
+        // router's own models are — only by AppContainer.releaseWhisperEngines
+        // under real memory pressure, never by this screen closing.
         //
-        // Off the main thread: release() blocks until any in-flight
-        // transcription actually unwinds (see its own doc comment) — fine on
-        // a background coroutine, an ANR risk called straight from onDestroy.
+        // whisperMicSession/voskRecognizer are still this screen's own —
+        // mic capture cannot usefully continue once it is gone. Off the
+        // main thread: release() blocks until any in-flight call actually
+        // unwinds (see its own doc comment) — fine on a background
+        // coroutine, an ANR risk called straight from onDestroy.
         CoroutineScope(Dispatchers.IO).launch {
-            container.whisperFileTranscriber.release()
             container.whisperMicSession.release()
             container.voskRecognizer.release()
         }
@@ -236,75 +246,11 @@ class TranscribeActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.transcribe_no_model, Toast.LENGTH_LONG).show()
             return
         }
-        if (results.isEmpty() || job?.isActive == true) return
-
-        setRunning(true)
-        container.fileTranscriptionActive = true
-        job = lifecycleScope.launch {
-            try {
-                for (result in results) {
-                    if (result.status == Status.DONE) continue
-                    result.status = Status.RUNNING
-                    result.text = ""
-                    render()
-                    runOne(result, seed)
-                }
-            } finally {
-                setRunning(false)
-                container.fileTranscriptionActive = false
-            }
-        }
-    }
-
-    private suspend fun runOne(result: Result, seed: WhisperModelSeed) {
-        try {
-            val transcript = container.whisperFileTranscriber.transcribe(result.uri, seed, language = null) { segment: TranscriptSegment ->
-                // Fires as each segment is finalized, before the rest of the
-                // file has decoded — the concrete, on-screen version of the
-                // vertical slice's acceptance criterion.
-                result.text = (result.text + " " + segment.text).trim()
-                runOnUiThread { render() }
-            }
-            val finalText = transcript.text.ifBlank { result.text }
-            val savedName = save(result.name, finalText)
-            result.text = finalText
-            result.status = Status.DONE
-            result.savedAs = savedName
-        } catch (e: CancellationException) {
-            result.status = Status.CANCELLED
-            // Whatever segments already arrived via onSegment before Stop was
-            // pressed are real transcript, not garbage — discarding them
-            // (the old behavior: CANCELLED with no save()) meant a long file
-            // stopped partway through showed neither text nor a saved file,
-            // even after minutes of real transcription work.
-            if (result.text.isNotBlank()) result.savedAs = save(result.name, result.text)
-            throw e
-        } catch (e: Exception) {
-            result.status = Status.ERROR
-            result.error = e.message ?: e.toString()
-        } finally {
-            // Not a plain trailing call: the CancellationException branch
-            // above re-throws (it must, to actually cancel the loop in
-            // start()) — a render() placed after the try/catch instead of
-            // in finally would never run on that path, which is exactly why
-            // Stop looked like it did nothing: status/savedAs were updated
-            // in memory correctly, but the RecyclerView row was never told
-            // to redraw.
-            render()
-        }
-    }
-
-    private fun save(sourceName: String, text: String): String {
-        val dir = File(filesDir, "transcripts").apply { mkdirs() }
-        val safeName = sourceName.substringBeforeLast('.').ifBlank { "transcript" }
-        val out = File(dir, "$safeName.txt")
-        out.writeText(text)
-        return out.name
+        container.fileTranscriptionRunner.start(seed)
     }
 
     private fun stop() {
-        job?.cancel()
-        container.whisperFileTranscriber.requestCancel()
+        container.fileTranscriptionRunner.stop()
     }
 
     private fun onMicToggleClicked() {
@@ -645,34 +591,22 @@ class TranscribeActivity : AppCompatActivity() {
         binding.playerBar.visibility = View.GONE
     }
 
-    private fun setRunning(running: Boolean) {
-        binding.transcribeStartButton.isEnabled = !running && results.isNotEmpty()
+    /** The single reactive rendering point for the batch job — see onCreate's own comment for why this replaced separate render()/setRunning() functions each racing their own idea of "results" and "running". */
+    private fun renderResults(results: List<TranscriptionResult>, running: Boolean) {
+        binding.transcribeEmpty.visibility = if (results.isEmpty()) View.VISIBLE else View.GONE
+        binding.transcribeResults.visibility = if (results.isEmpty()) View.GONE else View.VISIBLE
+        binding.transcribeStartButton.isEnabled = results.isNotEmpty() && !running
         binding.transcribeStopButton.isEnabled = running
         binding.transcribeProgress.visibility = if (running) View.VISIBLE else View.GONE
         binding.pickFileButton.isEnabled = !running
         binding.pickFolderButton.isEnabled = !running
-    }
-
-    private fun render() {
-        binding.transcribeEmpty.visibility = if (results.isEmpty()) View.VISIBLE else View.GONE
-        binding.transcribeResults.visibility = if (results.isEmpty()) View.GONE else View.VISIBLE
-        binding.transcribeStartButton.isEnabled = results.isNotEmpty() && job?.isActive != true
-        adapter.submit(results.toList())
-    }
-
-    private enum class Status { PENDING, RUNNING, DONE, ERROR, CANCELLED }
-
-    private class Result(val uri: Uri, val name: String) {
-        var status: Status = Status.PENDING
-        var text: String = ""
-        var error: String? = null
-        var savedAs: String? = null
+        adapter.submit(results)
     }
 
     private inner class ResultAdapter : RecyclerView.Adapter<ResultAdapter.Holder>() {
-        private var items: List<Result> = emptyList()
+        private var items: List<TranscriptionResult> = emptyList()
 
-        fun submit(next: List<Result>) {
+        fun submit(next: List<TranscriptionResult>) {
             items = next
             notifyDataSetChanged()
         }
@@ -685,14 +619,14 @@ class TranscribeActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: Holder, position: Int) = holder.bind(items[position])
 
         inner class Holder(val binding: ItemTranscribeResultBinding) : RecyclerView.ViewHolder(binding.root) {
-            fun bind(result: Result) {
+            fun bind(result: TranscriptionResult) {
                 binding.resultFileName.text = result.name
                 binding.resultStatus.text = when (result.status) {
-                    Status.PENDING -> getString(R.string.transcribe_status_pending)
-                    Status.RUNNING -> getString(R.string.transcribe_status_running)
-                    Status.DONE -> getString(R.string.transcribe_status_done, result.savedAs ?: "")
-                    Status.ERROR -> getString(R.string.transcribe_status_error, result.error ?: "")
-                    Status.CANCELLED -> result.savedAs?.let { getString(R.string.transcribe_status_cancelled_saved, it) }
+                    TranscriptionStatus.PENDING -> getString(R.string.transcribe_status_pending)
+                    TranscriptionStatus.RUNNING -> getString(R.string.transcribe_status_running)
+                    TranscriptionStatus.DONE -> getString(R.string.transcribe_status_done, result.savedAs ?: "")
+                    TranscriptionStatus.ERROR -> getString(R.string.transcribe_status_error, result.error ?: "")
+                    TranscriptionStatus.CANCELLED -> result.savedAs?.let { getString(R.string.transcribe_status_cancelled_saved, it) }
                         ?: getString(R.string.transcribe_status_cancelled)
                 }
                 binding.resultText.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
@@ -717,15 +651,16 @@ class TranscribeActivity : AppCompatActivity() {
      * Sharing plain text (EXTRA_TEXT) handed over the transcript's
      * *content*, not a file — a real ask, reported directly: text pasted
      * into a share target isn't the same as a .txt the user can actually
-     * save. Once [Result.savedAs] names the file on disk, this shares that
-     * file itself via [FileProvider] (see transcript_file_paths.xml and the
-     * AndroidManifest provider entry — file:// URIs are blocked by
-     * StrictMode for cross-app sharing on modern Android, hence content://
-     * through this). Falls back to plain text only for a row that has
-     * visible text but hasn't been saved yet (RUNNING, or ERROR after some
-     * text arrived) — save() only ever runs on DONE or a non-blank CANCELLED.
+     * save. Once [TranscriptionResult.savedAs] names the file on disk, this
+     * shares that file itself via [FileProvider] (see
+     * transcript_file_paths.xml and the AndroidManifest provider entry —
+     * file:// URIs are blocked by StrictMode for cross-app sharing on
+     * modern Android, hence content:// through this). Falls back to plain
+     * text only for a row that has visible text but hasn't been saved yet
+     * (RUNNING, or ERROR after some text arrived) — FileTranscriptionRunner
+     * only ever saves on DONE or a non-blank CANCELLED.
      */
-    private fun shareResult(result: Result) {
+    private fun shareResult(result: TranscriptionResult) {
         val savedName = result.savedAs
         val file = savedName?.let { File(File(filesDir, "transcripts"), it) }
         if (file != null && file.isFile) {

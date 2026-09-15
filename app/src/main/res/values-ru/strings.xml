@@ -303,6 +303,10 @@
     <string name="download_notification_searching">Поиск файла…</string>
     <string name="download_notification_title_one">Загрузка модели</string>
     <string name="download_notification_title_many">Загрузка моделей (%1$d)</string>
+
+    <string name="transcribe_notification_channel">Транскрипция файлов</string>
+    <string name="transcribe_notification_title">Транскрипция</string>
+    <string name="transcribe_notification_running">Транскрипция выполняется…</string>
     <string name="download_notification_whisper_progress">Whisper: %1$d%%</string>
 
     <string name="error_unsupported_file_type">Поддерживаются только .txt и .pdf</string>

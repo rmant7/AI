@@ -76,6 +76,8 @@ import ai.localstudio.core.speech.StreamingSpeechRouter
 import ai.localstudio.app.whisper.WhisperCppMicSession
 import ai.localstudio.app.whisper.WhisperCppRuntime
 import ai.localstudio.app.whisper.WhisperDownloads
+import ai.localstudio.app.whisper.FileTranscriptionRunner
+import ai.localstudio.app.whisper.FileTranscriptionService
 import ai.localstudio.app.whisper.WhisperEngine
 import ai.localstudio.app.whisper.WhisperFileTranscriber
 import ai.localstudio.app.whisper.WhisperModels
@@ -587,7 +589,8 @@ class AppContainer private constructor(private val context: Context) {
      *   close to an actual OOM. See this fix's own commit for the original
      *   report: an ~18s reload forced mid-conversation.
      * - [whisperFileTranscriber] skips eviction below TRIM_MEMORY_COMPLETE
-     *   while [fileTranscriptionActive] — a batch task that is *expected*
+     *   while [fileTranscriptionRunner]'s own `running` says a batch is
+     *   active — a task that is *expected*
      *   to keep running while the app is backgrounded (the user switches
      *   away and comes back later), so it needs to tolerate BACKGROUND/
      *   MODERATE, not just RUNNING_LOW. Real device report: a file finished
@@ -614,7 +617,7 @@ class AppContainer private constructor(private val context: Context) {
             whisperPreviewEngine.release()
             appLog.record("WHISPER", "preview engine unloaded under memory pressure ($reason)")
         }
-        val skipFileTranscriber = fileTranscriptionActive && level < android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        val skipFileTranscriber = fileTranscriptionRunner.running.value && level < android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE
         if (skipFileTranscriber) {
             appLog.record("WHISPER", "file-transcriber kept resident through non-critical pressure ($reason); transcription is active")
         }
@@ -832,6 +835,21 @@ class AppContainer private constructor(private val context: Context) {
     val whisperFileTranscriber = WhisperFileTranscriber(whisperCppRuntime as WhisperCppRuntime, whisperStore)
 
     /**
+     * Owns [TranscribeActivity]'s batch file/folder transcription for the
+     * whole app — see this class's own doc comment for the real device
+     * report that made this necessary (Activity recreation under memory
+     * pressure silently wiping an in-progress transcription). Wired with
+     * [FileTranscriptionService.ensureStarted] the same way [downloads]/
+     * [whisperDownloads] wire [ModelDownloadService] — a foreground service
+     * so the process itself survives backgrounding, not just the Activity.
+     */
+    val fileTranscriptionRunner = FileTranscriptionRunner(
+        transcriber = whisperFileTranscriber,
+        context = context,
+        onTranscriptionStarted = { FileTranscriptionService.ensureStarted(context) },
+    )
+
+    /**
      * Phase 3 (docs/13-asr-pipeline-migration.md): a live-mic
      * [ai.localstudio.core.runtime.StreamingSpeechSession] driver, new and
      * not yet wired into any screen's UI — [TranscribeActivity] exercises
@@ -924,21 +942,6 @@ class AppContainer private constructor(private val context: Context) {
      */
     @Volatile
     var routerSessionActive: Boolean = false
-
-    /**
-     * Set by [ai.localstudio.app.TranscribeActivity] around its file-
-     * transcription batch job's lifetime — read by [releaseWhisperEngines]
-     * so [whisperFileTranscriber] survives routine backgrounding
-     * (TRIM_MEMORY_BACKGROUND/MODERATE — exactly what fires the instant the
-     * user switches away from a file transcription they expect to keep
-     * running unattended) instead of being silently evicted mid-file. See
-     * [releaseWhisperEngines]'s own doc comment for the real device report
-     * this fixes: a file reported "Done" with an empty saved transcript
-     * because eviction mid-transcription made the decode loop quietly stop
-     * early rather than throw.
-     */
-    @Volatile
-    var fileTranscriptionActive: Boolean = false
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

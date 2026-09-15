@@ -301,6 +301,10 @@
     <string name="download_notification_searching">Looking for the file…</string>
     <string name="download_notification_title_one">Downloading model</string>
     <string name="download_notification_title_many">Downloading models (%1$d)</string>
+
+    <string name="transcribe_notification_channel">File transcription</string>
+    <string name="transcribe_notification_title">Transcribing</string>
+    <string name="transcribe_notification_running">Transcription running…</string>
     <string name="download_notification_whisper_progress">Whisper: %1$d%%</string>
 
     <string name="error_unsupported_file_type">Only .txt and .pdf are supported</string>
