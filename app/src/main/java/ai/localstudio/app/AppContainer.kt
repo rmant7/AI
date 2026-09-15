@@ -910,6 +910,7 @@ class AppContainer private constructor(private val context: Context) {
         engineProvider = { transcriptionEngines },
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         appLog = appLog,
+        context = context,
         onBenchmarkStarted = { BenchmarkService.ensureStarted(context) },
     )
 

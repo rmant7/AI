@@ -64,6 +64,20 @@ class BenchmarkRunner(
          * this module stays free of any Android dependency either way.
          */
         onStatus: (String) -> Unit = {},
+        /**
+         * Used to warm up every engine instead of one of [files] — content
+         * doesn't matter for warm-up (see [TranscriptionEngineSession.warmUp]'s
+         * own doc comment: it's priming native buffers/thread pools, not
+         * exercising the model against real speech), so a short, fixed
+         * sample is strictly better than picking one of the files actually
+         * being measured: bounded cost regardless of what's in [files], and
+         * comparable warm-up cost across separate runs instead of depending
+         * on whichever file happened to be shortest in a given folder. Null
+         * (the default) falls back to the shortest-known-duration file in
+         * [files] — this module has no Android dependency to source a
+         * bundled asset from itself, so the caller provides one when it can.
+         */
+        warmupSample: BenchmarkAudioFile? = null,
     ): BenchmarkRunOutput {
         val startedAt = clock()
         val engineSummaries = mutableListOf<BenchmarkEngineSummary>()
@@ -76,17 +90,14 @@ class BenchmarkRunner(
         var completed = 0
         val total = files.size * engines.size
 
-        // The shortest file with known duration, not just files.firstOrNull()
-        // — a real device report showed why: with a folder scanned in
-        // filesystem order, "first" landed on a long Zoom recording, and
-        // warm-up (meant to be one throwaway inference to prime buffers,
-        // see TranscriptionEngineSession.warmUp's own doc comment) ended up
-        // running a multi-minute full transcription before any real
-        // measurement even started. A file with unknown duration sorts last
-        // here (never preferred over one whose length is actually known);
-        // if every file's duration is unknown, this simply falls back to
-        // the first one, same as before.
-        val warmSample = files.minByOrNull { it.durationMs ?: Long.MAX_VALUE }
+        // Prefer the caller's own fixed sample (see warmupSample's own doc
+        // comment); falling back to the shortest-known-duration file in
+        // files avoids the same mistake a real device report already
+        // surfaced once: with no fixed sample and a folder scanned in
+        // filesystem order, files.firstOrNull() landed on a long Zoom
+        // recording, and warm-up ran a multi-minute full transcription
+        // before any real measurement even started.
+        val warmSample = warmupSample ?: files.minByOrNull { it.durationMs ?: Long.MAX_VALUE }
 
         for (engine in engines) {
             onStatus("Loading ${engine.displayName} (${engine.modelId})…")

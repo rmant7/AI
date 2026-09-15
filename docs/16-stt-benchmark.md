@@ -91,6 +91,30 @@ warm-up fails does not abort the whole run — its rows simply report
 up shows up as a documented failure, not a silent gap in a report read
 weeks later.
 
+**Warm-up runs on a fixed, bundled sample** (`WarmupSample`, a ~1.5s
+synthetic tone shipped as `assets/warmup_sample.wav`), not on one of the
+user's own scanned files. Content is irrelevant to what warm-up is for —
+priming native buffers/thread pools and paging in the model's own weights
+(mmap page faults, CPU governor ramp-up) — only running the same inference
+code path matters. A real device report is why this changed from an
+earlier "pick one of the scanned files" approach: with a folder scanned in
+filesystem order, `files.firstOrNull()` landed on a long Zoom recording,
+and warm-up quietly became a multi-minute full transcription before any
+real measurement even started. A fixed sample is also what makes
+`warmInferenceMs` comparable *across separate runs* — its cost no longer
+depends on whichever file happened to be shortest in whatever folder was
+picked that time. `BenchmarkRunner.run`'s `warmupSample` parameter still
+falls back to the shortest-known-duration file in `files` when the caller
+doesn't supply one (it has no Android dependency to source a bundled asset
+from itself).
+
+`WarmupSample` is shared, not benchmark-only: `TranscribeActivity` uses the
+exact same asset to silently pre-load and warm the currently-selected
+model the instant its screen opens (`warmUpSelectedModel()`), so a real
+user tapping "Transcribe" right after doesn't pay the cold-start cost
+visibly on their first file — it was already paid in the background while
+they were still picking one.
+
 ### One engine resident at a time
 
 `BenchmarkRunner` loads an engine, runs it against every file, and

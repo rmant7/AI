@@ -7,6 +7,7 @@ import ai.localstudio.app.whisper.MediaFileUtils
 import ai.localstudio.app.whisper.MicrophoneAudioSource
 import ai.localstudio.app.whisper.TranscriptionResult
 import ai.localstudio.app.whisper.TranscriptionStatus
+import ai.localstudio.app.whisper.WarmupSample
 import ai.localstudio.core.speech.StreamingRoutingSession
 import ai.localstudio.core.util.describeForUser
 import android.Manifest
@@ -193,6 +194,31 @@ class TranscribeActivity : AppCompatActivity() {
         renderMicState()
         renderVoskState()
         renderRouterState()
+        warmUpSelectedModel()
+    }
+
+    /**
+     * Fires as soon as this screen opens, silently, so the cold-start cost
+     * (mmap page faults, CPU governor ramp-up — see [ai.localstudio.app.whisper.WarmupSample]'s
+     * own doc comment) is paid in the background before the user has even
+     * picked a file, instead of visibly inflating the first real file's own
+     * transcription time. Reuses [AppContainer.whisperFileTranscriber]
+     * directly — [ai.localstudio.app.whisper.WhisperFileTranscriber.transcribe]
+     * already loads-if-needed and reuses an already-loaded matching seed, so
+     * this both primes and *is* the load the first real "Transcribe" tap
+     * would otherwise pay for. Best-effort: nothing here is shown to the
+     * user, and a failure (no model installed, a transient decode error on
+     * the bundled sample) just means the first real file pays the full cost
+     * as before — never worth an error dialog.
+     */
+    private fun warmUpSelectedModel() {
+        val seed = container.whisperStore.installedSeed(container.settings.whisperModelId) ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching {
+                val sample = WarmupSample.resolve(this@TranscribeActivity)
+                container.whisperFileTranscriber.transcribe(Uri.fromFile(sample), seed, language = null) {}
+            }
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

@@ -1,11 +1,13 @@
 package ai.localstudio.app.benchmark
 
 import ai.localstudio.app.log.AppLog
+import ai.localstudio.app.whisper.WarmupSample
 import ai.localstudio.core.benchmark.BenchmarkAudioFile
 import ai.localstudio.core.benchmark.BenchmarkReport
 import ai.localstudio.core.benchmark.BenchmarkRunner
 import ai.localstudio.core.benchmark.TranscriptionEngine
 import ai.localstudio.core.util.describeForUser
+import android.content.Context
 import android.os.Debug
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -36,6 +38,8 @@ class BenchmarkOrchestrator(
     private val scope: CoroutineScope,
     /** Real device report: a run stuck on "0 / 35" for minutes with nothing in the app's own log either — every status line also lands here under the "BENCHMARK" tag, so a run stuck on a slow load/file is diagnosable from Журнал ошибок without needing the screen open. */
     private val appLog: AppLog,
+    /** For [BenchmarkWarmup.resolve] — see [warmupSample]'s own doc comment. */
+    private val context: Context,
     /** Starts [ai.localstudio.app.benchmark.BenchmarkService] — a run over several GB-scale models can take many minutes, and without a foreground service the OS kills the whole process the moment the screen locks, same gap [ai.localstudio.app.whisper.FileTranscriptionRunner] already had fixed for it. A real device report: a run on the biggest installed model just vanished, mid-run, after a few minutes with the screen off. */
     private val onBenchmarkStarted: () -> Unit = {},
 ) {
@@ -43,6 +47,19 @@ class BenchmarkOrchestrator(
     val state: StateFlow<BenchmarkUiState> = _state
 
     private var job: Job? = null
+
+    /** A fixed short sample every engine warms up on instead of one of the user's own files — see [WarmupSample]'s own doc comment. Resolved once (the underlying asset never changes) rather than re-copied every run. */
+    private val warmupSample: BenchmarkAudioFile by lazy {
+        val file = WarmupSample.resolve(context)
+        BenchmarkAudioFile(
+            uri = file.toURI().toString(),
+            fileName = file.name,
+            fileSizeBytes = file.length(),
+            durationMs = WarmupSample.DURATION_MS,
+            sampleRateHz = WarmupSample.SAMPLE_RATE_HZ,
+            channels = 1,
+        )
+    }
 
     fun start(files: List<BenchmarkAudioFile>) {
         if (job?.isActive == true || files.isEmpty()) return
@@ -71,6 +88,7 @@ class BenchmarkOrchestrator(
                         val current = _state.value as? BenchmarkUiState.Running
                         _state.value = BenchmarkUiState.Running(current?.completed ?: 0, current?.total ?: total, status)
                     },
+                    warmupSample = warmupSample,
                 )
                 val report = reportStore.buildReport(output, sharedTask = "transcribe", sharedForcedLanguage = null)
                 val savedAs = reportStore.save(report)
