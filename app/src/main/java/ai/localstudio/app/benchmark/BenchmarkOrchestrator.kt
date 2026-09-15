@@ -12,6 +12,7 @@ import ai.localstudio.core.util.describeForUser
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Debug
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -185,6 +186,14 @@ class BenchmarkOrchestrator(
                 val savedAs = reportStore.save(report)
                 appLog.record("BENCHMARK", "run finished, saved as $savedAs")
                 _state.value = BenchmarkUiState.Done(report, savedAs)
+            } catch (e: CancellationException) {
+                // cancel() already set _state to Idle synchronously — real
+                // device report: this catch used to fall through to the
+                // generic Exception branch below (CancellationException IS
+                // an Exception), overwriting that Idle state with Failed
+                // right after the user pressed Stop, which looked like the
+                // run had crashed instead of just stopping.
+                appLog.record("BENCHMARK", "run stopped")
             } catch (e: Exception) {
                 appLog.record("BENCHMARK", "run failed: ${e.describeForUser()}")
                 _state.value = BenchmarkUiState.Failed(e.describeForUser())

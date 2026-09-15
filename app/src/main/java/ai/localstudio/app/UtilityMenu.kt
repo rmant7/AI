@@ -44,10 +44,33 @@ object UtilityMenu {
             .forEach { entry -> menu.add(0, entry.id, 0, entry.titleRes) }
     }
 
-    /** Returns true (and navigates) if [itemId] is one of this menu's own entries; false otherwise, so callers can fall through to their own item handling. */
+    /**
+     * Returns true (and navigates) if [itemId] is one of this menu's own
+     * entries; false otherwise, so callers can fall through to their own
+     * item handling.
+     *
+     * `CLEAR_TOP or SINGLE_TOP`, not a plain `startActivity` — real device
+     * report: ping-ponging between two of these screens (e.g. Benchmark ->
+     * Log -> Benchmark) kept creating a brand new instance of the target
+     * screen on every hop instead of returning to the one already on the
+     * back stack. Beyond piling up dead Activity instances, a fresh
+     * [BenchmarkActivity] instance's own views start from their XML
+     * defaults (its mode picker showing "Maximum") with no idea a benchmark
+     * was already running in a different mode in the background — which
+     * read as the run having silently changed mode and led to an
+     * accidental Stop. `CLEAR_TOP` pops back to an existing instance
+     * already in the stack instead of stacking a new one on top; `SINGLE_TOP`
+     * is what keeps that existing instance from being torn down and
+     * recreated in the process — together they make "go to X" actually mean
+     * "return to X" whenever X is already open, for every one of these
+     * screens uniformly, not just this one.
+     */
     fun handle(activity: AppCompatActivity, itemId: Int): Boolean {
         val entry = ENTRIES.firstOrNull { it.id == itemId } ?: return false
-        activity.startActivity(Intent(activity, entry.activityClass))
+        val intent = Intent(activity, entry.activityClass).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        activity.startActivity(intent)
         return true
     }
 }

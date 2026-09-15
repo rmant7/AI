@@ -118,6 +118,17 @@ class BenchmarkActivity : AppCompatActivity() {
         else -> BenchmarkPerformanceMode.MAXIMUM
     }
 
+    private fun selectRadioForMode(mode: BenchmarkPerformanceMode) {
+        val id = when (mode) {
+            BenchmarkPerformanceMode.SUSTAINED -> binding.benchmarkModeSustained.id
+            BenchmarkPerformanceMode.COOL_DOWN -> binding.benchmarkModeCoolDown.id
+            BenchmarkPerformanceMode.MAXIMUM -> binding.benchmarkModeMaximum.id
+        }
+        if (binding.benchmarkModeGroup.checkedRadioButtonId != id) {
+            binding.benchmarkModeGroup.check(id)
+        }
+    }
+
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
@@ -191,6 +202,17 @@ class BenchmarkActivity : AppCompatActivity() {
                 binding.benchmarkStartButton.isEnabled = false
                 binding.benchmarkPickFolderButton.isEnabled = false
                 setModePickerEnabled(false)
+                // Real device report: opening this screen fresh while a run
+                // is already in flight (e.g. Benchmark -> Log -> Benchmark
+                // through UtilityMenu, which creates a new instance rather
+                // than resuming the old one) left the radio group showing
+                // its XML default (Maximum) even though the actual
+                // background run was SUSTAINED — looked like the mode had
+                // silently changed and led to an accidental Stop. The
+                // running orchestrator's own state is the source of truth,
+                // not whatever this particular Activity instance's view
+                // happened to start with.
+                selectRadioForMode(state.mode)
             }
             is BenchmarkUiState.Done -> {
                 binding.benchmarkProgress.visibility = View.GONE

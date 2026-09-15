@@ -2,6 +2,7 @@ package ai.localstudio.core.benchmark
 
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.util.describeForUser
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import java.util.Locale
@@ -152,6 +153,17 @@ class BenchmarkRunner(
             val loadStart = clock()
             val session = try {
                 engine.load()
+            } catch (e: CancellationException) {
+                // Real device report: pressing Stop mid-run produced instant
+                // "ERROR: StandaloneCoroutine was cancelled" entries for
+                // every remaining engine × file — job.cancel() throws this
+                // at the very next suspension point, and a bare `catch
+                // (e: Exception)` here was swallowing it as an ordinary load
+                // failure instead of letting it end the coroutine, so the
+                // for-loop kept right on iterating through every engine
+                // still left, each one "failing" the same way in the same
+                // instant. Rethrowing is what actually stops the run.
+                throw e
             } catch (e: Exception) {
                 onStatus("${engine.displayName}: load failed — ${e.describeForUser()}")
                 engineSummaries += BenchmarkEngineSummary(
@@ -332,6 +344,15 @@ class BenchmarkRunner(
                 thermalStatus = thermalStatusSampler?.invoke(),
                 thermalHeadroom = thermalHeadroomSampler?.invoke(),
             )
+        } catch (e: CancellationException) {
+            // Not a timeout (that's caught above, and converted to
+            // BenchmarkStatus.TIMEOUT on purpose) — this is a real
+            // cancellation of the run itself (BenchmarkOrchestrator.cancel()),
+            // which must end this coroutine, not get reported as this
+            // file's own transcription error. See the matching rethrow in
+            // this class's engine-load catch for the real device report
+            // this exists for.
+            throw e
         } catch (e: Exception) {
             val elapsed = clock() - start
             BenchmarkRunMetrics(
