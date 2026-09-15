@@ -115,6 +115,17 @@ user tapping "Transcribe" right after doesn't pay the cold-start cost
 visibly on their first file — it was already paid in the background while
 they were still picking one.
 
+That proactive warm-up **skips itself while a benchmark is running**
+(checks `AppContainer.benchmarkOrchestrator.state`). Every whisper.cpp
+native call in this app, regardless of which engine instance it belongs
+to, goes through the same process-wide `WhisperBridge.nativeOpMutex` — a
+real device report showed a benchmark's own model load taking 44 seconds
+for a size that had loaded in ~1-2s earlier in the exact same run, strongly
+suggesting this exact warm-up call was competing for that lock at the same
+time (most likely `TranscribeActivity` open or recreated concurrently).
+This screen's own warm-up is a nice-to-have; a benchmark run in progress
+is not something it should ever be allowed to stall.
+
 ### One engine resident at a time
 
 `BenchmarkRunner` loads an engine, runs it against every file, and
@@ -171,24 +182,34 @@ fresh one after a model or engine update, per the original requirement.
 
 ### Output
 
-Saved three ways (`BenchmarkReportStore.save`):
-
-1. The full JSON internally, to `filesDir/benchmarks/benchmark-<timestamp>.json`
-   — always, regardless of API level; this is what `BenchmarkActivity`'s
-   own Share button reads, via the app's existing `FileProvider`
-   (`xml/transcript_file_paths.xml`, scoped to both `transcripts/` and
-   `benchmarks/`).
-2. The same JSON, mirrored to `Download/Transcripts/benchmark/` via
-   `MediaStore` on API 29+ (best-effort) — the single reproducible record
-   of the whole run.
-3. One plain-text file per (engine, audio file), under
+1. One plain-text file per (engine, audio file), under
    `Download/Transcripts/benchmark/<modelId>/<audio file name>.txt` —
    containing a short metrics header (status, processing time, RTF, native
    heap reading) followed by the transcript itself, or the error message
    for a failed run. Organized **by model**, not by source file: this is
    what makes "what did Tiny produce for this recording vs. what did Large
    produce" a matter of opening two folders side by side, without digging
-   through the combined JSON.
+   through the combined JSON. **Written incrementally** (`BenchmarkReportStore.saveEngineResults`,
+   called from `BenchmarkRunner`'s `onEngineComplete`) — once per engine,
+   the moment that engine's own file loop finishes, not batched to the end
+   of the whole run. A real device report is why: with everything saved
+   only once at the very end, a run comparing several GB-scale Whisper
+   sizes produced *zero* inspectable output for over half an hour,
+   all-or-nothing, on a device where a single engine's own pass can
+   legitimately take that long.
+2. The full JSON report, once the whole run finishes (`BenchmarkReportStore.save`):
+   internally to `filesDir/benchmarks/benchmark-<timestamp>.json` always
+   (what `BenchmarkActivity`'s own Share button reads, via the app's
+   existing `FileProvider`), and mirrored to `Download/Transcripts/benchmark/`
+   via `MediaStore` on API 29+ — the single reproducible record of the
+   whole run, including every engine's own summary (load/warm-up time,
+   failures).
+
+Every MediaStore write (both the per-engine `.txt` files and the final
+JSON) logs its own failure individually, tag `BENCHMARK` — a real device
+report showed why this matters: a run that reported "Done" on screen left
+no folder on disk at all, and a bare `runCatching` with no logging gave no
+way to tell why.
 
 ### Summary table
 

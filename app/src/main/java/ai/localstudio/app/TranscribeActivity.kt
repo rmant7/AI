@@ -1,5 +1,6 @@
 package ai.localstudio.app
 
+import ai.localstudio.app.benchmark.BenchmarkUiState
 import ai.localstudio.app.databinding.ActivityTranscribeBinding
 import ai.localstudio.app.databinding.ItemTranscribeResultBinding
 import ai.localstudio.app.vosk.VoskModelStore
@@ -210,8 +211,20 @@ class TranscribeActivity : AppCompatActivity() {
      * user, and a failure (no model installed, a transient decode error on
      * the bundled sample) just means the first real file pays the full cost
      * as before — never worth an error dialog.
+     *
+     * Skipped while [ai.localstudio.app.benchmark.BenchmarkOrchestrator] is
+     * actively running: every whisper.cpp native call in this app —
+     * regardless of which engine instance it belongs to — goes through the
+     * same process-wide [ai.localstudio.whisper.WhisperBridge.nativeOpMutex].
+     * A real device report is why this guard exists: a benchmark's own
+     * model load took 44 seconds for a size that had loaded in ~1-2s
+     * earlier in the same run, strongly suggesting this exact warm-up call
+     * was competing for that lock at the same time — this screen's own
+     * warm-up is a nice-to-have, a benchmark run in progress is not
+     * something it should ever be allowed to stall.
      */
     private fun warmUpSelectedModel() {
+        if (container.benchmarkOrchestrator.state.value is BenchmarkUiState.Running) return
         val seed = container.whisperStore.installedSeed(container.settings.whisperModelId) ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching {

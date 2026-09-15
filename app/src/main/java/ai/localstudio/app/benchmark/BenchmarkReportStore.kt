@@ -1,6 +1,7 @@
 package ai.localstudio.app.benchmark
 
 import ai.localstudio.app.log.AppLog
+import ai.localstudio.core.benchmark.BenchmarkAudioFile
 import ai.localstudio.core.benchmark.BenchmarkDeviceInfo
 import ai.localstudio.core.benchmark.BenchmarkReport
 import ai.localstudio.core.benchmark.BenchmarkRunMetrics
@@ -21,19 +22,26 @@ import java.util.Locale
 /**
  * Turns a raw [BenchmarkRunOutput] (Android-agnostic, from `core`) into the
  * full, reproducible [BenchmarkReport] by attaching device/app metadata,
- * then saves it three ways:
+ * then saves it:
  *
  * 1. Internally (`filesDir/benchmarks/`), so [ai.localstudio.app.BenchmarkActivity]
- *    can re-read/share past runs through the app's own `FileProvider`.
- * 2. The full JSON, mirrored to `Download/Transcripts/benchmark/` via
+ *    can re-read/share past runs through the app's own `FileProvider`, and
+ *    mirrored as one JSON to `Download/Transcripts/benchmark/` via
  *    MediaStore — the single reproducible record (every file, every
  *    engine, every metric) a run weeks from now can be compared against.
- * 3. One plain-text file per (engine, audio file) under
+ *    Both happen once, in [save], after the whole run finishes.
+ * 2. One plain-text file per (engine, audio file), under
  *    `Download/Transcripts/benchmark/<modelId>/<audio file name>.txt` — the
  *    per-model layout this exists for: opening one model's folder shows
  *    every one of its transcripts side by side, so comparing what Tiny
  *    produced against what Large produced for the same recording doesn't
- *    require digging through the combined JSON at all.
+ *    require digging through the combined JSON at all. **Written
+ *    incrementally, via [saveEngineResults]**, once per engine as soon as
+ *    that engine's own file loop finishes — not batched into [save] — a
+ *    real device report is why: with results only ever saved once, at the
+ *    very end, a run comparing several GB-scale models produced *zero*
+ *    inspectable output for over half an hour, all-or-nothing, on a device
+ *    where a single engine's own run can legitimately take that long.
  */
 class BenchmarkReportStore(private val context: Context, private val appLog: AppLog) {
 
@@ -54,6 +62,39 @@ class BenchmarkReportStore(private val context: Context, private val appLog: App
         files = output.files,
     )
 
+    /**
+     * Writes one .txt per (file, metrics) pair for a single engine's own
+     * completed run — call once per engine, as soon as it finishes, not
+     * batched with the rest of the run. See this class's own doc comment
+     * for why. Best-effort per file: one write failing (a name MediaStore
+     * rejects, a full disk) must not lose every other file's already-
+     * written transcript, so each one is its own `runCatching`, and every
+     * failure is logged individually rather than swallowed.
+     */
+    fun saveEngineResults(results: List<Pair<BenchmarkAudioFile, BenchmarkRunMetrics>>) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || results.isEmpty()) return
+        var written = 0
+        for ((file, metrics) in results) {
+            val baseName = file.fileName.substringBeforeLast('.', file.fileName)
+            runCatching {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.txt")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/benchmark/${metrics.modelId}/")
+                }
+                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: error("contentResolver.insert returned null")
+                context.contentResolver.openOutputStream(uri)?.use { it.write(transcriptFileText(file.fileName, metrics).toByteArray()) }
+                    ?: error("openOutputStream returned null for $uri")
+            }.onSuccess {
+                written++
+            }.onFailure { e ->
+                appLog.record("BENCHMARK", "failed to write ${metrics.modelId}/$baseName.txt: ${e.describeForUser()}")
+            }
+        }
+        appLog.record("BENCHMARK", "Downloads: wrote $written/${results.size} transcript file(s) for ${results.first().second.modelId}")
+    }
+
     /** Returns the internal file's name (for display) — the same "saved as X" convention TranscribeActivity already uses. */
     fun save(report: BenchmarkReport): String {
         val text = json.encodeToString(BenchmarkReport.serializer(), report)
@@ -68,8 +109,6 @@ class BenchmarkReportStore(private val context: Context, private val appLog: App
             return name
         }
         copyReportToDownloads(name, text)
-        val (written, total) = copyPerModelTranscriptsToDownloads(report)
-        appLog.record("BENCHMARK", "Downloads: wrote $written/$total per-model transcript file(s) under Download/Transcripts/benchmark/")
         return name
     }
 
@@ -87,49 +126,6 @@ class BenchmarkReportStore(private val context: Context, private val appLog: App
         }.onFailure { e ->
             appLog.record("BENCHMARK", "failed to copy $name to Download/Transcripts/benchmark/: ${e.describeForUser()}")
         }
-    }
-
-    /**
-     * One .txt per (engine, file), under `Download/Transcripts/benchmark/<modelId>/`
-     * — deliberately per-model directories, not per-file: comparing Tiny vs.
-     * Large for the *same* recording is the actual use case, and that only
-     * reads naturally when each model's whole batch of output sits in its
-     * own folder. Best-effort per file: one write failing (a name MediaStore
-     * rejects, a full disk) must not lose every other file's already-written
-     * transcript, so each one is its own `runCatching` — but every failure
-     * is still logged individually (a real device report showed why: a run
-     * that reported "Done" left no folder on disk at all, and nothing
-     * anywhere said why). Returns (written, total) for [save]'s own summary
-     * line.
-     */
-    private fun copyPerModelTranscriptsToDownloads(report: BenchmarkReport): Pair<Int, Int> {
-        var written = 0
-        var total = 0
-        for (fileResult in report.files) {
-            val baseName = fileResult.file.fileName.substringBeforeLast('.', fileResult.file.fileName)
-            for (metrics in fileResult.results) {
-                total++
-                runCatching {
-                    val values = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.txt")
-                        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/benchmark/${metrics.modelId}/")
-                    }
-                    val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                        ?: error("contentResolver.insert returned null")
-                    context.contentResolver.openOutputStream(uri)?.use { it.write(transcriptFileText(fileResult.file.fileName, metrics).toByteArray()) }
-                        ?: error("openOutputStream returned null for $uri")
-                }.onSuccess {
-                    written++
-                }.onFailure { e ->
-                    appLog.record(
-                        "BENCHMARK",
-                        "failed to write ${metrics.modelId}/$baseName.txt: ${e.describeForUser()}",
-                    )
-                }
-            }
-        }
-        return written to total
     }
 
     private fun transcriptFileText(fileName: String, metrics: BenchmarkRunMetrics): String {
