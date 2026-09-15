@@ -109,7 +109,8 @@
     <string name="transcribe_mic_idle">Не активно</string>
     <string name="transcribe_mic_error">Сессия микрофона остановлена: %1$s</string>
     <string name="transcribe_vosk_section_title">ЖИВОЙ МИКРОФОН — VOSK (SPIKE)</string>
-    <string name="transcribe_vosk_no_model">Модель Vosk не найдена. Сначала загрузите её — см. docs/14-vosk-spike.md.</string>
+    <string name="transcribe_vosk_no_model">Модель Vosk не установлена — сначала скачайте её на экране «Модели».</string>
+    <string name="transcribe_error_dialog_title">Ошибка</string>
 
     <string name="settings_whisper_model">Модель распознавания речи (офлайн)</string>
     <string name="settings_whisper_manage">Открыть модели → Голос</string>
@@ -209,6 +210,8 @@
     <string name="embed_result_suspicious">⚠ непохожий фрагмент оценён так же высоко или выше — проверьте pooling и query/passage-префиксы</string>
     <string name="embed_result_error">Ошибка: %1$s</string>
     <string name="models_voice_header">Модели распознавания речи — работают офлайн</string>
+    <string name="models_vosk_header">Vosk (spike) — потоковое распознавание, пробуем как альтернативу Whisper для живого микрофона</string>
+    <string name="models_vosk_note">Модели Vosk работают полностью офлайн после загрузки. Используются только секцией «LIVE MIC — VOSK (SPIKE)» на экране транскрипции — см. docs/14-vosk-spike.md; на Whisper выше это никак не влияет.</string>
     <string name="models_switched_chat">Чат переключён на %1$s</string>
     <string name="models_switched_voice">Голосовой ввод переключён на %1$s</string>
     <string name="model_state_installed">Установлена</string>

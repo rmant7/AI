@@ -22,6 +22,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
@@ -305,7 +306,7 @@ class TranscribeActivity : AppCompatActivity() {
             micActive = false
             renderMicState()
             container.whisperMicSession.lastError?.let { error ->
-                Toast.makeText(this@TranscribeActivity, getString(R.string.transcribe_mic_error, error.message ?: error.toString()), Toast.LENGTH_LONG).show()
+                showErrorDialog(getString(R.string.transcribe_mic_error, error.message ?: error.toString()))
             }
         }
     }
@@ -338,19 +339,19 @@ class TranscribeActivity : AppCompatActivity() {
     }
 
     private fun startVosk() {
-        if (!VoskModelStore.isInstalled(this)) {
+        val seed = VoskModelStore.installedSeed(this, container.settings.voskModelId)
+        if (seed == null) {
             Toast.makeText(this, R.string.transcribe_vosk_no_model, Toast.LENGTH_LONG).show()
             return
         }
-        val modelDir = VoskModelStore.modelDir(this)
+        val modelDir = VoskModelStore.modelDir(this, seed)
         voskActive = true
         renderVoskState()
         binding.voskTranscriptText.text = ""
         binding.voskTranscriptText.visibility = View.VISIBLE
         lifecycleScope.launch {
             // Model(path)/Recognizer construction throw a checked IOException
-            // on a missing/corrupt model directory — very much a live
-            // possibility for a manually adb-pushed spike model — which
+            // on a corrupt/partially-extracted model directory — which
             // would otherwise crash the app right here instead of just
             // failing this one start attempt.
             val transcripts = try {
@@ -358,7 +359,7 @@ class TranscribeActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 voskActive = false
                 renderVoskState()
-                Toast.makeText(this@TranscribeActivity, getString(R.string.transcribe_mic_error, e.message ?: e.toString()), Toast.LENGTH_LONG).show()
+                showErrorDialog(getString(R.string.transcribe_mic_error, e.message ?: e.toString()))
                 return@launch
             }
             // Every emission already carries the full session text so far —
@@ -370,7 +371,7 @@ class TranscribeActivity : AppCompatActivity() {
             voskActive = false
             renderVoskState()
             container.voskRecognizer.lastError?.let { error ->
-                Toast.makeText(this@TranscribeActivity, getString(R.string.transcribe_mic_error, error.message ?: error.toString()), Toast.LENGTH_LONG).show()
+                showErrorDialog(getString(R.string.transcribe_mic_error, error.message ?: error.toString()))
             }
         }
     }
@@ -492,5 +493,23 @@ class TranscribeActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             Toast.makeText(this, R.string.message_copied, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /**
+     * A mic-session error used to surface as a Toast — which truncates long
+     * text and disappears on its own timer, exactly wrong for something
+     * someone might need to actually read in full or copy out (to report it,
+     * say). This shows the whole message, selectable, with an explicit Copy
+     * button and no auto-dismiss — closed only by the OK button or tapping
+     * outside, like any other dialog.
+     */
+    private fun showErrorDialog(message: String) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.transcribe_error_dialog_title)
+            .setMessage(message)
+            .setPositiveButton(R.string.dialog_ok, null)
+            .setNeutralButton(R.string.log_copy) { _, _ -> copyToClipboard(message) }
+            .show()
+        dialog.findViewById<android.widget.TextView>(android.R.id.message)?.setTextIsSelectable(true)
     }
 }

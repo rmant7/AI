@@ -2,24 +2,71 @@ package ai.localstudio.app.vosk
 
 import android.content.Context
 import java.io.File
+import java.io.IOException
+import java.util.zip.ZipInputStream
 
 /**
- * Locates the on-device Vosk model directory for the spike — see
- * docs/14-vosk-spike.md for exactly how to provision it (`adb push`, not a
- * download in the app). Deliberately not a real catalog/downloader like
- * [ai.localstudio.app.whisper.WhisperStore]: the spike's own scope is no
- * production download UI and no multi-model manager, just "is a model
- * there or not" — a real download path is only worth building once the
- * device test says Vosk itself is worth keeping.
+ * Where downloaded Vosk models live — one directory per [VoskModelSeed],
+ * each holding an unpacked model (`am/`, `conf/`, `graph/`, …) the way
+ * `org.vosk.Model(path)` expects, plus [extract] to get there from the zip
+ * [VoskDownloads] downloads. Mirrors [ai.localstudio.app.whisper.WhisperStore]'s
+ * role for Whisper's `.bin` files.
  */
 object VoskModelStore {
 
-    /** Where an unzipped Vosk model directory (containing am/, conf/, graph/, ...) is expected. App-private storage — no permission needed, survives app restarts, gone on uninstall. */
-    fun modelDir(context: Context): File = File(context.filesDir, "vosk-model-ru-small")
+    fun directory(context: Context): File = File(context.filesDir, "vosk-models").apply { mkdirs() }
 
-    /** A directory that exists and isn't empty is close enough for a spike — Vosk's own `Model(path)` constructor is what actually validates its contents, and fails loudly (IOException) if they're wrong. */
-    fun isInstalled(context: Context): Boolean {
-        val dir = modelDir(context)
+    fun modelDir(context: Context, seed: VoskModelSeed): File = File(directory(context), seed.id)
+    fun zipFile(context: Context, seed: VoskModelSeed): File = File(directory(context), "${seed.id}.zip")
+    fun zipPartFile(context: Context, seed: VoskModelSeed): File = File(directory(context), "${seed.id}.zip.part")
+
+    fun isInstalled(context: Context, seed: VoskModelSeed): Boolean {
+        val dir = modelDir(context, seed)
         return dir.isDirectory && dir.listFiles()?.isNotEmpty() == true
+    }
+
+    /** [preferredId] wins if that size is actually installed; otherwise the largest installed one — same resolution as [ai.localstudio.app.whisper.WhisperStore.installedSeed]. */
+    fun installedSeed(context: Context, preferredId: String?): VoskModelSeed? {
+        val preferred = preferredId?.let { VoskModels.byId(it) }?.takeIf { isInstalled(context, it) }
+        return preferred ?: VoskModels.SEEDS.filter { isInstalled(context, it) }.maxByOrNull { it.approxSizeBytes }
+    }
+
+    fun delete(context: Context, seed: VoskModelSeed) {
+        modelDir(context, seed).deleteRecursively()
+        zipFile(context, seed).delete()
+        zipPartFile(context, seed).delete()
+    }
+
+    /**
+     * Unzips [zip] into [modelDir], stripping the single top-level directory
+     * every official Vosk archive wraps its contents in (e.g. a
+     * `vosk-model-small-ru-0.22/am/final.mdl` entry becomes `am/final.mdl`
+     * under [modelDir]) — `Model(path)` expects `am/`, `conf/`, `graph/`, …
+     * directly inside [modelDir], not one level down.
+     */
+    fun extract(zip: File, modelDir: File) {
+        if (modelDir.exists()) modelDir.deleteRecursively()
+        modelDir.mkdirs()
+        val root = modelDir.canonicalFile
+        ZipInputStream(zip.inputStream().buffered()).use { zis ->
+            var entry = zis.nextEntry
+            while (entry != null) {
+                val strippedName = entry.name.substringAfter('/', missingDelimiterValue = "")
+                if (strippedName.isNotBlank() && !entry.isDirectory) {
+                    val outFile = File(modelDir, strippedName)
+                    // Guards against a zip entry whose name climbs out of
+                    // modelDir via "../" — official Vosk archives don't do
+                    // this, but nothing about a zip's own format stops one
+                    // from claiming to.
+                    if (!outFile.canonicalFile.startsWith(root)) {
+                        throw IOException("Zip entry escapes model directory: ${entry.name}")
+                    }
+                    outFile.parentFile?.mkdirs()
+                    outFile.outputStream().use { output -> zis.copyTo(output) }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
+            }
+        }
     }
 }

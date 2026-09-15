@@ -61,6 +61,7 @@ import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
+import ai.localstudio.app.vosk.VoskDownloads
 import ai.localstudio.app.vosk.VoskSpeechRecognizer
 import ai.localstudio.app.whisper.WhisperCppMicSession
 import ai.localstudio.app.whisper.WhisperCppRuntime
@@ -786,6 +787,12 @@ class AppContainer private constructor(private val context: Context) {
      * one instance across recordings instead of reloading the model each time.
      */
     val voskRecognizer = VoskSpeechRecognizer()
+
+    /** In-app downloader for [ai.localstudio.app.vosk.VoskModels.SEEDS] — same role for the Voice tab's Vosk rows as [whisperDownloads] has for Whisper's. */
+    val voskDownloads = VoskDownloads(
+        context,
+        onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+    )
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
