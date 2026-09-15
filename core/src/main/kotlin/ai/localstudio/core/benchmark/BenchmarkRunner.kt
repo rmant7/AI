@@ -76,6 +76,18 @@ class BenchmarkRunner(
         var completed = 0
         val total = files.size * engines.size
 
+        // The shortest file with known duration, not just files.firstOrNull()
+        // — a real device report showed why: with a folder scanned in
+        // filesystem order, "first" landed on a long Zoom recording, and
+        // warm-up (meant to be one throwaway inference to prime buffers,
+        // see TranscriptionEngineSession.warmUp's own doc comment) ended up
+        // running a multi-minute full transcription before any real
+        // measurement even started. A file with unknown duration sorts last
+        // here (never preferred over one whose length is actually known);
+        // if every file's duration is unknown, this simply falls back to
+        // the first one, same as before.
+        val warmSample = files.minByOrNull { it.durationMs ?: Long.MAX_VALUE }
+
         for (engine in engines) {
             onStatus("Loading ${engine.displayName} (${engine.modelId})…")
             val loadStart = clock()
@@ -120,7 +132,6 @@ class BenchmarkRunner(
 
             var warmInferenceMs: Long? = null
             var warmUpFailed = false
-            val warmSample = files.firstOrNull()
             if (warmSample == null) {
                 warmUpFailed = true
             } else {
