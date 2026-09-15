@@ -323,7 +323,7 @@ class TranscribeActivity : AppCompatActivity() {
             micActive = false
             renderMicState()
             container.whisperMicSession.lastError?.let { error ->
-                showErrorDialog(getString(R.string.transcribe_mic_error, error.message ?: error.toString()))
+                showErrorDialog(getString(R.string.transcribe_mic_error, error.describeForUser()))
             }
         }
     }
@@ -389,7 +389,7 @@ class TranscribeActivity : AppCompatActivity() {
             voskActive = false
             renderVoskState()
             container.voskRecognizer.lastError?.let { error ->
-                showErrorDialog(getString(R.string.transcribe_mic_error, error.message ?: error.toString()))
+                showErrorDialog(getString(R.string.transcribe_mic_error, error.describeForUser()))
             }
         }
     }
@@ -482,7 +482,7 @@ class TranscribeActivity : AppCompatActivity() {
             // — without this check, a router session that died from a bug
             // partway through just went quiet with no error shown at all.
             session.lastError?.let { error ->
-                showErrorDialog(getString(R.string.transcribe_mic_error, error.message ?: error.toString()))
+                showErrorDialog(getString(R.string.transcribe_mic_error, error.describeForUser()))
             }
         }
 
