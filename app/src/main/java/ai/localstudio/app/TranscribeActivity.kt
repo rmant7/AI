@@ -439,6 +439,7 @@ class TranscribeActivity : AppCompatActivity() {
 
     private fun startRouter() {
         routerActive = true
+        container.routerSessionActive = true
         renderRouterState()
         binding.routerTranscriptText.text = ""
         binding.routerTranscriptText.visibility = View.VISIBLE
@@ -477,6 +478,7 @@ class TranscribeActivity : AppCompatActivity() {
                     if (binding.routerTranscriptText.text.isNullOrBlank()) line else "${binding.routerTranscriptText.text}\n$line"
             }
             routerActive = false
+            container.routerSessionActive = false
             routerSession = null
             renderRouterState()
         }
@@ -497,6 +499,7 @@ class TranscribeActivity : AppCompatActivity() {
     private fun stopRouter() {
         val session = routerSession
         routerActive = false
+        container.routerSessionActive = false
         renderRouterState()
         // Cancel the mic-read loop first (it lives here, not inside the
         // session — see routerMicJob's own doc comment), then finish the

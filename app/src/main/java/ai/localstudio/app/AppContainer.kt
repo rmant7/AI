@@ -521,11 +521,12 @@ class AppContainer private constructor(private val context: Context) {
                 ) {
                     return
                 }
-                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("trim level $level") }
+                val critical = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("trim level $level", critical) }
             }
 
             override fun onLowMemory() {
-                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("onLowMemory") }
+                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("onLowMemory", critical = true) }
             }
 
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
@@ -563,16 +564,32 @@ class AppContainer private constructor(private val context: Context) {
      * load independently and are each just as capable of sitting resident
      * and uncounted through a real OOM as the LLM was.
      */
-    private suspend fun releaseMemoryUnderPressure(reason: String) {
+    private suspend fun releaseMemoryUnderPressure(reason: String, critical: Boolean = true) {
         if (semanticMemoryEmbedder.isReady) {
             semanticMemoryEmbedder.unload()
             appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
         }
         releaseLocalModels()
-        releaseWhisperEngines(reason)
+        releaseWhisperEngines(reason, critical)
     }
 
-    private fun releaseWhisperEngines(reason: String) {
+    /**
+     * [critical] distinguishes a routine trim signal (TRIM_MEMORY_RUNNING_LOW
+     * — a real device log showed this firing constantly at ~1.4GB free,
+     * nowhere near an actual OOM) from a genuine one (RUNNING_CRITICAL and
+     * up, onLowMemory): only the router's own three models
+     * ([whisperFallbackModel]/[voskRuSpecialist]/[voskEnSpecialist]) skip
+     * eviction on the routine tier, and only while
+     * [routerSessionActive] says a session is actually using them right
+     * now — every other engine here, and the router's own models once
+     * pressure is actually critical, are released exactly as before. This
+     * is the fix for a real device report: the router forced an ~18s
+     * reload of its own fallback model mid-conversation because a routine
+     * trim signal evicted it while a session was still running. It is not
+     * a way to opt the router out of memory pressure handling — critical
+     * pressure still wins.
+     */
+    private fun releaseWhisperEngines(reason: String, critical: Boolean = true) {
         if (whisperEngine.isLoaded) {
             whisperEngine.release()
             appLog.record("WHISPER", "main engine unloaded under memory pressure ($reason)")
@@ -593,15 +610,19 @@ class AppContainer private constructor(private val context: Context) {
             voskRecognizer.release()
             appLog.record("VOSK", "recognizer unloaded under memory pressure ($reason)")
         }
-        if (whisperFallbackModel.isLoaded) {
+        val skipRouterModels = routerSessionActive && !critical
+        if (skipRouterModels) {
+            appLog.record("ROUTER", "router models kept resident through non-critical pressure ($reason); session is active")
+        }
+        if (whisperFallbackModel.isLoaded && !skipRouterModels) {
             whisperFallbackModel.release()
             appLog.record("WHISPER", "router fallback model unloaded under memory pressure ($reason)")
         }
-        if (voskRuSpecialist.isLoaded) {
+        if (voskRuSpecialist.isLoaded && !skipRouterModels) {
             voskRuSpecialist.release()
             appLog.record("VOSK", "router RU specialist unloaded under memory pressure ($reason)")
         }
-        if (voskEnSpecialist.isLoaded) {
+        if (voskEnSpecialist.isLoaded && !skipRouterModels) {
             voskEnSpecialist.release()
             appLog.record("VOSK", "router EN specialist unloaded under memory pressure ($reason)")
         }
@@ -867,6 +888,22 @@ class AppContainer private constructor(private val context: Context) {
         lidWindowMs = 4_000,
         lidStrideMs = 3_000,
     )
+
+    /**
+     * Set by [ai.localstudio.app.TranscribeActivity] around a router
+     * session's lifetime — read by [releaseWhisperEngines] so a routine,
+     * non-critical trim signal (TRIM_MEMORY_RUNNING_LOW, the one a real
+     * device log showed firing constantly at ~1.4GB free) does not evict
+     * the exact models an active router session is using every few seconds
+     * for LID and ASR, forcing an expensive reload mid-session. Real
+     * pressure (TRIM_MEMORY_RUNNING_CRITICAL and up, onLowMemory) still
+     * evicts them regardless — see [releaseWhisperEngines]'s own doc
+     * comment for why that distinction matters: this must never become a
+     * way to silently reintroduce the OOM kill [releaseMemoryUnderPressure]
+     * exists to prevent.
+     */
+    @Volatile
+    var routerSessionActive: Boolean = false
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
