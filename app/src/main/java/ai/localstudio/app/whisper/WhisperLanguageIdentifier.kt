@@ -25,7 +25,7 @@ import ai.localstudio.core.speech.LanguageIdentifier
  * with a several-second `lidStrideMs`, not the sub-second value the
  * interface would technically allow.
  */
-class WhisperLanguageIdentifier(
+internal class WhisperLanguageIdentifier(
     private val whisperModel: suspend () -> WhisperCppSpeechModel,
 ) : LanguageIdentifier {
 

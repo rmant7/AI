@@ -83,8 +83,8 @@ class WhisperRegisteredSpeechModel(
         handle
     }
 
-    /** For [WhisperLanguageIdentifier], which needs the same already-loaded handle rather than triggering a second, independent load. */
-    suspend fun loadedWhisperModel(): WhisperCppSpeechModel = handle() as WhisperCppSpeechModel
+    /** For [WhisperLanguageIdentifier], which needs the same already-loaded handle rather than triggering a second, independent load. Internal, not public: [WhisperCppSpeechModel] itself is `internal`, so a public signature exposing it would leak past this module's own boundary. */
+    internal suspend fun loadedWhisperModel(): WhisperCppSpeechModel = handle() as WhisperCppSpeechModel
 
     val isLoaded: Boolean get() = loaded != null
 
