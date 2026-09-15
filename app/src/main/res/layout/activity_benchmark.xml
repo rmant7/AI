@@ -78,6 +78,16 @@
 
         </RadioGroup>
 
+        <TextView
+            android:id="@+id/benchmarkSustainedHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="4dp"
+            android:textColor="?attr/colorError"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/benchmarkStartButton"
             style="@style/Widget.Material3.Button"

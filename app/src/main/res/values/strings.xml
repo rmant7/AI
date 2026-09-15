@@ -46,6 +46,7 @@
     <string name="benchmark_mode_sustained">Sustained</string>
     <string name="benchmark_mode_cool_down">Cool-down</string>
     <string name="benchmark_sustained_unsupported">Sustained Performance Mode isn\'t supported on this device — running without it.</string>
+    <string name="benchmark_sustained_device_unsupported">This device doesn\'t support Sustained Performance Mode — running Sustained here is identical to Maximum, so it won\'t tell you anything new. Use Cool-down instead to test whether pacing helps.</string>
     <string name="benchmark_trend">First run: %1$s · Average: %2$s · Last run: %3$s · Degradation: %4$s</string>
     <string name="message_copy">Copy message</string>
     <string name="message_copied">Copied</string>

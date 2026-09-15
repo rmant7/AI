@@ -80,6 +80,16 @@ class BenchmarkActivity : AppCompatActivity() {
         binding.benchmarkCancelButton.setOnClickListener { container.benchmarkOrchestrator.cancel() }
         binding.benchmarkShareButton.setOnClickListener { shareReport() }
 
+        // Shown up front, not just discovered after a full run — a real
+        // device report is why: Sustained on hardware that doesn't support
+        // Window.setSustainedPerformanceMode runs byte-for-byte identical to
+        // Maximum, so picking it there wastes a full run (which can be tens
+        // of minutes) on a comparison that can't produce a different result.
+        if (!SustainedPerformanceSupport.isSupported(this)) {
+            binding.benchmarkSustainedHint.text = getString(R.string.benchmark_sustained_device_unsupported)
+            binding.benchmarkSustainedHint.visibility = View.VISIBLE
+        }
+
         lifecycleScope.launch {
             container.benchmarkOrchestrator.state.collect { state -> render(state) }
         }
