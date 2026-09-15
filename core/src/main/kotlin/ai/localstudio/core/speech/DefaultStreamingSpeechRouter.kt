@@ -2,6 +2,7 @@ package ai.localstudio.core.speech
 
 import ai.localstudio.core.model.TranscriptSegment
 import ai.localstudio.core.runtime.StreamingSpeechSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -84,8 +85,8 @@ class DefaultStreamingRoutingSession(
     var droppedChunkCount: Int = 0
         private set
 
-    /** Set when a specialist *and* the configured fallback both fail — see [selectModelFor]. Mirrors [ai.localstudio.app.whisper.WhisperCppMicSession.lastError]'s own established convention: there is no other way for a caller to tell "the session died" from "finish()/cancel() ended it normally" once [segments] has completed. */
-    var lastError: Throwable? = null
+    /** Set when a specialist *and* the configured fallback both fail — see [selectModelFor] — or when [processInbox] itself hits an unexpected exception. Mirrors [ai.localstudio.app.whisper.WhisperCppMicSession.lastError]'s own established convention: there is no other way for a caller to tell "the session died" from "finish()/cancel() ended it normally" once [segments] has completed. */
+    override var lastError: Throwable? = null
         private set
 
     private val lidWindow = ShortArray(lidWindowSamples)
@@ -116,7 +117,29 @@ class DefaultStreamingRoutingSession(
     /** Audio that arrived before any model was selected yet — flushed into the first model chosen. */
     private val preBuffer = ArrayDeque<ShortArray>()
 
-    private val processorJob = scope.launch { processInbox() }
+    // Any unexpected exception escaping processInbox() (a bug, not one of
+    // the already-caught paths in tryStart/selectModelFor) used to just
+    // kill this coroutine silently: segmentsChannel/decisionsChannel never
+    // close, so a caller's session.segments.collect{} hangs forever with
+    // no error and no further activity — indistinguishable from "still
+    // working, just no speech recognized yet." A real device report
+    // matched this exactly: a router session that produced decisions right
+    // up to a model switch, then nothing at all, ever again, no error.
+    // lastError is the one existing, established way callers already check
+    // for "the session died" (see its own doc comment) — this is what
+    // actually sets it for this failure mode, and closes both channels so
+    // a hung collect{} actually completes instead of waiting forever.
+    private val processorJob = scope.launch {
+        try {
+            processInbox()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            lastError = e
+            segmentsChannel.close()
+            decisionsChannel.close()
+        }
+    }
 
     override suspend fun acceptAudio(pcm: ShortArray) {
         if (inbox.trySend(pcm).isFailure) droppedChunkCount++

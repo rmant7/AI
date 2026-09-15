@@ -31,6 +31,18 @@ interface StreamingRoutingSession {
 
     /** Every routing decision as it's made — see [RoutingDecision]'s own doc comment for why this exists. */
     val decisions: Flow<RoutingDecision>
+
+    /**
+     * Set once [segments] has completed on its own (not via [finish]/
+     * [cancel]) because the session actually failed — the same convention
+     * [ai.localstudio.app.whisper.WhisperCppMicSession.lastError]/
+     * [ai.localstudio.app.vosk.VoskSpeechRecognizer.lastError] already
+     * establish: there is no other way for a caller to tell "the session
+     * died" from "finish()/cancel() ended it normally" once [segments] has
+     * completed, and without checking it a dead session looks identical to
+     * one that is simply not hearing any speech right now.
+     */
+    val lastError: Throwable?
 }
 
 /**

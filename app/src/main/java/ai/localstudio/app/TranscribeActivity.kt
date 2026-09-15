@@ -473,6 +473,16 @@ class TranscribeActivity : AppCompatActivity() {
             container.routerSessionActive = false
             routerSession = null
             renderRouterState()
+            // Same convention as startMic()/startVosk(): the segments Flow
+            // completing tells nothing about *why* on its own — normal
+            // finish()/cancel() and an unexpected failure inside the
+            // session both end up here. lastError is what distinguishes
+            // them (see DefaultStreamingRoutingSession's own doc comment)
+            // — without this check, a router session that died from a bug
+            // partway through just went quiet with no error shown at all.
+            session.lastError?.let { error ->
+                showErrorDialog(getString(R.string.transcribe_mic_error, error.message ?: error.toString()))
+            }
         }
 
         // RoutingDecision was already emitted for every LID window since the
