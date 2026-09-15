@@ -89,10 +89,11 @@ class BenchmarkOrchestrator(
                         _state.value = BenchmarkUiState.Running(current?.completed ?: 0, current?.total ?: total, status)
                     },
                     warmupSample = warmupSample,
-                    // Persisted as each engine finishes, not batched to the
-                    // very end — see BenchmarkReportStore's own doc comment
-                    // for the real device report this exists for.
-                    onEngineComplete = { _, results -> reportStore.saveEngineResults(results) },
+                    // Persisted the moment each individual file finishes,
+                    // not batched by engine or to the very end — see
+                    // BenchmarkReportStore's own doc comment for the real
+                    // device report this exists for.
+                    onFileComplete = { _, file, metrics -> reportStore.saveFileResult(file, metrics) },
                 )
                 val report = reportStore.buildReport(output, sharedTask = "transcribe", sharedForcedLanguage = null)
                 val savedAs = reportStore.save(report)

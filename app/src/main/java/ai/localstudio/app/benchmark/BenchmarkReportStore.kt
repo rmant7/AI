@@ -36,12 +36,13 @@ import java.util.Locale
  *    every one of its transcripts side by side, so comparing what Tiny
  *    produced against what Large produced for the same recording doesn't
  *    require digging through the combined JSON at all. **Written
- *    incrementally, via [saveEngineResults]**, once per engine as soon as
- *    that engine's own file loop finishes — not batched into [save] — a
- *    real device report is why: with results only ever saved once, at the
- *    very end, a run comparing several GB-scale models produced *zero*
- *    inspectable output for over half an hour, all-or-nothing, on a device
- *    where a single engine's own run can legitimately take that long.
+ *    incrementally, via [saveFileResult]**, the moment each individual
+ *    file finishes — not batched by engine, and not batched into [save] —
+ *    a real device report is why: with results only ever saved once, at
+ *    the very end, a run comparing several GB-scale models produced *zero*
+ *    inspectable output for over half an hour, all-or-nothing, and even
+ *    "once per engine" still meant waiting many minutes on a device where
+ *    a single *file* can itself take that long.
  */
 class BenchmarkReportStore(private val context: Context, private val appLog: AppLog) {
 
@@ -63,36 +64,28 @@ class BenchmarkReportStore(private val context: Context, private val appLog: App
     )
 
     /**
-     * Writes one .txt per (file, metrics) pair for a single engine's own
-     * completed run — call once per engine, as soon as it finishes, not
-     * batched with the rest of the run. See this class's own doc comment
-     * for why. Best-effort per file: one write failing (a name MediaStore
-     * rejects, a full disk) must not lose every other file's already-
-     * written transcript, so each one is its own `runCatching`, and every
-     * failure is logged individually rather than swallowed.
+     * Writes one .txt for a single (file, engine) result — call the moment
+     * each file finishes, not batched with anything else in the run. See
+     * this class's own doc comment for why. Failure here (a name MediaStore
+     * rejects, a full disk) is logged, not thrown — one file's write
+     * failing must never lose or delay any other file's own result.
      */
-    fun saveEngineResults(results: List<Pair<BenchmarkAudioFile, BenchmarkRunMetrics>>) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || results.isEmpty()) return
-        var written = 0
-        for ((file, metrics) in results) {
-            val baseName = file.fileName.substringBeforeLast('.', file.fileName)
-            runCatching {
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.txt")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/benchmark/${metrics.modelId}/")
-                }
-                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: error("contentResolver.insert returned null")
-                context.contentResolver.openOutputStream(uri)?.use { it.write(transcriptFileText(file.fileName, metrics).toByteArray()) }
-                    ?: error("openOutputStream returned null for $uri")
-            }.onSuccess {
-                written++
-            }.onFailure { e ->
-                appLog.record("BENCHMARK", "failed to write ${metrics.modelId}/$baseName.txt: ${e.describeForUser()}")
+    fun saveFileResult(file: BenchmarkAudioFile, metrics: BenchmarkRunMetrics) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val baseName = file.fileName.substringBeforeLast('.', file.fileName)
+        runCatching {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.txt")
+                put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/benchmark/${metrics.modelId}/")
             }
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("contentResolver.insert returned null")
+            context.contentResolver.openOutputStream(uri)?.use { it.write(transcriptFileText(file.fileName, metrics).toByteArray()) }
+                ?: error("openOutputStream returned null for $uri")
+        }.onFailure { e ->
+            appLog.record("BENCHMARK", "failed to write ${metrics.modelId}/$baseName.txt: ${e.describeForUser()}")
         }
-        appLog.record("BENCHMARK", "Downloads: wrote $written/${results.size} transcript file(s) for ${results.first().second.modelId}")
     }
 
     /** Returns the internal file's name (for display) — the same "saved as X" convention TranscribeActivity already uses. */

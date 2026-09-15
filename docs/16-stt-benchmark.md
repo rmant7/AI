@@ -189,14 +189,15 @@ fresh one after a model or engine update, per the original requirement.
    for a failed run. Organized **by model**, not by source file: this is
    what makes "what did Tiny produce for this recording vs. what did Large
    produce" a matter of opening two folders side by side, without digging
-   through the combined JSON. **Written incrementally** (`BenchmarkReportStore.saveEngineResults`,
-   called from `BenchmarkRunner`'s `onEngineComplete`) — once per engine,
-   the moment that engine's own file loop finishes, not batched to the end
-   of the whole run. A real device report is why: with everything saved
-   only once at the very end, a run comparing several GB-scale Whisper
-   sizes produced *zero* inspectable output for over half an hour,
-   all-or-nothing, on a device where a single engine's own pass can
-   legitimately take that long.
+   through the combined JSON. **Written incrementally, per file**
+   (`BenchmarkReportStore.saveFileResult`, called from `BenchmarkRunner`'s
+   `onFileComplete`) — the moment each individual file finishes, not
+   batched by engine and not batched to the end of the whole run. A real
+   device report is why: with everything saved only once at the very end, a
+   run comparing several GB-scale Whisper sizes produced *zero* inspectable
+   output for over half an hour, all-or-nothing — and even "once per
+   engine" still meant a long wait, since a single *file* can itself take
+   several minutes on a large model.
 2. The full JSON report, once the whole run finishes (`BenchmarkReportStore.save`):
    internally to `filesDir/benchmarks/benchmark-<timestamp>.json` always
    (what `BenchmarkActivity`'s own Share button reads, via the app's

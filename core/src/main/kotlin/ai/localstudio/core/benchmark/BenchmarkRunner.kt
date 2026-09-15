@@ -79,17 +79,20 @@ class BenchmarkRunner(
          */
         warmupSample: BenchmarkAudioFile? = null,
         /**
-         * Fires once per engine, right after its own file loop finishes (or
-         * immediately, with every file reporting the same load failure, if
-         * [TranscriptionEngine.load] itself threw) — before the *next*
-         * engine even starts loading. A real device report is why this
-         * exists: with results only ever saved once, at the very end of the
-         * whole run, a run comparing several GB-scale models produced
-         * *zero* inspectable output for over half an hour, all-or-nothing.
-         * The caller can persist each engine's own results as they land
-         * instead of waiting for engines still to come.
+         * Fires right after *each individual file* finishes — including a
+         * file whose engine failed to load at all, which reports the same
+         * load-failure [BenchmarkRunMetrics] immediately rather than
+         * waiting for every other file in [files] to get the same
+         * treatment. A real device report is why this exists at file
+         * granularity, not just once per engine: a single engine's own file
+         * loop can itself run for many minutes on a large model, and
+         * waiting even for that felt like results were "batched" —
+         * per-file is the finest granularity this benchmark actually
+         * measures at, so it is also the finest granularity worth
+         * persisting at. The caller can save each file's result the moment
+         * it lands instead of waiting for anything still to come.
          */
-        onEngineComplete: (BenchmarkEngineSummary, List<Pair<BenchmarkAudioFile, BenchmarkRunMetrics>>) -> Unit = { _, _ -> },
+        onFileComplete: (BenchmarkEngineSummary, BenchmarkAudioFile, BenchmarkRunMetrics) -> Unit = { _, _, _ -> },
     ): BenchmarkRunOutput {
         val startedAt = clock()
         val engineSummaries = mutableListOf<BenchmarkEngineSummary>()
@@ -130,7 +133,7 @@ class BenchmarkRunner(
                     loadFailed = true,
                     loadErrorMessage = e.describeForUser(),
                 )
-                val loadFailureResults = files.map { file ->
+                files.forEach { file ->
                     val metrics = BenchmarkRunMetrics(
                         backendId = engine.backendId,
                         backendVersion = engine.backendVersion,
@@ -148,9 +151,8 @@ class BenchmarkRunner(
                     perFileMetrics.getValue(file) += metrics
                     completed++
                     onProgress(completed, total)
-                    file to metrics
+                    onFileComplete(engineSummaries.last(), file, metrics)
                 }
-                onEngineComplete(engineSummaries.last(), loadFailureResults)
                 continue
             }
             val modelLoadMs = clock() - loadStart
@@ -185,13 +187,11 @@ class BenchmarkRunner(
                 loadFailed = false,
             )
 
-            val thisEngineResults = mutableListOf<Pair<BenchmarkAudioFile, BenchmarkRunMetrics>>()
             try {
                 files.forEachIndexed { index, file ->
                     onStatus("${engine.displayName}: ${file.fileName} (${index + 1}/${files.size})…")
                     val metrics = runOneTimed(engine, session, file, forcedLanguage, memorySamplerMb)
                     perFileMetrics.getValue(file) += metrics
-                    thisEngineResults += file to metrics
                     onStatus(
                         "${engine.displayName}: ${file.fileName} — ${metrics.status}" +
                             (metrics.rtf?.let { " (RTF ${"%.2f".format(Locale.ROOT, it)})" } ?: "") +
@@ -199,6 +199,7 @@ class BenchmarkRunner(
                     )
                     completed++
                     onProgress(completed, total)
+                    onFileComplete(engineSummaries.last(), file, metrics)
                 }
             } finally {
                 // Always released before the next engine's own load() call —
@@ -210,7 +211,6 @@ class BenchmarkRunner(
                 // frees it.
                 session.release()
             }
-            onEngineComplete(engineSummaries.last(), thisEngineResults)
         }
 
         val fileResults = files.map { file -> BenchmarkFileResult(file, perFileMetrics.getValue(file)) }
