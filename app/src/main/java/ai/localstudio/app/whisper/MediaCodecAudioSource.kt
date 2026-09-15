@@ -197,6 +197,20 @@ class MediaCodecAudioSource private constructor(
                 // audio, so it gets its own (short) final chunk rather than being
                 // dropped.
                 emit(pending.size)
+            } catch (e: MediaCodec.CodecException) {
+                // Real device report: this exception's own message() is a blank
+                // string, not null — Throwable.describeForUser()'s null-or-blank
+                // fallback to toString() doesn't help either, since the default
+                // toString() is just "<classname>: " with nothing useful after
+                // it. The actual diagnostic (what went wrong, whether retrying
+                // could work) lives in this class's own dedicated fields, not in
+                // message — errorCode/diagnosticInfo are folded into a real
+                // IOException message here so every catch site upstream that
+                // already knows how to report an IOException gets it for free.
+                throw IOException(
+                    "MediaCodec error ${e.errorCode} (recoverable=${e.isRecoverable}, transient=${e.isTransient}): ${e.diagnosticInfo}",
+                    e,
+                )
             } finally {
                 runCatching { codec.stop() }
                 codec.release()

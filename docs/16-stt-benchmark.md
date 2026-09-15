@@ -382,6 +382,62 @@ or Qwen3-ASR's Hebrew coverage, both of which turned out not to apply here.
 Not started this round: ivrit.ai's zero-integration-cost fix was the
 obviously cheaper first move for the same Hebrew problem.
 
+## Real device finding: thermal throttling, not a software bug
+
+A full 7-engine run on the Pixel 10 Pro surfaced a genuine hardware limit,
+not something more code can fix outright: after ~35 minutes of continuous,
+back-to-back multi-GB model loads and inference with zero rest between
+engines, warm-up on the fixed 1.5s `WarmupSample` took **791 seconds (13
+minutes)**, and every file transcribed afterward failed with
+`android.media.MediaCodec$CodecException` — including files that had
+**succeeded minutes earlier in the exact same run**, under a different
+engine. Nothing in the code changed between those two points; the device's
+own thermal state did. `MediaCodec.CodecException.message` is a blank
+string for this exception (a known API quirk — the real diagnostic lives
+in `errorCode`/`diagnosticInfo`, not `message`), which even
+`Throwable.describeForUser()`'s null-or-blank fallback to `toString()`
+couldn't surface; `MediaCodecAudioSource` now catches this exception type
+specifically and builds a real message from those fields.
+
+Two mitigations, neither of which "fixes" real silicon throttling:
+
+- **`ThermalGuard`** (`PowerManager.currentThermalStatus`, API 29+) — awaited
+  before every engine's own load (`BenchmarkRunner`'s new `beforeEngine`
+  hook). While the device reports `THERMAL_STATUS_SEVERE` or worse, the run
+  pauses (polling every 15s, both logged and shown on screen) instead of
+  immediately starting the next multi-GB model load that is near-certain to
+  fail or time out anyway.
+- **Per-call timeouts** (`BenchmarkStatus.TIMEOUT`, already modeled but
+  unused until now) — warm-up capped at 90s, a file's own transcribe capped
+  at `max(120s, durationMs × 10)`. This is a bookkeeping backstop, not true
+  cancellation: whisper.cpp's native calls aren't interruptible mid-call
+  (the same limitation `BenchmarkOrchestrator.cancel()` already documents),
+  so a timed-out call's underlying native work — and the global native
+  mutex it holds — keeps running regardless. What it buys: the benchmark
+  itself never silently blocks for 13 minutes on one call again, and
+  correctly records `TIMEOUT` instead of nothing.
+
+Also fixed alongside this: `AppLog` (Журнал ошибок) is a single, app-wide,
+~1000-line capped log — the benchmark's own routine per-file chatter (two
+lines per file × every file × every engine) was rotating away not just its
+own early history but every *other* feature's log entries too, well before
+a long run even finished. `BenchmarkOrchestrator` now sends only high-signal
+events to `AppLog` (run start/finish/failure, each file's own *error*,
+thermal pauses) — every routine status line still drives the on-screen
+status live, just without also flooding the shared log. Separately,
+`LogActivity` itself only ever rendered once, in `onCreate` — someone
+watching it during a long run saw a frozen snapshot from the moment they
+opened it; it now polls and re-renders every 2s while open.
+
+**Practical takeaway for running this benchmark**: on real hardware, 7
+engines back-to-back in one sitting can push the device far enough that
+later results are not trustworthy even when they don't outright fail —
+thermal throttling degrades real compute speed, which is exactly what RTF
+is supposed to measure honestly. Running in smaller batches with real
+cooldown between them remains the user's own best mitigation; `ThermalGuard`
+only stops the run from making the problem worse once it's already
+detectable.
+
 ## What's deliberately not done this round
 
 - CTranslate2, sherpa-onnx, or any other second *backend* — see above.

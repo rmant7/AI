@@ -2,7 +2,18 @@ package ai.localstudio.core.benchmark
 
 import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.util.describeForUser
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import java.util.Locale
+
+/** Generous ceiling for warm-up on a ~1.5s clip — real device report: 13 minutes (791s) for exactly this, with the device thermally throttled. Should never legitimately take more than a few seconds; this is a backstop, not a target. */
+private const val WARMUP_TIMEOUT_MS = 90_000L
+
+/** Floor for a file's own transcribe timeout, for a file with no known duration. */
+private const val MIN_TRANSCRIBE_TIMEOUT_MS = 120_000L
+
+/** How many times a file's own duration a transcribe call may run before it's presumed hung rather than genuinely slow — generous even for a thermally-throttled device running far below its normal speed. */
+private const val TRANSCRIBE_TIMEOUT_RTF_CEILING = 10L
 
 /**
  * Runs every registered [TranscriptionEngine] against every selected file
@@ -93,6 +104,21 @@ class BenchmarkRunner(
          * it lands instead of waiting for anything still to come.
          */
         onFileComplete: (BenchmarkEngineSummary, BenchmarkAudioFile, BenchmarkRunMetrics) -> Unit = { _, _, _ -> },
+        /**
+         * Awaited right before *each* engine's own [TranscriptionEngine.load]
+         * call — the seam for a caller to pace the run against real device
+         * conditions this module has no way to see itself (thermal state,
+         * memory pressure). A real device report is why this exists: after
+         * 30+ minutes of continuous, back-to-back multi-GB model loads with
+         * no rest between engines, warm-up on a 1.5s clip took 13 minutes,
+         * and every file transcribed afterward failed — while the exact
+         * same operations had succeeded minutes earlier in the same run.
+         * Nothing in this module can detect or fix real silicon throttling;
+         * a caller that can (e.g. Android's own thermal status API) gets the
+         * chance to pause here instead of burning through more models
+         * that are near-certain to fail or time out regardless.
+         */
+        beforeEngine: suspend () -> Unit = {},
     ): BenchmarkRunOutput {
         val startedAt = clock()
         val engineSummaries = mutableListOf<BenchmarkEngineSummary>()
@@ -115,6 +141,7 @@ class BenchmarkRunner(
         val warmSample = warmupSample ?: files.minByOrNull { it.durationMs ?: Long.MAX_VALUE }
 
         for (engine in engines) {
+            beforeEngine()
             onStatus("Loading ${engine.displayName} (${engine.modelId})…")
             val loadStart = clock()
             val session = try {
@@ -166,9 +193,15 @@ class BenchmarkRunner(
                 onStatus("${engine.displayName}: warming up on ${warmSample.fileName}…")
                 val warmStart = clock()
                 try {
-                    session.warmUp(AudioRef(uri = warmSample.uri, durationMs = warmSample.durationMs, sampleRate = warmSample.sampleRateHz))
+                    withTimeout(WARMUP_TIMEOUT_MS) {
+                        session.warmUp(AudioRef(uri = warmSample.uri, durationMs = warmSample.durationMs, sampleRate = warmSample.sampleRateHz))
+                    }
                     warmInferenceMs = clock() - warmStart
                     onStatus("${engine.displayName}: warm-up done in ${warmInferenceMs}ms")
+                } catch (e: TimeoutCancellationException) {
+                    warmUpFailed = true
+                    warmInferenceMs = clock() - warmStart
+                    onStatus("${engine.displayName}: warm-up timed out after ${WARMUP_TIMEOUT_MS}ms")
                 } catch (e: Exception) {
                     warmUpFailed = true
                     onStatus("${engine.displayName}: warm-up failed — ${e.describeForUser()}")
@@ -223,6 +256,19 @@ class BenchmarkRunner(
         )
     }
 
+    /**
+     * `withTimeout` here is a bookkeeping backstop, not true cancellation:
+     * whisper.cpp's own native calls are not interruptible mid-call (the
+     * same cooperative-cancellation limitation [BenchmarkOrchestrator]'s
+     * own `cancel()` already documents), so a timed-out call's underlying
+     * native work — and the global native mutex it holds — keeps running
+     * until it actually finishes on its own, whatever that takes. What
+     * this buys: [BenchmarkRunner] itself never blocks past [timeoutMs]
+     * on any single call, correctly reports [BenchmarkStatus.TIMEOUT]
+     * instead of silently hanging, and can move its own bookkeeping
+     * forward — even though the *next* call may still have to wait its
+     * turn for the same still-held mutex.
+     */
     private suspend fun runOneTimed(
         engine: TranscriptionEngine,
         session: TranscriptionEngineSession,
@@ -231,8 +277,11 @@ class BenchmarkRunner(
         memorySamplerMb: (() -> Long?)?,
     ): BenchmarkRunMetrics {
         val start = clock()
+        val timeoutMs = maxOf(MIN_TRANSCRIBE_TIMEOUT_MS, (file.durationMs ?: 0L) * TRANSCRIBE_TIMEOUT_RTF_CEILING)
         return try {
-            val transcript = session.transcribe(AudioRef(uri = file.uri, durationMs = file.durationMs, sampleRate = file.sampleRateHz))
+            val transcript = withTimeout(timeoutMs) {
+                session.transcribe(AudioRef(uri = file.uri, durationMs = file.durationMs, sampleRate = file.sampleRateHz))
+            }
             val elapsed = clock() - start
             val rtf = file.durationMs?.takeIf { it > 0 }?.let { elapsed.toDouble() / it }
             BenchmarkRunMetrics(
@@ -248,6 +297,22 @@ class BenchmarkRunner(
                 memoryMb = memorySamplerMb?.invoke(),
                 status = BenchmarkStatus.SUCCESS,
                 transcriptText = transcript.text,
+            )
+        } catch (e: TimeoutCancellationException) {
+            val elapsed = clock() - start
+            BenchmarkRunMetrics(
+                backendId = engine.backendId,
+                backendVersion = engine.backendVersion,
+                modelId = engine.modelId,
+                precision = engine.precision,
+                threads = session.threads,
+                forcedLanguage = forcedLanguage,
+                detectedLanguage = null,
+                processingMs = elapsed,
+                rtf = null,
+                memoryMb = memorySamplerMb?.invoke(),
+                status = BenchmarkStatus.TIMEOUT,
+                errorMessage = "no result after ${timeoutMs}ms",
             )
         } catch (e: Exception) {
             val elapsed = clock() - start

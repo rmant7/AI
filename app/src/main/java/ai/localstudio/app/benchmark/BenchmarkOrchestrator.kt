@@ -5,6 +5,7 @@ import ai.localstudio.app.whisper.WarmupSample
 import ai.localstudio.core.benchmark.BenchmarkAudioFile
 import ai.localstudio.core.benchmark.BenchmarkReport
 import ai.localstudio.core.benchmark.BenchmarkRunner
+import ai.localstudio.core.benchmark.BenchmarkStatus
 import ai.localstudio.core.benchmark.TranscriptionEngine
 import ai.localstudio.core.util.describeForUser
 import android.content.Context
@@ -36,7 +37,17 @@ class BenchmarkOrchestrator(
     private val reportStore: BenchmarkReportStore,
     private val engineProvider: () -> List<TranscriptionEngine>,
     private val scope: CoroutineScope,
-    /** Real device report: a run stuck on "0 / 35" for minutes with nothing in the app's own log either — every status line also lands here under the "BENCHMARK" tag, so a run stuck on a slow load/file is diagnosable from Журнал ошибок without needing the screen open. */
+    /**
+     * Every load/warm-up/per-file status line drives the on-screen
+     * [BenchmarkUiState.Running.status] directly — [appLog] only gets the
+     * high-signal events (run start/finish/failure, each file's own
+     * *error*, never a routine success). A real device report is why:
+     * Журнал ошибок is a single, app-wide, ~1000-line capped log (see
+     * [AppLog]'s own doc comment), and a run's own routine chatter — two
+     * lines per file, times every file, times every engine — was rotating
+     * away not just its own early history but every *other* feature's log
+     * entries too, well before the run itself finished.
+     */
     private val appLog: AppLog,
     /** For [BenchmarkWarmup.resolve] — see [warmupSample]'s own doc comment. */
     private val context: Context,
@@ -47,6 +58,8 @@ class BenchmarkOrchestrator(
     val state: StateFlow<BenchmarkUiState> = _state
 
     private var job: Job? = null
+
+    private val thermalGuard = ThermalGuard(context)
 
     /** A fixed short sample every engine warms up on instead of one of the user's own files — see [WarmupSample]'s own doc comment. Resolved once (the underlying asset never changes) rather than re-copied every run. */
     private val warmupSample: BenchmarkAudioFile by lazy {
@@ -84,16 +97,32 @@ class BenchmarkOrchestrator(
                         _state.value = BenchmarkUiState.Running(completed, done, current?.status.orEmpty())
                     },
                     onStatus = { status ->
-                        appLog.record("BENCHMARK", status)
                         val current = _state.value as? BenchmarkUiState.Running
                         _state.value = BenchmarkUiState.Running(current?.completed ?: 0, current?.total ?: total, status)
                     },
                     warmupSample = warmupSample,
-                    // Persisted the moment each individual file finishes,
-                    // not batched by engine or to the very end — see
-                    // BenchmarkReportStore's own doc comment for the real
-                    // device report this exists for.
-                    onFileComplete = { _, file, metrics -> reportStore.saveFileResult(file, metrics) },
+                    // Real device report: a benchmark that kept loading
+                    // multi-GB models back-to-back while the device was
+                    // already thermally throttled produced 13-minute
+                    // warm-ups and then a 100% failure rate — see
+                    // ThermalGuard's own doc comment.
+                    beforeEngine = {
+                        thermalGuard.waitUntilSafe { message ->
+                            appLog.record("BENCHMARK", message)
+                            val current = _state.value as? BenchmarkUiState.Running
+                            _state.value = BenchmarkUiState.Running(current?.completed ?: 0, current?.total ?: total, message)
+                        }
+                    },
+                    onFileComplete = { _, file, metrics ->
+                        // Persisted the moment each individual file finishes,
+                        // not batched by engine or to the very end — see
+                        // BenchmarkReportStore's own doc comment for the
+                        // real device report this exists for.
+                        reportStore.saveFileResult(file, metrics)
+                        if (metrics.status == BenchmarkStatus.ERROR) {
+                            appLog.record("BENCHMARK", "${metrics.modelId}: ${file.fileName} — ERROR: ${metrics.errorMessage}")
+                        }
+                    },
                 )
                 val report = reportStore.buildReport(output, sharedTask = "transcribe", sharedForcedLanguage = null)
                 val savedAs = reportStore.save(report)
