@@ -93,6 +93,23 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Exposes only files/transcripts/ (see xml/transcript_file_paths.xml)
+             as content:// URIs — TranscribeActivity's saved .txt transcripts
+             live under this app's own private filesDir, unreachable by any
+             other app (a file manager, Drive, Telegram) without this: a
+             plain file:// URI is blocked by StrictMode for cross-app
+             sharing on modern Android, and text-only Intent.EXTRA_TEXT
+             shares content, not a file the user can actually save. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/transcript_file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

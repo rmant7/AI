@@ -25,6 +25,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -623,7 +624,7 @@ class TranscribeActivity : AppCompatActivity() {
                 binding.resultCopyButton.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
                 binding.resultCopyButton.setOnClickListener { copyToClipboard(result.text) }
                 binding.resultShareButton.visibility = if (result.text.isBlank()) View.GONE else View.VISIBLE
-                binding.resultShareButton.setOnClickListener { shareText(result.text) }
+                binding.resultShareButton.setOnClickListener { shareResult(result) }
 
                 val isPlaying = playingUri == result.uri
                 binding.resultPlayButton.setImageResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
@@ -635,12 +636,34 @@ class TranscribeActivity : AppCompatActivity() {
 
     /**
      * The saved .txt lives under this app's own private filesDir — invisible
-     * to any file manager, Downloads app, or other app without root. Plain
-     * text share (same pattern as ChatActivity.shareChat()) is the actual
-     * way out: the system share sheet's own targets (Files, Drive, Telegram,
-     * ...) already know how to save that text as a file somewhere the user
-     * can reach, without this needing a FileProvider of its own.
+     * to any file manager, Downloads app, or other app without root.
+     * Sharing plain text (EXTRA_TEXT) handed over the transcript's
+     * *content*, not a file — a real ask, reported directly: text pasted
+     * into a share target isn't the same as a .txt the user can actually
+     * save. Once [Result.savedAs] names the file on disk, this shares that
+     * file itself via [FileProvider] (see transcript_file_paths.xml and the
+     * AndroidManifest provider entry — file:// URIs are blocked by
+     * StrictMode for cross-app sharing on modern Android, hence content://
+     * through this). Falls back to plain text only for a row that has
+     * visible text but hasn't been saved yet (RUNNING, or ERROR after some
+     * text arrived) — save() only ever runs on DONE or a non-blank CANCELLED.
      */
+    private fun shareResult(result: Result) {
+        val savedName = result.savedAs
+        val file = savedName?.let { File(File(filesDir, "transcripts"), it) }
+        if (file != null && file.isFile) {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, getString(R.string.transcribe_share)))
+        } else {
+            shareText(result.text)
+        }
+    }
+
     private fun shareText(text: String) {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
