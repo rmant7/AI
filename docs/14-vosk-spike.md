@@ -45,10 +45,14 @@ against the actual models list before spending more time on this path.
   bookkeeping.
 - **`ai.localstudio.app.vosk.VoskModels`** — the small, hand-picked
   catalogue (`vosk-small-ru`, `vosk-small-en`, and a larger, more-accurate
-  `vosk-ru`). Each seed carries a *list* of URLs, tried in order —
-  <https://alphacephei.com/vosk/models> first, then a Hugging Face mirror —
-  since `alphacephei.com` alone has been reported unreachable (DNS not
-  resolving, VPN or not) on a real device.
+  `vosk-ru`). Each seed carries a *list* of URLs, tried in order — a
+  mirror-fallback mechanism `VoskDownloads` supports generally, currently
+  used only for `vosk-small-en` (a Hugging Face mirror as a second try).
+  The two Russian seeds point at `alphacephei.com` alone: a guessed HF
+  mirror URL for the large model turned out to 404 on a real device, and
+  since HF file paths can't be re-verified from this dev environment
+  (egress policy blocks `huggingface.co`), a second unverified guess isn't
+  worth shipping — see `VoskModels`' own doc comment.
 - **`ai.localstudio.app.vosk.VoskModelStore`** — one directory per seed
   under app-private storage, plus `extract()` to unzip a downloaded model
   into it (stripping the single top-level directory every official archive

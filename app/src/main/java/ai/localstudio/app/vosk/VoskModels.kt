@@ -24,13 +24,20 @@ object VoskModels {
     private const val ALPHACEPHEI = "https://alphacephei.com/vosk/models"
 
     val SEEDS = listOf(
+        // No Hugging Face fallback for the two Russian models: the guessed
+        // mirror URL for the large one (localstack/vosk-models) turned out
+        // to 404 on a real device — reported directly, after a partial
+        // download against alphacephei.com itself had already gotten past
+        // half. That guess is now known wrong, and neither could be
+        // re-verified from this dev environment (this sandbox's own egress
+        // policy blocks huggingface.co outright), so shipping another
+        // unverified guess would just add a doomed retry cycle before the
+        // real error, not actually help. alphacephei.com is the one host
+        // confirmed to actually serve these two files.
         VoskModelSeed(
             id = "vosk-small-ru",
             title = "Vosk Small — Russian",
-            downloadUrls = listOf(
-                "$ALPHACEPHEI/vosk-model-small-ru-0.22.zip",
-                "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-ru-0.22.zip",
-            ),
+            downloadUrls = listOf("$ALPHACEPHEI/vosk-model-small-ru-0.22.zip"),
             approxSizeBytes = 45_000_000,
         ),
         VoskModelSeed(
@@ -45,10 +52,7 @@ object VoskModels {
         VoskModelSeed(
             id = "vosk-ru",
             title = "Vosk — Russian (large, more accurate)",
-            downloadUrls = listOf(
-                "$ALPHACEPHEI/vosk-model-ru-0.42.zip",
-                "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-ru-0.42.zip",
-            ),
+            downloadUrls = listOf("$ALPHACEPHEI/vosk-model-ru-0.42.zip"),
             approxSizeBytes = 1_800_000_000,
         ),
     )
