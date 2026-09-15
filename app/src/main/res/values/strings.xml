@@ -41,6 +41,12 @@
     <string name="benchmark_done">Done — saved as %1$s</string>
     <string name="benchmark_failed">Benchmark failed: %1$s</string>
     <string name="benchmark_no_engines">No transcription engines are available to benchmark.</string>
+    <string name="benchmark_mode_label">Performance mode</string>
+    <string name="benchmark_mode_maximum">Maximum</string>
+    <string name="benchmark_mode_sustained">Sustained</string>
+    <string name="benchmark_mode_cool_down">Cool-down</string>
+    <string name="benchmark_sustained_unsupported">Sustained Performance Mode isn\'t supported on this device — running without it.</string>
+    <string name="benchmark_trend">First run: %1$s · Average: %2$s · Last run: %3$s · Degradation: %4$s</string>
     <string name="message_copy">Copy message</string>
     <string name="message_copied">Copied</string>
     <string name="message_attached_image">Attached image</string>

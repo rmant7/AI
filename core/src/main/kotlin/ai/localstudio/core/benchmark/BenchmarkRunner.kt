@@ -62,6 +62,12 @@ class BenchmarkRunner(
          * this reports. Null (the default) means memory just isn't recorded.
          */
         memorySamplerMb: (() -> Long?)? = null,
+        /** Device-wide free RAM (MB) sampled right after each transcribe call — see [BenchmarkRunMetrics.freeRamMb]'s own doc comment. Null (the default) means it isn't recorded. */
+        freeRamMbSampler: (() -> Long?)? = null,
+        /** [android.os.PowerManager.currentThermalStatus]'s name, sampled right after each transcribe call — see [BenchmarkRunMetrics.thermalStatus]'s own doc comment. Null (the default) means it isn't recorded. */
+        thermalStatusSampler: (() -> String?)? = null,
+        /** [android.os.PowerManager.getThermalHeadroom] sampled right after each transcribe call — see [BenchmarkRunMetrics.thermalHeadroom]'s own doc comment. Null (the default) means it isn't recorded. */
+        thermalHeadroomSampler: (() -> Float?)? = null,
         onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> },
         /**
          * A human-readable line for every state transition (load starting,
@@ -223,7 +229,10 @@ class BenchmarkRunner(
             try {
                 files.forEachIndexed { index, file ->
                     onStatus("${engine.displayName}: ${file.fileName} (${index + 1}/${files.size})…")
-                    val metrics = runOneTimed(engine, session, file, forcedLanguage, memorySamplerMb)
+                    val metrics = runOneTimed(
+                        engine, session, file, forcedLanguage,
+                        memorySamplerMb, freeRamMbSampler, thermalStatusSampler, thermalHeadroomSampler,
+                    )
                     perFileMetrics.getValue(file) += metrics
                     onStatus(
                         "${engine.displayName}: ${file.fileName} — ${metrics.status}" +
@@ -275,6 +284,9 @@ class BenchmarkRunner(
         file: BenchmarkAudioFile,
         forcedLanguage: String?,
         memorySamplerMb: (() -> Long?)?,
+        freeRamMbSampler: (() -> Long?)?,
+        thermalStatusSampler: (() -> String?)?,
+        thermalHeadroomSampler: (() -> Float?)?,
     ): BenchmarkRunMetrics {
         val start = clock()
         val timeoutMs = maxOf(MIN_TRANSCRIBE_TIMEOUT_MS, (file.durationMs ?: 0L) * TRANSCRIBE_TIMEOUT_RTF_CEILING)
@@ -297,6 +309,9 @@ class BenchmarkRunner(
                 memoryMb = memorySamplerMb?.invoke(),
                 status = BenchmarkStatus.SUCCESS,
                 transcriptText = transcript.text,
+                freeRamMb = freeRamMbSampler?.invoke(),
+                thermalStatus = thermalStatusSampler?.invoke(),
+                thermalHeadroom = thermalHeadroomSampler?.invoke(),
             )
         } catch (e: TimeoutCancellationException) {
             val elapsed = clock() - start
@@ -313,6 +328,9 @@ class BenchmarkRunner(
                 memoryMb = memorySamplerMb?.invoke(),
                 status = BenchmarkStatus.TIMEOUT,
                 errorMessage = "no result after ${timeoutMs}ms",
+                freeRamMb = freeRamMbSampler?.invoke(),
+                thermalStatus = thermalStatusSampler?.invoke(),
+                thermalHeadroom = thermalHeadroomSampler?.invoke(),
             )
         } catch (e: Exception) {
             val elapsed = clock() - start
@@ -329,6 +347,9 @@ class BenchmarkRunner(
                 memoryMb = memorySamplerMb?.invoke(),
                 status = BenchmarkStatus.ERROR,
                 errorMessage = e.describeForUser(),
+                freeRamMb = freeRamMbSampler?.invoke(),
+                thermalStatus = thermalStatusSampler?.invoke(),
+                thermalHeadroom = thermalHeadroomSampler?.invoke(),
             )
         }
     }

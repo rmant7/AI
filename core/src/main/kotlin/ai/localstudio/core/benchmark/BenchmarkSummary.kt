@@ -49,4 +49,26 @@ object BenchmarkSummary {
         val mid = sorted.size / 2
         return if (sorted.size % 2 == 0) (sorted[mid - 1] + sorted[mid]) / 2.0 else sorted[mid]
     }
+
+    /**
+     * [orderedRtfs] must already be in execution order (first file
+     * transcribed first), not grouped/sorted by backend or file the way
+     * [report]'s own structure is — see [BenchmarkPerformanceTrend]'s own
+     * doc comment for why this needs to be execution order specifically.
+     * [BenchmarkPerformanceTrend.degradationPercent] is null whenever the
+     * first RTF is null or non-positive, never a divide-by-zero or
+     * divide-by-negative result.
+     */
+    fun computeTrend(orderedRtfs: List<Double>): BenchmarkPerformanceTrend {
+        val first = orderedRtfs.firstOrNull()
+        val last = orderedRtfs.lastOrNull()
+        val average = orderedRtfs.takeIf { it.isNotEmpty() }?.average()
+        val degradation = if (first != null && first > 0 && last != null) ((last - first) / first) * 100.0 else null
+        return BenchmarkPerformanceTrend(
+            firstRtf = first,
+            averageRtf = average,
+            lastRtf = last,
+            degradationPercent = degradation,
+        )
+    }
 }

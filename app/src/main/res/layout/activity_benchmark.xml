@@ -35,6 +35,49 @@
             android:paddingBottom="8dp"
             android:textSize="13sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:paddingHorizontal="16dp"
+            android:text="@string/benchmark_mode_label"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/benchmarkModeGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp">
+
+            <RadioButton
+                android:id="@+id/benchmarkModeMaximum"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:checked="true"
+                android:text="@string/benchmark_mode_maximum"
+                android:textSize="12sp" />
+
+            <RadioButton
+                android:id="@+id/benchmarkModeSustained"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/benchmark_mode_sustained"
+                android:textSize="12sp" />
+
+            <RadioButton
+                android:id="@+id/benchmarkModeCoolDown"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/benchmark_mode_cool_down"
+                android:textSize="12sp" />
+
+        </RadioGroup>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/benchmarkStartButton"
             style="@style/Widget.Material3.Button"
@@ -79,6 +122,15 @@
             android:layout_height="wrap_content"
             android:layout_margin="12dp"
             android:stretchColumns="*"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/benchmarkTrendText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="16dp"
+            android:paddingBottom="8dp"
+            android:textSize="12sp"
             android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton

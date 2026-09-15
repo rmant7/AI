@@ -43,6 +43,12 @@
     <string name="benchmark_done">Готово — сохранено как %1$s</string>
     <string name="benchmark_failed">Benchmark не удался: %1$s</string>
     <string name="benchmark_no_engines">Нет доступных движков распознавания для benchmark.</string>
+    <string name="benchmark_mode_label">Режим производительности</string>
+    <string name="benchmark_mode_maximum">Максимальная</string>
+    <string name="benchmark_mode_sustained">Стабильная</string>
+    <string name="benchmark_mode_cool_down">С охлаждением</string>
+    <string name="benchmark_sustained_unsupported">Sustained Performance Mode не поддерживается на этом устройстве — продолжаем без него.</string>
+    <string name="benchmark_trend">Первый прогон: %1$s · Средняя: %2$s · Последний прогон: %3$s · Деградация: %4$s</string>
     <string name="message_copy">Скопировать сообщение</string>
     <string name="message_copied">Скопировано</string>
     <string name="message_attached_image">Прикреплённое изображение</string>

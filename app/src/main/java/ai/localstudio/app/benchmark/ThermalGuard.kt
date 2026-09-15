@@ -40,11 +40,35 @@ class ThermalGuard(context: Context) {
     }
 
     private fun describeStatus(status: Int): String = when (status) {
+        PowerManager.THERMAL_STATUS_NONE -> "NONE"
+        PowerManager.THERMAL_STATUS_LIGHT -> "LIGHT"
+        PowerManager.THERMAL_STATUS_MODERATE -> "MODERATE"
         PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE"
         PowerManager.THERMAL_STATUS_CRITICAL -> "CRITICAL"
         PowerManager.THERMAL_STATUS_EMERGENCY -> "EMERGENCY"
         PowerManager.THERMAL_STATUS_SHUTDOWN -> "SHUTDOWN"
         else -> status.toString()
+    }
+
+    /** Read-only, non-blocking snapshot for per-file logging (see [ai.localstudio.core.benchmark.BenchmarkRunMetrics.thermalStatus]) — unlike [waitUntilSafe], never pauses or acts on the value, just reports it. API 29+; null below that or if the service is unavailable. */
+    fun currentStatusLabel(): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val pm = powerManager ?: return null
+        return describeStatus(pm.currentThermalStatus)
+    }
+
+    /**
+     * [PowerManager.getThermalHeadroom]'s normalized forecast (not a raw
+     * Celsius reading — Android exposes no public raw-temperature API to
+     * apps) for the current moment ([forecastSeconds] = 0). API 30+; the
+     * platform call itself can throw when it has no data yet, which this
+     * treats the same as "unavailable" rather than crashing a benchmark run
+     * over a missing metric.
+     */
+    fun currentHeadroom(): Float? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val pm = powerManager ?: return null
+        return runCatching { pm.getThermalHeadroom(0) }.getOrNull()?.takeUnless { it.isNaN() }
     }
 
     private companion object {

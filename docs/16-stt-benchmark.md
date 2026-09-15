@@ -438,12 +438,61 @@ cooldown between them remains the user's own best mitigation; `ThermalGuard`
 only stops the run from making the problem worse once it's already
 detectable.
 
+## Performance modes: does Sustained Performance Mode actually help?
+
+Three ways to pace a run (`BenchmarkPerformanceMode`, picked via a radio
+group on the benchmark screen before starting):
+
+- **Maximum** — no pacing, no OS performance mode. Engine after engine,
+  back to back, exactly as this benchmark always has run. The baseline.
+- **Sustained** — identical to Maximum except `Window.setSustainedPerformanceMode(true)`
+  is set for the duration of the run, wherever
+  `PowerManager.isSustainedPerformanceModeSupported` says the device can
+  honor it. Nothing else about the run differs — same engines, same files,
+  same per-call timeouts — because the whole point is a valid Maximum-vs-
+  Sustained comparison (an apples-to-apples throughput test, not a
+  reworked pipeline). If unsupported, the run still proceeds and logs the
+  literal string `sustained_mode=unsupported` rather than silently
+  reporting a run indistinguishable from one where the mode actually
+  engaged. `sustainedModeSupported`/`sustainedModeActive` in the saved
+  report record exactly what happened.
+- **Cool-down** — the only mode that intentionally changes wall-clock
+  behavior: pauses via `ThermalGuard.waitUntilSafe` plus a fixed one-minute
+  floor between engines, specifically to let the device recover. Not used
+  for the Maximum-vs-Sustained comparison itself, for the same reason
+  Sustained can't add its own pauses either.
+
+`Window.setSustainedPerformanceMode` is a `Window`-level API requiring a
+live, focused window — it cannot be set from `BenchmarkOrchestrator` itself,
+which deliberately runs Activity-independently (see above). `BenchmarkActivity`
+toggles it from `onResume`/`onPause`, reading the active run's mode off
+`BenchmarkUiState.Running.mode` so the flag tracks whatever run is actually
+in flight rather than a copy that could drift.
+
+**Never enabled programmatically, in any mode**: Battery Saver / Extreme
+Battery Saver. Only Sustained mode touches an OS performance API at all,
+and only the one built for exactly this comparison.
+
+**Per-file metrics now also include**, when available: free system RAM
+(`freeRamMb`, device-wide, distinct from `memoryMb`'s app-only native
+heap), thermal status name from `PowerManager.currentThermalStatus`
+(API 29+), and `PowerManager.getThermalHeadroom` (API 30+, a normalized
+forecast — Android exposes no public raw-temperature API to apps, so this
+is the honest ceiling on what "temperature" can mean here).
+
+**The report's own trend** (`BenchmarkPerformanceTrend`, requirement: first
+run vs. average vs. last run vs. degradation %) is computed from successful
+files' RTF values in actual execution order — not grouped by file the way
+the rest of the report is — specifically so a real slowdown across the run
+shows up as a real number, not averaged away.
+
 ## What's deliberately not done this round
 
 - CTranslate2, sherpa-onnx, or any other second *backend* — see above.
 - Real-time microphone benchmarking — the spec explicitly asked for
   files-first; microphone mode reuses the same `TranscriptionEngine`
   abstraction later, per the architecture diagram above.
-- A true continuously-sampled memory/CPU peak during inference, or
-  temperature/throttling indicators — `memoryMb`'s honest scope is
-  documented above rather than silently overstated.
+- A true continuously-sampled memory/CPU peak during inference, or a raw
+  Celsius reading — `memoryMb`'s honest scope is documented above rather
+  than silently overstated, and `thermalHeadroom` is Android's own
+  normalized forecast, not a real temperature, for the same reason.

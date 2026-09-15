@@ -34,6 +34,12 @@ data class BenchmarkRunMetrics(
     val status: BenchmarkStatus,
     val errorMessage: String? = null,
     val transcriptText: String = "",
+    /** Free system RAM right after the call returns, in MB — unlike [memoryMb] (this app's own native heap), this is device-wide headroom, sampled to correlate a slow/failed run against memory pressure from other processes. Null where the sampler wasn't wired up. */
+    val freeRamMb: Long? = null,
+    /** [android.os.PowerManager.currentThermalStatus]'s name (e.g. "NONE", "MODERATE", "SEVERE") sampled right after the call returns — API 29+ only; null below that or where unavailable. See [ai.localstudio.app.benchmark.ThermalGuard]. */
+    val thermalStatus: String? = null,
+    /** [android.os.PowerManager.getThermalHeadroom] sampled right after the call returns — a normalized 0..1+ forecast, not a raw Celsius reading (Android exposes no public raw-temperature API to apps). API 30+ only; null below that or where the OS itself couldn't produce a value. */
+    val thermalHeadroom: Float? = null,
 )
 
 @Serializable
@@ -62,6 +68,21 @@ data class BenchmarkEngineSummary(
     val warmUpFailed: Boolean,
     val loadFailed: Boolean,
     val loadErrorMessage: String? = null,
+)
+
+/**
+ * First/average/last RTF across a run's successful files, in execution
+ * order — not grouped by file like [BenchmarkReport.files] is, since the
+ * whole point is to see whether the *last* file was slower than the
+ * *first*. [degradationPercent] is `((last - first) / first) * 100`; null
+ * whenever [firstRtf] is null or non-positive (nothing sane to divide by).
+ */
+@Serializable
+data class BenchmarkPerformanceTrend(
+    val firstRtf: Double?,
+    val averageRtf: Double?,
+    val lastRtf: Double?,
+    val degradationPercent: Double?,
 )
 
 @Serializable
@@ -101,4 +122,12 @@ data class BenchmarkReport(
     val sharedForcedLanguage: String?,
     val engines: List<BenchmarkEngineSummary>,
     val files: List<BenchmarkFileResult>,
+    /** [ai.localstudio.app.benchmark.BenchmarkPerformanceMode]'s name — "MAXIMUM", "SUSTAINED", or "COOL_DOWN". A plain String, not the app-layer enum itself: this module has no Android dependency, and the mode is an Android OS concept (battery saver, Window.setSustainedPerformanceMode), not a core benchmarking one. Defaults to "MAXIMUM" for reports produced before this field existed. */
+    val performanceMode: String = "MAXIMUM",
+    /** [android.os.PowerManager.isSustainedPerformanceModeSupported] on this device — independent of [performanceMode], so a SUSTAINED run on an unsupported device is visible in the report rather than silently indistinguishable from one where it worked. */
+    val sustainedModeSupported: Boolean = false,
+    /** Whether `Window.setSustainedPerformanceMode(true)` was actually set during this run — false whenever [performanceMode] wasn't SUSTAINED, or it was but [sustainedModeSupported] was false (see requirement: log `sustained_mode=unsupported` and continue rather than fail). */
+    val sustainedModeActive: Boolean = false,
+    /** Null only for a report produced before this field existed, or a run with fewer than one successful file. */
+    val performanceTrend: BenchmarkPerformanceTrend? = null,
 )
