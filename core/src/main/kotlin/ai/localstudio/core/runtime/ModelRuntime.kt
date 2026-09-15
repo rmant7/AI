@@ -76,7 +76,26 @@ interface StreamingSpeechSession {
     /** Stops immediately, discarding any unflushed buffered audio, and completes [segments]. */
     fun cancel()
 
-    /** Segments as they become available. The flow completes after [finish] or [cancel]. */
+    /**
+     * Segments as they become available. The flow completes after [finish]
+     * or [cancel].
+     *
+     * Carries both finalized segments and, for an implementation that
+     * revises an in-progress utterance as it hears more of it (a sliding-
+     * window engine — see [ai.localstudio.app.whisper.WhisperCppSpeechModel.startStreaming]
+     * and docs/12-audio.md), *partial* re-transcriptions of the same
+     * utterance — there is no separate flag distinguishing the two. A
+     * consumer that appends every emission as new text will render those
+     * revisions as steadily duplicating garbage instead of a corrected
+     * line. What does distinguish them: every revision of the same
+     * utterance is emitted with the same [TranscriptSegment.startMs] (only
+     * [TranscriptSegment.endMs] and the text itself change as it grows) —
+     * a *changed* `startMs` is what "the previous utterance settled, a new
+     * one began" looks like on this flow. An implementation with no
+     * partial phase at all (finalized segments only) trivially satisfies
+     * this too, since consecutive segments then simply never share a
+     * `startMs`.
+     */
     val segments: Flow<TranscriptSegment>
 }
 

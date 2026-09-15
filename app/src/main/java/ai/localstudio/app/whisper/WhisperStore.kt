@@ -69,17 +69,19 @@ class WhisperDownloads(
     val state: StateFlow<Map<String, WhisperDownloadState>> = states
 
     private val jobs = mutableMapOf<String, Job>()
-    private var activeDownloader: ModelDownloader? = null
+
+    /** Per seed, like [ai.localstudio.app.models.ModelDownloads.downloaders] — a single shared field here previously meant [cancel] could cancel a *different* seed's transfer, and a second Download tap was blocked outright rather than starting alongside the first. */
+    private val downloaders = mutableMapOf<String, ModelDownloader>()
 
     fun stateOf(seed: WhisperModelSeed): WhisperDownloadState =
         states.value[seed.id] ?: if (store.isInstalled(seed)) WhisperDownloadState.Installed else WhisperDownloadState.Idle
 
     fun start(seed: WhisperModelSeed) {
-        if (jobs.values.any { it.isActive }) return
+        if (jobs[seed.id]?.isActive == true) return
 
         onDownloadStarted()
         val downloader = ModelDownloader()
-        activeDownloader = downloader
+        downloaders[seed.id] = downloader
         jobs[seed.id] = scope.launch {
             try {
                 publish(seed, WhisperDownloadState.Running(DownloadProgress(0, seed.approxSizeBytes), "model"))
@@ -92,12 +94,14 @@ class WhisperDownloads(
                 publish(seed, WhisperDownloadState.Installed)
             } catch (e: Exception) {
                 publish(seed, WhisperDownloadState.Failed(e.message ?: e.toString()))
+            } finally {
+                downloaders.remove(seed.id)
             }
         }
     }
 
     fun cancel(seed: WhisperModelSeed) {
-        activeDownloader?.cancel()
+        downloaders[seed.id]?.cancel()
         jobs[seed.id]?.cancel()
         publish(seed, WhisperDownloadState.Idle)
     }

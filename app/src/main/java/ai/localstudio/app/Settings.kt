@@ -79,6 +79,11 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_WHISPER_MODEL, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_WHISPER_MODEL, value).apply()
 
+    /** Which downloaded Vosk model (docs/14-vosk-spike.md) to use for the live-mic Vosk section. Empty means "whichever is installed". */
+    var voskModelId: String
+        get() = prefs.getString(KEY_VOSK_MODEL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_VOSK_MODEL, value).apply()
+
     /**
      * Share of total RAM a model may claim, in percent.
      *
@@ -241,6 +246,7 @@ class Settings(context: Context) {
         const val KEY_CHAT_MODEL = "chatModel"
         const val KEY_ASR_MODEL = "asrModel"
         const val KEY_WHISPER_MODEL = "whisperModelId"
+        const val KEY_VOSK_MODEL = "voskModelId"
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_SEMANTIC_MEMORY = "semanticMemoryEnabled"
         const val KEY_COMPARE_MODE = "compareMode"

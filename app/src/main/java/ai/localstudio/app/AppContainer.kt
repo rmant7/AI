@@ -41,6 +41,11 @@ import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
 import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
+import ai.localstudio.app.benchmark.BenchmarkOrchestrator
+import ai.localstudio.app.benchmark.BenchmarkReportStore
+import ai.localstudio.app.benchmark.BenchmarkService
+import ai.localstudio.core.benchmark.BenchmarkRunner
+import ai.localstudio.core.benchmark.TranscriptionEngine
 import ai.localstudio.app.keys.BundledApiKeyStore
 import ai.localstudio.app.keys.BundledApiKeys
 import ai.localstudio.app.keys.PrefsApiKeyStore
@@ -61,9 +66,25 @@ import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
+import ai.localstudio.app.vosk.VoskDownloads
+import ai.localstudio.app.vosk.VoskModels
+import ai.localstudio.app.vosk.VoskRegisteredSpeechModel
+import ai.localstudio.app.vosk.VoskSpeechRecognizer
+import ai.localstudio.app.whisper.WhisperLanguageIdentifier
+import ai.localstudio.app.whisper.WhisperRegisteredSpeechModel
+import ai.localstudio.core.speech.DefaultStreamingSpeechRouter
+import ai.localstudio.core.speech.InMemorySpeechModelRegistry
+import ai.localstudio.core.speech.Language
+import ai.localstudio.core.speech.RoutingPolicy
+import ai.localstudio.core.speech.SpeechModelRegistry
+import ai.localstudio.core.speech.StreamingSpeechRouter
+import ai.localstudio.app.whisper.WhisperCppMicSession
 import ai.localstudio.app.whisper.WhisperCppRuntime
 import ai.localstudio.app.whisper.WhisperDownloads
+import ai.localstudio.app.whisper.FileTranscriptionRunner
+import ai.localstudio.app.whisper.FileTranscriptionService
 import ai.localstudio.app.whisper.WhisperEngine
+import ai.localstudio.app.whisper.WhisperCppTranscriptionEngine
 import ai.localstudio.app.whisper.WhisperFileTranscriber
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.app.whisper.WhisperStore
@@ -508,11 +529,11 @@ class AppContainer private constructor(private val context: Context) {
                 ) {
                     return
                 }
-                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("trim level $level") }
+                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("trim level $level", level) }
             }
 
             override fun onLowMemory() {
-                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("onLowMemory") }
+                CoroutineScope(Dispatchers.IO).launch { releaseMemoryUnderPressure("onLowMemory", level = Int.MAX_VALUE) }
             }
 
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
@@ -550,16 +571,50 @@ class AppContainer private constructor(private val context: Context) {
      * load independently and are each just as capable of sitting resident
      * and uncounted through a real OOM as the LLM was.
      */
-    private suspend fun releaseMemoryUnderPressure(reason: String) {
+    private suspend fun releaseMemoryUnderPressure(reason: String, level: Int = Int.MAX_VALUE) {
         if (semanticMemoryEmbedder.isReady) {
             semanticMemoryEmbedder.unload()
             appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
         }
         releaseLocalModels()
-        releaseWhisperEngines(reason)
+        releaseWhisperEngines(reason, level)
     }
 
-    private fun releaseWhisperEngines(reason: String) {
+    /**
+     * [level] is the raw ComponentCallbacks2 trim level (Int.MAX_VALUE for
+     * onLowMemory/[simulateMemoryPressureForTesting], always the most
+     * severe). Two different engines tolerate different tiers of it, because
+     * they mean different things while "actively in use":
+     *
+     * - The router's four models ([whisperFallbackModel]/[whisperLidModel]/
+     *   [voskRuSpecialist]/[voskEnSpecialist]) skip eviction below TRIM_MEMORY_RUNNING_CRITICAL
+     *   while [routerSessionActive] — a foreground, interactive feature that
+     *   already stops itself on backgrounding (TranscribeActivity.onPause),
+     *   so it only needs protecting from the *routine* signal (RUNNING_LOW,
+     *   fired constantly on a real device at ~1.4GB free) that was never
+     *   close to an actual OOM. See this fix's own commit for the original
+     *   report: an ~18s reload forced mid-conversation.
+     * - [whisperFileTranscriber] skips eviction below TRIM_MEMORY_COMPLETE
+     *   while [fileTranscriptionRunner]'s own `running` says a batch is
+     *   active — a task that is *expected*
+     *   to keep running while the app is backgrounded (the user switches
+     *   away and comes back later), so it needs to tolerate BACKGROUND/
+     *   MODERATE, not just RUNNING_LOW. Real device report: a file finished
+     *   as "Done" with an empty transcript, saved as an empty .txt, because
+     *   [WhisperFileTranscriber.release] fired mid-transcription (BACKGROUND,
+     *   trim level 40) — its `requestCancel()` makes the transcription loop
+     *   quietly `break` and return whatever it has so far (nothing, if the
+     *   very first 30s window hadn't finished yet) rather than throwing, so
+     *   nothing in TranscribeActivity's own error handling ever saw this as
+     *   a failure. TRIM_MEMORY_COMPLETE (about to be killed regardless) and
+     *   onLowMemory still evict it — this is not a way to keep a file
+     *   transcription alive through an actual OOM, only through routine
+     *   backgrounding.
+     *
+     * Every other engine here has no "in use" concept to protect and is
+     * released on any qualifying level, exactly as before.
+     */
+    private fun releaseWhisperEngines(reason: String, level: Int = Int.MAX_VALUE) {
         if (whisperEngine.isLoaded) {
             whisperEngine.release()
             appLog.record("WHISPER", "main engine unloaded under memory pressure ($reason)")
@@ -568,9 +623,41 @@ class AppContainer private constructor(private val context: Context) {
             whisperPreviewEngine.release()
             appLog.record("WHISPER", "preview engine unloaded under memory pressure ($reason)")
         }
-        if (whisperFileTranscriber.isLoaded) {
+        val skipFileTranscriber = fileTranscriptionRunner.running.value && level < android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        if (skipFileTranscriber) {
+            appLog.record("WHISPER", "file-transcriber kept resident through non-critical pressure ($reason); transcription is active")
+        }
+        if (whisperFileTranscriber.isLoaded && !skipFileTranscriber) {
             whisperFileTranscriber.release()
             appLog.record("WHISPER", "file-transcriber engine unloaded under memory pressure ($reason)")
+        }
+        if (whisperMicSession.isLoaded) {
+            whisperMicSession.release()
+            appLog.record("WHISPER", "mic session unloaded under memory pressure ($reason)")
+        }
+        if (voskRecognizer.isLoaded) {
+            voskRecognizer.release()
+            appLog.record("VOSK", "recognizer unloaded under memory pressure ($reason)")
+        }
+        val skipRouterModels = routerSessionActive && level < android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+        if (skipRouterModels) {
+            appLog.record("ROUTER", "router models kept resident through non-critical pressure ($reason); session is active")
+        }
+        if (whisperFallbackModel.isLoaded && !skipRouterModels) {
+            whisperFallbackModel.release()
+            appLog.record("WHISPER", "router fallback model unloaded under memory pressure ($reason)")
+        }
+        if (whisperLidModel.isLoaded && !skipRouterModels) {
+            whisperLidModel.release()
+            appLog.record("WHISPER", "router LID model unloaded under memory pressure ($reason)")
+        }
+        if (voskRuSpecialist.isLoaded && !skipRouterModels) {
+            voskRuSpecialist.release()
+            appLog.record("VOSK", "router RU specialist unloaded under memory pressure ($reason)")
+        }
+        if (voskEnSpecialist.isLoaded && !skipRouterModels) {
+            voskEnSpecialist.release()
+            appLog.record("VOSK", "router EN specialist unloaded under memory pressure ($reason)")
         }
     }
 
@@ -756,6 +843,197 @@ class AppContainer private constructor(private val context: Context) {
      * pressure that unloads everything else.
      */
     val whisperFileTranscriber = WhisperFileTranscriber(whisperCppRuntime as WhisperCppRuntime, whisperStore)
+
+    /**
+     * Owns [TranscribeActivity]'s batch file/folder transcription for the
+     * whole app — see this class's own doc comment for the real device
+     * report that made this necessary (Activity recreation under memory
+     * pressure silently wiping an in-progress transcription). Wired with
+     * [FileTranscriptionService.ensureStarted] the same way [downloads]/
+     * [whisperDownloads] wire [ModelDownloadService] — a foreground service
+     * so the process itself survives backgrounding, not just the Activity.
+     */
+    val fileTranscriptionRunner = FileTranscriptionRunner(
+        transcriber = whisperFileTranscriber,
+        context = context,
+        onTranscriptionStarted = { FileTranscriptionService.ensureStarted(context) },
+    )
+
+    /**
+     * STT Benchmark (docs/16-stt-benchmark.md): every backend currently
+     * available to compare, resolved live rather than cached — a model can
+     * be downloaded or deleted between one read and the next, same
+     * reasoning [installedSeeds] already follows. Empty (never a crash)
+     * when no whisper model is installed; [BenchmarkActivity] surfaces that
+     * as [ai.localstudio.app.R.string.benchmark_no_engines] before a run is
+     * even started.
+     *
+     * A dedicated [WhisperCppTranscriptionEngine] instance, not
+     * [whisperFileTranscriber]/`whisperFallbackModel`/etc — see that
+     * class's own doc comment for why sharing a resident handle would
+     * corrupt the one number a benchmark exists to measure honestly
+     * (model_load_time).
+     */
+    /**
+     * Every *installed* Whisper size, not just [settings.whisperModelId]'s
+     * one pick — comparing sizes/quantizations against each other is the
+     * whole point once CTranslate2 is off the table as a second backend
+     * (see docs/16-stt-benchmark.md's own note on this). Order is
+     * deliberate, not scan order: Tiny first (cheapest, fastest way to
+     * confirm the whole run works at all), then largest-to-smallest
+     * through the rest — this run's biggest, riskiest load happens early,
+     * right after a known-good baseline, rather than last after whatever
+     * memory pressure the smaller models already added.
+     */
+    val transcriptionEngines: List<TranscriptionEngine>
+        get() {
+            val installed = WhisperModels.SEEDS.filter { whisperStore.isInstalled(it) }
+            val tiny = installed.filter { it.id == WhisperModels.TINY_ID }
+            val restLargestFirst = installed.filterNot { it.id == WhisperModels.TINY_ID }.sortedByDescending { it.approxSizeBytes }
+            return (tiny + restLargestFirst).map { seed ->
+                WhisperCppTranscriptionEngine(whisperCppRuntime as WhisperCppRuntime, whisperStore, seed)
+            }
+        }
+
+    private val benchmarkReportStore = BenchmarkReportStore(context, appLog)
+
+    /**
+     * Owns the STT Benchmark run for the whole app, not for
+     * [BenchmarkActivity] — same reasoning [fileTranscriptionRunner]
+     * already follows: a run over hundreds of files across several engines
+     * can run far longer than the screen watching it is guaranteed to stay
+     * alive for.
+     */
+    val benchmarkOrchestrator = BenchmarkOrchestrator(
+        runner = BenchmarkRunner(),
+        reportStore = benchmarkReportStore,
+        engineProvider = { transcriptionEngines },
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        appLog = appLog,
+        context = context,
+        onBenchmarkStarted = { BenchmarkService.ensureStarted(context) },
+    )
+
+    /**
+     * Phase 3 (docs/13-asr-pipeline-migration.md): a live-mic
+     * [ai.localstudio.core.runtime.StreamingSpeechSession] driver, new and
+     * not yet wired into any screen's UI — [TranscribeActivity] exercises
+     * it as a test harness the same way it already does for files. Shared
+     * for the same reason [whisperFileTranscriber] is: so
+     * [releaseMemoryUnderPressure] can free it too.
+     */
+    val whisperMicSession = WhisperCppMicSession(whisperCppRuntime as WhisperCppRuntime, whisperStore)
+
+    /**
+     * Vosk ASR spike (docs/14-vosk-spike.md): a second, independent live-mic
+     * path, tried as a candidate for replacing [whisperMicSession]'s
+     * re-transcribe-the-growing-buffer approach. Shared the same way
+     * [whisperMicSession] is, so [releaseMemoryUnderPressure] can free its
+     * model too, and so [ai.localstudio.app.TranscribeActivity] can reuse
+     * one instance across recordings instead of reloading the model each time.
+     */
+    val voskRecognizer = VoskSpeechRecognizer()
+
+    /** In-app downloader for [ai.localstudio.app.vosk.VoskModels.SEEDS] — same role for the Voice tab's Vosk rows as [whisperDownloads] has for Whisper's. */
+    val voskDownloads = VoskDownloads(
+        context,
+        onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+    )
+
+    /**
+     * Whisper registered as the router's multilingual fallback — see
+     * [WhisperRegisteredSpeechModel]'s own doc comment. Held separately
+     * (not just inside [speechModelRegistry]) so callers with a loaded
+     * handle already in hand (there were none left once
+     * [speechLanguageIdentifier] stopped being one of them — see
+     * [whisperLidModel]'s own doc comment for why) can reuse it.
+     */
+    private val whisperFallbackModel = WhisperRegisteredSpeechModel(
+        runtime = whisperCppRuntime as WhisperCppRuntime,
+        whisperStore = whisperStore,
+        seedProvider = { whisperStore.installedSeed(settings.whisperModelId) },
+    )
+
+    /**
+     * A dedicated, always-tiny model for the router's own language
+     * identification — deliberately NOT [whisperFallbackModel]/
+     * `settings.whisperModelId` (the user's actual transcription-quality
+     * pick). LID runs a full whisper pass every few seconds regardless of
+     * which language is active, and doing that with whatever heavy model
+     * the user picked for real transcription (large-turbo: 574MB, several
+     * seconds a pass) competed for the same global native mutex (see
+     * [ai.localstudio.whisper.WhisperBridge.nativeOpMutex]'s own doc
+     * comment) with both the router's own ASR and any concurrent file
+     * transcription. A real device report showed exactly this: a
+     * large-turbo file transcription "stuck" for minutes while the
+     * router's own LID, hammering that same heavy model every few
+     * seconds, starved everything else waiting on that one lock.
+     * [WhisperModels.TINY_ID] is this app's own auto-downloaded
+     * first-launch default — normally installed with no extra download UI
+     * needed, and cheap enough that a full pass costs a small fraction of
+     * what a heavier model would.
+     */
+    private val whisperLidModel = WhisperRegisteredSpeechModel(
+        runtime = whisperCppRuntime as WhisperCppRuntime,
+        whisperStore = whisperStore,
+        seedProvider = { whisperStore.installedSeed(WhisperModels.TINY_ID) },
+        id = "whisper-lid",
+    )
+
+    private val voskRuSpecialist = VoskRegisteredSpeechModel(context, VoskModels.byId("vosk-small-ru")!!, setOf(Language.RU))
+    private val voskEnSpecialist = VoskRegisteredSpeechModel(context, VoskModels.byId("vosk-small-en")!!, setOf(Language.EN))
+
+    /**
+     * docs/15-speech-routing.md's first configuration: RU/EN handled by
+     * their small Vosk specialists (reusing the exact seeds the Vosk spike
+     * — docs/14-vosk-spike.md — already downloads/tests), everything else
+     * (Hebrew, unknown, mixed, or either specialist failing/not installed)
+     * falling back to multilingual Whisper. Deliberately temporary — see
+     * that doc's own "the router should be able to switch ... simply by
+     * configuration/registration, no router code should change" note.
+     */
+    val speechModelRegistry: SpeechModelRegistry = InMemorySpeechModelRegistry().apply {
+        register(voskRuSpecialist)
+        register(voskEnSpecialist)
+        register(whisperFallbackModel)
+    }
+
+    private val speechLanguageIdentifier = WhisperLanguageIdentifier { whisperLidModel.loadedWhisperModel() }
+
+    /**
+     * Shared router instance for the experimental routing demo (see
+     * [ai.localstudio.app.TranscribeActivity]'s own "LIVE MIC — ROUTER"
+     * section) — a long-lived [CoroutineScope] of its own, not tied to any
+     * one screen, the same reasoning [whisperMicSession]/[voskRecognizer]
+     * already follow. `lidStrideMs` is several seconds, not the
+     * sub-second default: [WhisperLanguageIdentifier] runs a full whisper
+     * pass per evaluation, real CPU cost that must not compete with the
+     * active ASR model too often.
+     */
+    val speechRouter: StreamingSpeechRouter = DefaultStreamingSpeechRouter(
+        registry = speechModelRegistry,
+        languageIdentifier = speechLanguageIdentifier,
+        policy = RoutingPolicy(fallbackModelId = "whisper-fallback"),
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        lidWindowMs = 4_000,
+        lidStrideMs = 3_000,
+    )
+
+    /**
+     * Set by [ai.localstudio.app.TranscribeActivity] around a router
+     * session's lifetime — read by [releaseWhisperEngines] so a routine,
+     * non-critical trim signal (TRIM_MEMORY_RUNNING_LOW, the one a real
+     * device log showed firing constantly at ~1.4GB free) does not evict
+     * the exact models an active router session is using every few seconds
+     * for LID and ASR, forcing an expensive reload mid-session. Real
+     * pressure (TRIM_MEMORY_RUNNING_CRITICAL and up, onLowMemory) still
+     * evicts them regardless — see [releaseWhisperEngines]'s own doc
+     * comment for why that distinction matters: this must never become a
+     * way to silently reintroduce the OOM kill [releaseMemoryUnderPressure]
+     * exists to prevent.
+     */
+    @Volatile
+    var routerSessionActive: Boolean = false
 
     /** Seeds that are on disk right now, newest state each time it is asked. */
     fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }

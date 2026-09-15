@@ -143,11 +143,26 @@ VAD), было не интегрировано в архитектуру, рад
 
 - `SpeechModelHandle`: добавлен `startStreaming(language): StreamingSpeechSession`
   (обязателен для реализации — все существующие реализации обновлены).
-- Новый интерфейс `StreamingSpeechSession` (`core.runtime`).
+- Новый интерфейс `StreamingSpeechSession` (`core.runtime`) — контракт
+  `segments: Flow<TranscriptSegment>` явно задокументирован (partial vs
+  final различаются по `startMs`, см. «Прогресс по фазам» → Phase 3).
 - Новый интерфейс `AudioSource` (`core.audio`).
 - `WhisperBridge.nativeTranscribe` — добавлен параметр `sink: SegmentSink?`
   (без значения по умолчанию: `external fun` не поддерживает default-параметры).
 - `WhisperBridge.nativeCancel` — новый метод.
+- `WhisperCppSpeechModel.close()` — теперь берёт `nativeOpMutex` перед
+  `nativeFree` (было небезопасно относительно `startStreaming()`, см. Phase 3).
+
+## Новые файлы (обе ветки вместе)
+
+`core/audio/`: `AudioSource.kt`, `PcmMath.kt`, `PcmBuffer.kt` (+ тесты).
+`app/whisper/`: `MediaCodecAudioSource.kt`, `WhisperCppSpeechModel.kt`
+(содержит и `WhisperCppRuntime`), `WhisperFileTranscriber.kt`,
+`MediaFileUtils.kt`, `MicrophoneAudioSource.kt`, `WhisperCppMicSession.kt`.
+`app/`: `TranscribeActivity.kt` + `activity_transcribe.xml` +
+`item_transcribe_result.xml` + `ic_play_arrow.xml`/`ic_pause.xml`.
+`app/src/androidTest/.../whisper/`: `WhisperBenchmarkTest.kt`. Этот файл
+(`docs/13-asr-pipeline-migration.md`).
 
 ## Что не перенесено и почему
 
@@ -171,9 +186,11 @@ VAD), было не интегрировано в архитектуру, рад
   `OpenAiRuntime.RemoteSpeechModel.audioFile()`); ни один вызывающий код в
   приложении сегодня не строит `AudioRef` с `content://` — экрана выбора
   файла нет. Добавить `Context`-резолвинг, когда появится реальный UI.
-- **UI экрана «выбрать файл → транскрибировать»** — не создавался: задание
-  прямо требует не трогать старый UI/lifecycle и не расширять срез сверх
-  необходимого; сама постановка Definition of Done про экран не говорит.
+- **UI экрана «выбрать файл → транскрибировать»** — изначально не создавался
+  по той же логике (Definition of Done про экран не говорит). Позже
+  добавлен `TranscribeActivity` — см. отдельный раздел ниже: пользователю
+  оказалось нужно реально потестить на устройстве, а не только прочитать
+  код.
 - **CMakeLists.txt** — не менялся: в AI он уже был на уровне (или лучше)
   reference-реализации (`-O3`/`-DNDEBUG` принудительно, `armv8.2-a+dotprod+fp16+i8mm`,
   пиннутый `whisper.cpp v1.9.3`). Единственное, чего не хватало — `flash_attn`
@@ -190,32 +207,152 @@ VAD), было не интегрировано в архитектуру, рад
    нативный вызов на этом handle — включая чужой, если одновременно идут
    и `transcribe()`, и `startStreaming()`-сессия. Для одного активного
    вызова за раз (текущий сценарий использования) это не проблема.
-3. `startStreaming()` реализован (интерфейс того требует от каждого
-   `SpeechModelHandle`), но не готов к продакшену на живом микрофоне —
-   см. «Что не перенесено» выше.
+3. ~~`startStreaming()` не готов к продакшену на живом микрофоне~~ —
+   актуализировано: `close()` теперь сам берёт `nativeOpMutex` перед
+   `nativeFree`, так что он безопасен против гонки с сессией
+   `startStreaming()` в любом случае (см. Phase 3 ниже). Остаётся
+   ограничение: `WhisperCppMicSession` не заведён через `RuntimeManager`
+   (тот же выбор, что и `WhisperFileTranscriber`) — RAM-бюджетом живой
+   mic-сессии `RuntimeManager` не управляет, только `releaseMemoryUnderPressure`.
 
-## TODO по фазам (как в задании)
+## Прогресс по фазам (обновлено после аудита + доработки)
 
-- **Phase 2** — `transcribeDirectory()`: обход директории, поддерживаемые
-  форматы, последовательная или ограниченно-параллельная обработка,
-  сохранение результата сразу после каждого файла, одна загруженная модель
-  на весь проход.
-- **Phase 3** — живой микрофон на `WhisperCppSpeechModel.startStreaming()`
-  вместо `WhisperEngine`/`AudioRecorder`; решить ref-counting-проблему
-  из «Что не перенесено».
-- **Phase 4** — настоящий incremental/token-level streaming (если
-  whisper.cpp или альтернативный движок это позволяют) вместо
-  sliding-window shim.
-- **Phase 5** — альтернативные движки (`SherpaSpeechModel`, `QwenAsrSpeechModel`,
-  `RemoteSpeechModel` — последний уже существует как `OpenAiRuntime.RemoteSpeechModel`).
+- **Phase 2 — по факту сделан.** `TranscribeActivity`'s folder picker
+  (`MediaFileUtils.listMediaFilesRecursively` + `WhisperFileTranscriber`)
+  уже даёт: обход директории, последовательную обработку, сохранение
+  каждого результата сразу после готовности, одну загруженную модель на
+  весь проход. Отдельного публичного `transcribeDirectory()` API нет —
+  логика инкапсулирована в Activity, этого достаточно для текущей цели
+  (тестовый экран, не публичный SDK).
+- **Phase 3 — инфраструктура готова, в продакшен UI не встроена.**
+  Новое:
+  - `MicrophoneAudioSource` (`app/whisper/`) — микрофон как `AudioSource`,
+    параметры захвата перенесены из уже рабочего `AudioRecorder` (MIC,
+    не VOICE_RECOGNITION; ×8 буфер; блоки ~0.25 с).
+  - `WhisperCppMicSession` (`app/whisper/`) — по аналогии с
+    `WhisperFileTranscriber`: грузит модель напрямую через
+    `WhisperCppRuntime` (не через `RuntimeManager` — тот же выбор, что и
+    `WhisperFileTranscriber`, по той же причине: `RuntimeManager` рассчитан
+    на acquire-use-release в границах одного вызова, а не на
+    открытую по времени сессию), качает `AudioSource` в
+    `StreamingSpeechSession.acceptAudio()` на фоновой корутине.
+  - `WhisperCppSpeechModel.close()` исправлен на реальную безопасность:
+    теперь берёт `WhisperBridge.nativeOpMutex` перед `nativeFree` — тем
+    самым ждёт любой текущий нативный вызов (batch или streaming) вместо
+    того, чтобы просто полагаться на то, что вызывающий код никогда не
+    попросит закрыть занятую модель. Это и была основная техническая
+    причина, по которой `startStreaming()` не был безопасен для живого
+    использования — теперь безопасен.
+  - `TranscribeActivity` получил раздел «LIVE MIC (PHASE 3 TEST)» —
+    кнопка старт/стоп, разрешение `RECORD_AUDIO`, живой транскрипт на
+    экране. Не идёт через `Orchestrator`.
+  - **Сознательно не тронуто:** `ChatActivity`'s собственная кнопка
+    микрофона (`WhisperEngine`/`AudioRecorder`, сейчас скрыта из-за
+    известных проблем с качеством/латентностью — см. комментарий в
+    `activity_chat.xml`) не переведена на этот путь. Причина не техническая:
+    это решение о продукте («достаточно ли теперь хорошо качество,
+    учитывая выбор модели»), которое требует реального устройства и
+    решения человека, а не архитектурного изменения втихую без возможности
+    проверить. `WhisperCppMicSession` — новая, отдельная инфраструктура,
+    которую можно подключить к `ChatActivity`, когда это решение будет
+    принято.
+- **Phase 4 — исследовано, вывод отрицательный для whisper.cpp конкретно.**
+  whisper.cpp — full-context encoder (весь mel-спектрограм окна целиком на
+  вход энкодера), а не потоково-ориентированная архитектура (Zipformer/
+  Conformer с causal-чанкингом, как у настоящих streaming-движков). У
+  `whisper_full` нет персистентного состояния декодирования между вызовами,
+  которое позволяло бы «добавить чуть аудио → получить только новые
+  токены» без пересчёта энкодера заново. Значит true token-level
+  incremental streaming **не достижим на whisper.cpp путём доработки
+  Kotlin/JNI-слоя** — это не то, что можно доделать поверх существующего
+  `startStreaming()`, sliding-window — практический потолок для этого
+  движка. Phase 4 фактически = Phase 5 (сменить движок на
+  архитектурно-потоковый), не отдельный шаг.
+
+- **Phase 5 — исследовано (Sherpa-ONNX), не реализовано: три реальных
+  препятствия, не отговорки.** Собрал конкретные факты, а не общие слова:
+
+  1. **Интеграция AAR неоднозначна.** Официальный путь — скачать
+     `sherpa-onnx-<version>.aar` (~48 МБ) с GitHub Releases
+     (`github.com/k2-fsa/sherpa-onnx/releases`) и подключить либо через
+     Ivy-репозиторий, указывающий на паттерн GitHub Releases (стандартный
+     трюк для бинарных ассетов без Maven Central), либо публикацией в
+     local Maven. При этом есть открытое сообщение о том, что AGP 8+
+     отклоняет голые `.aar` внутри library-модуля напрямую — этот репозиторий
+     на AGP 8.7.3 (см. `whisper/build.gradle.kts`), риск реальный, но
+     непроверенный без реальной сборки.
+  2. **Нет проверенной маленькой модели с покрытием русского.** У
+     Sherpa-ONNX streaming-модели в основном китайский/английский/японский/
+     корейский/кантонский. Нашёл `alphacep/vosk-model-small-streaming-ru`
+     (Zipformer2, Apache-2.0, экспортирован в ONNX как
+     `csukuangfj/sherpa-onnx-streaming-zipformer-small-ru-vosk-2025-08-16`
+     на Hugging Face) — единственный найденный streaming-вариант с русским,
+     но: (a) ~597 МБ — крупнее, чем "small" whisper (466 МБ) и сравнимо с
+     "medium" (539 МБ), то есть выигрыша в размере над уже используемым
+     whisper для этого языка нет; (b) есть открытый GitHub issue про
+     лицензию конвертированной ONNX-версии (`k2-fsa/sherpa-onnx#3914`),
+     не проверено, что реально разрешено использование в приложении; (c)
+     нет уверенности в стабильности hosting (Hugging Face, не проверено из
+     этой среды выполнения — есть сетевые ограничения, `k2-fsa.github.io`
+     оказался заблокирован политикой egress прямо во время исследования).
+  3. **Kotlin API уже задокументирован** (для следующего, кто будет это
+     делать, не нужно исследовать заново):
+     ```kotlin
+     // Конфигурация
+     val config = OnlineRecognizerConfig(modelConfig = OnlineModelConfig(...), ...)
+     val recognizer = OnlineRecognizer(assetManager = null, config = config)
+     val stream = recognizer.createStream()
+     // Цикл:
+     stream.acceptWaveform(samples: FloatArray, sampleRate: Int)
+     while (recognizer.isReady(stream)) recognizer.decode(stream)
+     val result = recognizer.getResult(stream) // .text
+     val isEndpoint = recognizer.isEndpoint(stream)
+     if (isEndpoint) recognizer.reset(stream)
+     // Финал:
+     stream.inputFinished()
+     stream.release(); recognizer.release()
+     ```
+     Форма (`config` объект → `createStream()` → push samples →
+     `isReady`/`decode`/`getResult` в цикле) отличается от нативного
+     JNI-стиля `WhisperBridge` — обёртка `SherpaSpeechModel` реализовывала
+     бы `SpeechModelHandle`/`StreamingSpeechSession` так же, как
+     `WhisperCppSpeechModel`, но внутренний цикл был бы другим (не одна
+     блокирующая нативная функция на окно, а именно push-decode-poll).
+
+  **Вывод:** не форсировал слепую интеграцию тремя непроверенными
+  допущениями разом (сборка, лицензия, реальная польза для русского) без
+  устройства и без решения человека про рост APK на десятки МБ. Это
+  конкретный, выполнимый план для следующего шага — не тупик, а
+  зафиксированное состояние исследования.
+
+- **`RemoteSpeechModel`** — уже существует
+  (`OpenAiRuntime.RemoteSpeechModel`), уже подключается через `registry()`
+  при `RuntimeKind.REMOTE_OPENAI`. `QwenAsrSpeechModel` (отдельный,
+  Qwen-специфичный движок, не через OpenAI-совместимый REST) не
+  исследовался — не было сигнала, что он даёт что-то, чего не даёт уже
+  подключённый `RemoteSpeechModel`.
+
+## Ветки этой работы
+
+- `claude/asr-pipeline-migration-5035ni` — Phase 1 (vertical slice) +
+  `TranscribeActivity` (batch/Phase 2) + memory-pressure fix для голосовых
+  моделей + play/copy кнопки. Собран и проверен в CI (build + smoke-test
+  зелёные).
+- `claude/asr-phase3-mic-streaming` — форк от предыдущей, начиная отсюда
+  Phase 3 (эта секция) ведётся отдельно от уже проверенной Phase 1/2 ветки.
 
 ## Benchmark
 
-**Не выполнялся.** В этой среде выполнения (облачный sandbox) нет
-физического Android-устройства — Pixel 10 Pro, RTF, first-result latency,
-RAM/CPU/battery/thermal и accuracy-замеры из задания требуют реального
-железа. Инфраструктура для замеров (сам `WhisperCppSpeechModel`, сегменты
-с таймстемпами) готова; сами цифры — предстоит снять на устройстве.
+**Результатов нет** (Pixel 10 Pro недоступен из этой среды выполнения) —
+**но инструмент готов и ждёт запуска**, не просто «предстоит написать»:
+`app/src/androidTest/.../whisper/WhisperBenchmarkTest.kt` (ветка
+`claude/asr-phase3-mic-streaming`). Он сам измеряет RTF, first-result
+latency, общее время и число сегментов на любом наборе аудиофайлов,
+которые вы положите на устройство — инструкция (`adb push`/`adb pull`,
+имя тестового класса для `connectedDebugAndroidTest`) прямо в doc-комменте
+класса. RAM/CPU/battery/thermal и accuracy (WER) этот тест не измеряет —
+честно указано там же, что и как снять параллельно (профайлер / `adb
+shell dumpsys`) или чем дополнить отдельно.
 
 ## Верификация в этой среде — и её пределы
 

@@ -7,7 +7,10 @@
     app:cardCornerRadius="16dp"
     app:cardElevation="0dp"
     app:strokeWidth="1dp"
-    app:strokeColor="?attr/colorOutlineVariant">
+    app:strokeColor="?attr/colorOutlineVariant"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -29,15 +32,12 @@
                 android:textSize="15sp"
                 android:textStyle="bold" />
 
-            <ImageButton
-                android:id="@+id/resultPlayButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/transcribe_play"
-                android:padding="6dp"
-                android:src="@drawable/ic_play_arrow" />
-
+            <!-- app:tint: ic_copy is hardcoded #FF000000 with no tint of its
+                 own, so on this app's dark theme it renders as black-on-
+                 near-black — effectively invisible, reported directly as
+                 "there's no play button" for the same reason before the
+                 play control moved to its own player bar below.
+                 ?attr/colorOnSurface adapts to whichever theme is active. -->
             <ImageButton
                 android:id="@+id/resultCopyButton"
                 android:layout_width="32dp"
@@ -46,7 +46,19 @@
                 android:contentDescription="@string/message_copy"
                 android:padding="6dp"
                 android:src="@drawable/ic_copy"
-                android:visibility="gone" />
+                android:visibility="gone"
+                app:tint="?attr/colorOnSurface" />
+
+            <ImageButton
+                android:id="@+id/resultShareButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/transcribe_share"
+                android:padding="6dp"
+                android:src="@android:drawable/ic_menu_share"
+                android:visibility="gone"
+                app:tint="?attr/colorOnSurface" />
 
         </LinearLayout>
 

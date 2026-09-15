@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
@@ -60,6 +62,14 @@ class HistoryActivity : AppCompatActivity() {
         finish()
         return true
     }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        UtilityMenu.inflate(this, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
 
     private fun render() {
         val conversations = history.list()

@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Two independent scrolling regions, not one giant ScrollView wrapping
+     everything: transcribeResults can hold hundreds of files (a real
+     device report: a 472-file folder), and RecyclerView only recycles
+     off-screen rows correctly when it has a *bounded* height — wrap_content
+     inside a ScrollView forces it to lay out every single row at once,
+     which is both a severe performance problem and, past a few hundred
+     custom cards, broke rendering outright (4 of 472 rows shown, no way to
+     scroll to the rest). So transcribeResults keeps its own bounded,
+     properly-recycling internal scroll (weight="1", same as before this
+     screen grew a router section), and the mic/vosk/router test-harness
+     sections — always small, fixed content, never hundreds of items — get
+     their own separate scrollable area below it (also weight="1"). Plain
+     framework ScrollView for that second region: nothing inside it is
+     itself a scrolling child needing nested-scroll cooperation, so there's
+     no reason to pull in androidx's NestedScrollView. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -41,6 +56,15 @@
 
     </LinearLayout>
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/openVoiceModelsButton"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginBottom="4dp"
+        android:text="@string/transcribe_open_voice_models" />
+
     <TextView
         android:id="@+id/transcribeSourceText"
         android:layout_width="match_parent"
@@ -48,6 +72,61 @@
         android:paddingHorizontal="16dp"
         android:paddingBottom="8dp"
         android:textSize="13sp" />
+
+    <!-- A single shared player, next to the source picker rather than one
+         per result row: only one file plays at a time (one MediaPlayer),
+         so a real seek bar/position belongs to one control, not duplicated
+         per row and disconnected from transcription. Tap a result row to
+         load it here (see TranscribeActivity.selectAndPlay). Hidden until
+         something is actually loaded. -->
+    <LinearLayout
+        android:id="@+id/playerBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurfaceVariant"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:visibility="gone">
+
+        <ImageButton
+            android:id="@+id/playerPlayPauseButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/transcribe_play"
+            android:padding="6dp"
+            android:src="@drawable/ic_play_arrow"
+            app:tint="?attr/colorOnSurfaceVariant" />
+
+        <TextView
+            android:id="@+id/playerFileNameText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="8dp"
+            android:ellipsize="middle"
+            android:maxWidth="120dp"
+            android:maxLines="1"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/playerSeekBar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/playerTimeText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -93,11 +172,202 @@
         android:padding="16dp"
         android:text="@string/transcribe_empty" />
 
+    <!-- Bounded height (weight, not wrap_content) so RecyclerView actually
+         recycles off-screen rows instead of laying out the entire list at
+         once — see this file's own root comment for the real device report
+         that made this matter (472-file folder, only 4 rows ever
+         rendered). isNestedScrollingEnabled stays at its default (true):
+         it is a sibling of the mic-sections ScrollView below, not nested
+         inside it, so there is nothing here for it to cooperate with. -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/transcribeResults"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:padding="12dp" />
+
+    <!-- Phase 3 test harness (docs/13-asr-pipeline-migration.md) plus the
+         Vosk spike (docs/14) and the language router (docs/15): always
+         small, fixed content (three toggle buttons and their transcript
+         boxes), never hundreds of items like transcribeResults above, so
+         it gets its own independent scrollable region rather than sharing
+         transcribeResults' one — the whole reason that shared region
+         existed was to reach these sections below the fold, but nesting a
+         large RecyclerView inside it is what broke the file list. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOutlineVariant" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:text="@string/transcribe_mic_section_title"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/micToggleButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/transcribe_mic_start" />
+
+        <TextView
+            android:id="@+id/micStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/micTranscriptText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="10dp"
+        android:textIsSelectable="true"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <!-- Vosk ASR spike (docs/14-vosk-spike.md): a second, independent live
+         mic section, driving VoskSpeechRecognizer directly. Deliberately
+         separate from the Whisper LIVE MIC section above rather than a
+         shared toggle — this way trying Vosk can never regress the
+         already-working Whisper mic path above it. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOutlineVariant" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:text="@string/transcribe_vosk_section_title"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/voskToggleButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/transcribe_mic_start" />
+
+        <TextView
+            android:id="@+id/voskStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/voskTranscriptText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="10dp"
+        android:textIsSelectable="true"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <!-- docs/15-speech-routing.md: the experimental language-routed live
+         mic — dispatches per detected language to whichever registered
+         specialist (Vosk RU/EN) or the Whisper fallback the router
+         chooses, instead of driving one fixed engine directly like the
+         two sections above. Each line is tagged [lang][modelId] so a
+         routing decision is visible, not just its output. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOutlineVariant" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:text="@string/transcribe_router_section_title"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/routerToggleButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/transcribe_mic_start" />
+
+        <TextView
+            android:id="@+id/routerStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/routerTranscriptText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="10dp"
+        android:textIsSelectable="true"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    </LinearLayout>
+
+    </ScrollView>
 
 </LinearLayout>

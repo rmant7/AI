@@ -198,6 +198,7 @@ class ChatActivity : AppCompatActivity() {
         // one conversation.
         menu.add(0, MENU_LOG, 7, R.string.menu_log)
         menu.add(0, MENU_TRANSCRIBE, 8, R.string.menu_transcribe)
+        menu.add(0, MENU_BENCHMARK, 9, R.string.menu_benchmark)
         return true
     }
 
@@ -244,6 +245,11 @@ class ChatActivity : AppCompatActivity() {
 
         MENU_TRANSCRIBE -> {
             startActivity(Intent(this, TranscribeActivity::class.java))
+            true
+        }
+
+        MENU_BENCHMARK -> {
+            startActivity(Intent(this, BenchmarkActivity::class.java))
             true
         }
 
@@ -1121,6 +1127,7 @@ class ChatActivity : AppCompatActivity() {
         const val MENU_SHARE_CHAT = 7
         const val MENU_CLEAR = 8
         const val MENU_TRANSCRIBE = 9
+        const val MENU_BENCHMARK = 10
 
         // Was temporarily raised to 30 minutes to measure real on-device
         // timing for heavier local models before picking a production value

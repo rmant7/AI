@@ -5,11 +5,17 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivityLogBinding
 import ai.localstudio.app.llama.LlamaBridge
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
  * Read-only view of [ai.localstudio.app.log.AppLog] — the whole point is
@@ -44,12 +50,35 @@ class LogActivity : AppCompatActivity() {
         binding.logClearButton.setOnClickListener { confirmClear() }
 
         render()
+        // Real device report: this screen rendered once, in onCreate, and
+        // never again — someone watching it during a long-running benchmark
+        // saw a frozen snapshot from the moment they opened it, while new
+        // lines kept landing in the underlying log file the whole time,
+        // completely invisible until the screen was closed and reopened.
+        // A plain periodic poll rather than a reactive AppLog.record() Flow:
+        // this is a read-only diagnostic screen, not a latency-sensitive
+        // one, and readAll() re-reading a small text file every few seconds
+        // is cheap enough not to need the extra plumbing.
+        lifecycleScope.launch {
+            while (isActive) {
+                delay(2_000)
+                render()
+            }
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
     }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        UtilityMenu.inflate(this, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
 
     private fun render() {
         binding.logHeader.text = buildHeader()

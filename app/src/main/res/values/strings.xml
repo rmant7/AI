@@ -28,6 +28,19 @@
     <string name="menu_share_chat">Share chat</string>
     <string name="menu_log">Error log</string>
     <string name="menu_transcribe">Transcribe files</string>
+    <string name="menu_benchmark">STT Benchmark</string>
+
+    <string name="benchmark_hint">Picks a folder of audio files and runs every registered speech-to-text backend against every file, so their speed and output can be compared on identical input. See docs/16-stt-benchmark.md.</string>
+    <string name="benchmark_pick_folder">Pick folder</string>
+    <string name="benchmark_scanning">Scanning folder…</string>
+    <string name="benchmark_no_files">No supported audio files found in that folder.</string>
+    <string name="benchmark_files_found">%1$d files found · %2$s total audio · %3$s on disk</string>
+    <string name="benchmark_start">Run benchmark</string>
+    <string name="benchmark_cancel">Stop</string>
+    <string name="benchmark_running">Running %1$d / %2$d…</string>
+    <string name="benchmark_done">Done — saved as %1$s</string>
+    <string name="benchmark_failed">Benchmark failed: %1$s</string>
+    <string name="benchmark_no_engines">No transcription engines are available to benchmark.</string>
     <string name="message_copy">Copy message</string>
     <string name="message_copied">Copied</string>
     <string name="message_attached_image">Attached image</string>
@@ -86,6 +99,7 @@
     <string name="transcribe_hint">Test screen for the whisper.cpp vertical slice (see docs/13-asr-pipeline-migration.md). Pick a file or a folder, then Transcribe. Each result is saved as a .txt next to the others once its file finishes — files transcribe one at a time against a single loaded model.</string>
     <string name="transcribe_pick_file">Pick file</string>
     <string name="transcribe_pick_folder">Pick folder</string>
+    <string name="transcribe_open_voice_models">Choose voice model</string>
     <string name="transcribe_start">Transcribe</string>
     <string name="transcribe_stop">Stop</string>
     <string name="transcribe_no_model">No whisper model installed — download one on the Models screen first.</string>
@@ -95,10 +109,22 @@
     <string name="transcribe_status_running">Transcribing…</string>
     <string name="transcribe_status_done">Done, saved as %1$s</string>
     <string name="transcribe_status_error">Error: %1$s</string>
+    <string name="transcribe_share">Share transcript</string>
     <string name="transcribe_status_cancelled">Cancelled</string>
+    <string name="transcribe_status_cancelled_saved">Cancelled, partial result saved as %1$s</string>
     <string name="transcribe_play">Play</string>
     <string name="transcribe_pause">Pause</string>
     <string name="transcribe_play_failed">Couldn\'t play this file: %1$s</string>
+    <string name="transcribe_mic_section_title">LIVE MIC (PHASE 3 TEST)</string>
+    <string name="transcribe_mic_start">Start listening</string>
+    <string name="transcribe_mic_stop">Stop</string>
+    <string name="transcribe_mic_listening">Listening…</string>
+    <string name="transcribe_mic_idle">Idle</string>
+    <string name="transcribe_mic_error">Mic session stopped: %1$s</string>
+    <string name="transcribe_vosk_section_title">LIVE MIC — VOSK (SPIKE)</string>
+    <string name="transcribe_vosk_no_model">No Vosk model installed — download one on the Models screen first.</string>
+    <string name="transcribe_router_section_title">LIVE MIC — LANGUAGE ROUTER (EXPERIMENTAL)</string>
+    <string name="transcribe_error_dialog_title">Error</string>
 
     <string name="settings_whisper_model">Speech recognition model (offline)</string>
     <string name="settings_whisper_manage">Open Models → Voice</string>
@@ -158,7 +184,9 @@
     <string name="models_category_voice">Voice</string>
     <string name="models_category_embedding">Embedding</string>
     <string name="embed_status_loaded">Loaded ✓</string>
-    <string name="embed_status_not_loaded">Not loaded (enable Semantic retrieval in Memory)</string>
+    <string name="embed_status_memory_off">Not loaded — Long-term memory is off (Memory settings)</string>
+    <string name="embed_status_semantic_off">Not loaded — Semantic retrieval is off (Memory settings)</string>
+    <string name="embed_status_unloaded">Temporarily unloaded — will reload when needed</string>
     <string name="models_local_header">Local models — work without a network</string>
     <string name="models_embedding_header">Semantic memory embedding model</string>
     <string name="models_embedding_subtitle">%1$d dimensions · used for semantic memory retrieval, never for chat</string>
@@ -196,6 +224,8 @@
     <string name="embed_result_suspicious">⚠ dissimilar scored as high or higher — check pooling mode and query/passage prefixes</string>
     <string name="embed_result_error">Error: %1$s</string>
     <string name="models_voice_header">Speech recognition models — work offline</string>
+    <string name="models_vosk_header">Vosk (spike) — genuinely streaming, tried as a live-mic alternative to Whisper</string>
+    <string name="models_vosk_note">Vosk models work fully offline once downloaded. Used only by TranscribeActivity\'s \"LIVE MIC — VOSK (SPIKE)\" section — see docs/14-vosk-spike.md; Whisper above is unaffected by which of these is installed or selected.</string>
     <string name="models_switched_chat">Chat switched to %1$s</string>
     <string name="models_switched_voice">Voice input switched to %1$s</string>
     <string name="model_state_installed">Installed</string>
@@ -284,6 +314,13 @@
     <string name="download_notification_searching">Looking for the file…</string>
     <string name="download_notification_title_one">Downloading model</string>
     <string name="download_notification_title_many">Downloading models (%1$d)</string>
+
+    <string name="transcribe_notification_channel">File transcription</string>
+    <string name="transcribe_notification_title">Transcribing</string>
+    <string name="transcribe_notification_running">Transcription running…</string>
+    <string name="benchmark_notification_channel">STT Benchmark</string>
+    <string name="benchmark_notification_title">Benchmark running</string>
+    <string name="benchmark_notification_running">Comparing STT backends…</string>
     <string name="download_notification_whisper_progress">Whisper: %1$d%%</string>
 
     <string name="error_unsupported_file_type">Only .txt and .pdf are supported</string>

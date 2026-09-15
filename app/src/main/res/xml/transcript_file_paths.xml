@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scoped to just files/transcripts/ (Context.getFilesDir()/transcripts/,
+     what TranscribeActivity.save() writes to) and files/benchmarks/
+     (Context.getFilesDir()/benchmarks/, what BenchmarkReportStore.save()
+     writes to) — not the whole app-private filesDir, so the FileProvider
+     this backs can only ever expose exactly those saved outputs, nothing
+     else this app stores there. -->
+<paths>
+    <files-path name="transcripts" path="transcripts/" />
+    <files-path name="benchmarks" path="benchmarks/" />
+</paths>

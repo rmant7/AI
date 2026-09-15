@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -26,6 +28,10 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
+import ai.localstudio.app.vosk.VoskDownloadState
+import ai.localstudio.app.vosk.VoskModelSeed
+import ai.localstudio.app.vosk.VoskModelStore
+import ai.localstudio.app.vosk.VoskModels
 import ai.localstudio.app.whisper.WhisperDownloadState
 import ai.localstudio.app.whisper.WhisperModelSeed
 import ai.localstudio.app.whisper.WhisperModels
@@ -118,6 +124,7 @@ class ModelsActivity : AppCompatActivity() {
 
         lifecycleScope.launch { container.downloads.state.collect { render() } }
         lifecycleScope.launch { container.whisperDownloads.state.collect { render() } }
+        lifecycleScope.launch { container.voskDownloads.state.collect { render() } }
         lifecycleScope.launch { container.experimentalEmbeddingDownloads.state.collect { render() } }
         render()
     }
@@ -131,6 +138,14 @@ class ModelsActivity : AppCompatActivity() {
         finish()
         return true
     }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        UtilityMenu.inflate(this, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
 
     // ── Text models ────────────────────────────────────────────────────────
 
@@ -207,6 +222,32 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun useForVoice(seed: WhisperModelSeed) {
         container.settings.whisperModelId = seed.id
+        Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
+        render()
+    }
+
+    // ── Vosk models (docs/14-vosk-spike.md) ───────────────────────────────
+
+    private fun onVoskPrimary(seed: VoskModelSeed) {
+        when (container.voskDownloads.stateOf(seed)) {
+            is VoskDownloadState.Installed -> useForVosk(seed)
+            is VoskDownloadState.Running -> container.voskDownloads.cancel(seed)
+            else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.voskDownloads.start(seed) }
+        }
+    }
+
+    private fun onVoskSecondary(seed: VoskModelSeed) {
+        when (val state = container.voskDownloads.stateOf(seed)) {
+            is VoskDownloadState.Failed -> showDetails(seed.title, state.message)
+            else -> {
+                container.voskDownloads.delete(seed)
+                render()
+            }
+        }
+    }
+
+    private fun useForVosk(seed: VoskModelSeed) {
+        container.settings.voskModelId = seed.id
         Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
         render()
     }
@@ -366,14 +407,27 @@ class ModelsActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Same three-state distinction as [MemoryActivity.renderModelStatus] —
+     * installed-but-not-ready means something different depending on *why*:
+     * off elsewhere in Settings vs. merely unloaded under memory pressure
+     * and about to reload on its own. This used to always say "enable
+     * Semantic retrieval in Memory" whenever [AppContainer.semanticEmbedderReady]
+     * was false, which was actively wrong the moment that toggle was
+     * already on and the model was just between a pressure-unload and its
+     * automatic reload — exactly what a real screenshot showed: this
+     * screen telling the user to enable a setting that Memory's own screen,
+     * at the same moment, showed already enabled.
+     */
     private fun embeddingStatus(state: ExperimentalDownloadState): String = when (state) {
         is ExperimentalDownloadState.Installed -> {
-            val loaded = if (container.semanticEmbedderReady) {
-                getString(R.string.embed_status_loaded)
-            } else {
-                getString(R.string.embed_status_not_loaded)
+            val statusLine = when {
+                !container.settings.memoryEnabled -> getString(R.string.embed_status_memory_off)
+                !container.settings.semanticMemoryEnabled -> getString(R.string.embed_status_semantic_off)
+                container.semanticEmbedderReady -> getString(R.string.embed_status_loaded)
+                else -> getString(R.string.embed_status_unloaded)
             }
-            "${getString(R.string.model_state_installed)} · ${size(container.experimentalEmbeddingStore.installedSize(ExperimentalEmbeddingModels.E5_BASE))}\n$loaded"
+            "${getString(R.string.model_state_installed)} · ${size(container.experimentalEmbeddingStore.installedSize(ExperimentalEmbeddingModels.E5_BASE))}\n$statusLine"
         }
         is ExperimentalDownloadState.Resolving -> getString(R.string.model_state_resolving, ExperimentalEmbeddingModels.E5_BASE.repoId)
         is ExperimentalDownloadState.Running ->
@@ -427,13 +481,10 @@ class ModelsActivity : AppCompatActivity() {
     private fun voiceRows(device: DeviceProfile): List<Row> = buildList {
         add(Row.Header(getString(R.string.models_voice_header)))
         val selectedSeed = container.whisperStore.installedSeed(container.settings.whisperModelId)
-        val anyRunning = container.whisperDownloads.state.value.values
-            .any { it is WhisperDownloadState.Running }
 
         WhisperModels.SEEDS.forEach { seed ->
             val state = container.whisperDownloads.stateOf(seed)
             val selected = selectedSeed?.id == seed.id
-            val blocked = anyRunning && state is WhisperDownloadState.Idle
 
             add(
                 Row.Model(
@@ -451,7 +502,6 @@ class ModelsActivity : AppCompatActivity() {
                             )
                         state is WhisperDownloadState.Failed ->
                             getString(R.string.model_state_error, state.message.lineSequence().first())
-                        blocked -> getString(R.string.model_state_wait_other)
                         else -> null
                     },
                     progress = (state as? WhisperDownloadState.Running)?.progress?.fraction,
@@ -463,7 +513,7 @@ class ModelsActivity : AppCompatActivity() {
                         is WhisperDownloadState.Failed -> getString(R.string.model_retry)
                         WhisperDownloadState.Idle -> getString(R.string.model_download)
                     },
-                    primaryEnabled = !(state is WhisperDownloadState.Installed && selected) && !blocked,
+                    primaryEnabled = !(state is WhisperDownloadState.Installed && selected),
                     secondaryLabel = when (state) {
                         is WhisperDownloadState.Failed -> getString(R.string.model_details)
                         is WhisperDownloadState.Installed -> getString(R.string.model_delete)
@@ -475,6 +525,58 @@ class ModelsActivity : AppCompatActivity() {
             )
         }
         add(Row.Note(getString(R.string.settings_whisper_note)))
+
+        // Vosk ASR spike (docs/14-vosk-spike.md): a second catalogue on the
+        // same tab, not a separate screen — this is exactly where someone
+        // choosing "which voice model" already looks, and the whole point
+        // of the spike is trying it against Whisper with as little new UI
+        // as possible.
+        add(Row.Header(getString(R.string.models_vosk_header)))
+        val selectedVoskSeed = VoskModelStore.installedSeed(this@ModelsActivity, container.settings.voskModelId)
+
+        VoskModels.SEEDS.forEach { seed ->
+            val state = container.voskDownloads.stateOf(seed)
+            val selected = selectedVoskSeed?.id == seed.id
+
+            add(
+                Row.Model(
+                    title = seed.title,
+                    subtitle = "~${size(seed.approxSizeBytes)} · ${fitLabel(device.classifyFit(seed.approxSizeBytes))}",
+                    selected = selected,
+                    status = when {
+                        state is VoskDownloadState.Installed -> getString(R.string.model_state_installed)
+                        state is VoskDownloadState.Running ->
+                            getString(
+                                R.string.download_progress_label,
+                                state.stage,
+                                size(state.progress.bytesDownloaded),
+                                if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?",
+                            )
+                        state is VoskDownloadState.Failed ->
+                            getString(R.string.model_state_error, state.message.lineSequence().first())
+                        else -> null
+                    },
+                    progress = (state as? VoskDownloadState.Running)?.progress?.fraction,
+                    indeterminate = false,
+                    primaryLabel = when (state) {
+                        is VoskDownloadState.Installed ->
+                            getString(if (selected) R.string.model_installed else R.string.model_use)
+                        is VoskDownloadState.Running -> getString(R.string.model_cancel)
+                        is VoskDownloadState.Failed -> getString(R.string.model_retry)
+                        VoskDownloadState.Idle -> getString(R.string.model_download)
+                    },
+                    primaryEnabled = !(state is VoskDownloadState.Installed && selected),
+                    secondaryLabel = when (state) {
+                        is VoskDownloadState.Failed -> getString(R.string.model_details)
+                        is VoskDownloadState.Installed -> getString(R.string.model_delete)
+                        else -> null
+                    },
+                    onPrimary = { onVoskPrimary(seed) },
+                    onSecondary = { onVoskSecondary(seed) },
+                ),
+            )
+        }
+        add(Row.Note(getString(R.string.models_vosk_note)))
     }
 
     private fun textStatus(state: DownloadState, installedBytes: Long): String? = when (state) {
