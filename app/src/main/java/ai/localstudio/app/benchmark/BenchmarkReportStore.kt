@@ -10,8 +10,10 @@ import ai.localstudio.core.benchmark.BenchmarkRunOutput
 import ai.localstudio.core.benchmark.BenchmarkStatus
 import ai.localstudio.core.util.describeForUser
 import android.app.ActivityManager
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import kotlinx.serialization.json.Json
@@ -30,7 +32,14 @@ import java.util.Locale
  *    mirrored as one JSON to `Download/Transcripts/benchmark/` via
  *    MediaStore — the single reproducible record (every file, every
  *    engine, every metric) a run weeks from now can be compared against.
- *    Both happen once, in [save], after the whole run finishes.
+ *    [save] itself is called both once at the very end of a run *and*
+ *    after every individual file finishes (see its own doc comment) — a
+ *    real device report is why: a run that gets stopped, crashes, or is
+ *    killed mid-way used to leave nothing but scattered per-file .txt
+ *    transcripts and no combined JSON at all, since this only ran once at
+ *    the end. Each call overwrites the same file (same name, derived from
+ *    the run's own start time), so this is a live, growing snapshot, not
+ *    a new file every time.
  * 2. One plain-text file per (engine, audio file), under
  *    `Download/Transcripts/benchmark/<modelId>/<audio file name>.txt` — the
  *    per-model layout this exists for: opening one model's folder shows
@@ -82,9 +91,15 @@ class BenchmarkReportStore(private val context: Context, private val appLog: App
     fun saveFileResult(file: BenchmarkAudioFile, metrics: BenchmarkRunMetrics) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         val baseName = file.fileName.substringBeforeLast('.', file.fileName)
+        // modelId in the filename itself, not just the per-model directory
+        // it lives in — real device request: a file pulled out of its
+        // folder (shared, uploaded, listed flat) still needs to say which
+        // model produced it without anyone having to open it and read the
+        // header line.
+        val displayName = "${baseName}_${metrics.modelId}.txt"
         runCatching {
             val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.txt")
+                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/benchmark/${metrics.modelId}/")
             }
@@ -93,41 +108,79 @@ class BenchmarkReportStore(private val context: Context, private val appLog: App
             context.contentResolver.openOutputStream(uri)?.use { it.write(transcriptFileText(file.fileName, metrics).toByteArray()) }
                 ?: error("openOutputStream returned null for $uri")
         }.onFailure { e ->
-            appLog.record("BENCHMARK", "failed to write ${metrics.modelId}/$baseName.txt: ${e.describeForUser()}")
+            appLog.record("BENCHMARK", "failed to write ${metrics.modelId}/$displayName: ${e.describeForUser()}")
         }
     }
 
-    /** Returns the internal file's name (for display) — the same "saved as X" convention TranscribeActivity already uses. */
-    fun save(report: BenchmarkReport): String {
+    /**
+     * Returns the internal file's name (for display) — the same "saved as
+     * X" convention TranscribeActivity already uses.
+     *
+     * [logResult] false for the periodic in-progress saves
+     * [BenchmarkOrchestrator] now does after every file (real device
+     * request: a run that gets killed, crashes, or is stopped mid-way used
+     * to leave every individual .txt from [saveFileResult] but *no*
+     * combined JSON at all, since this only ever ran once at the very
+     * end) — logging every one of those to [appLog] would just reintroduce
+     * the same per-file flooding [saveFileResult] itself was already
+     * written to avoid. The filename is stable across every call for the
+     * same run ([report]'s own `startedAtEpochMs` never changes), so
+     * repeated calls overwrite the same file/Downloads entry rather than
+     * accumulating duplicates.
+     */
+    fun save(report: BenchmarkReport, logResult: Boolean = true): String {
         val text = json.encodeToString(BenchmarkReport.serializer(), report)
         val dir = File(context.filesDir, "benchmarks").apply { mkdirs() }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(report.startedAtEpochMs))
         val name = "benchmark-$stamp.json"
         File(dir, name).writeText(text)
-        appLog.record("BENCHMARK", "saved internally as $name")
+        if (logResult) appLog.record("BENCHMARK", "saved internally as $name")
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            appLog.record("BENCHMARK", "Downloads copy skipped: API ${Build.VERSION.SDK_INT} < 29")
+            if (logResult) appLog.record("BENCHMARK", "Downloads copy skipped: API ${Build.VERSION.SDK_INT} < 29")
             return name
         }
-        copyReportToDownloads(name, text)
+        copyReportToDownloads(name, text, logResult)
         return name
     }
 
-    private fun copyReportToDownloads(name: String, text: String) {
+    private fun copyReportToDownloads(name: String, text: String, logResult: Boolean) {
+        val relativePath = "Download/Transcripts/benchmark/"
         runCatching {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Transcripts/benchmark/")
+            // Reuses the same MediaStore row on every subsequent call for
+            // this run instead of insert()-ing a new one each time — a bare
+            // insert() with the same DISPLAY_NAME doesn't overwrite under
+            // scoped storage, it silently renames to "benchmark-...(1).json",
+            // "(2)", etc., which would defeat the whole point of a stable,
+            // re-checkable filename for an in-progress run.
+            val uri = findExistingDownloadsUri(name, relativePath) ?: run {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                }
+                context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: error("contentResolver.insert returned null")
             }
-            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: error("contentResolver.insert returned null")
-            context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+            context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) }
                 ?: error("openOutputStream returned null for $uri")
         }.onFailure { e ->
-            appLog.record("BENCHMARK", "failed to copy $name to Download/Transcripts/benchmark/: ${e.describeForUser()}")
+            if (logResult) appLog.record("BENCHMARK", "failed to copy $name to $relativePath: ${e.describeForUser()}")
         }
+    }
+
+    private fun findExistingDownloadsUri(displayName: String, relativePath: String): Uri? {
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+        context.contentResolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, arrayOf(displayName, relativePath), null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                return ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+            }
+        }
+        return null
     }
 
     private fun transcriptFileText(fileName: String, metrics: BenchmarkRunMetrics): String {

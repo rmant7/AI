@@ -3,7 +3,11 @@ package ai.localstudio.app.benchmark
 import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.whisper.WarmupSample
 import ai.localstudio.core.benchmark.BenchmarkAudioFile
+import ai.localstudio.core.benchmark.BenchmarkEngineSummary
+import ai.localstudio.core.benchmark.BenchmarkFileResult
 import ai.localstudio.core.benchmark.BenchmarkReport
+import ai.localstudio.core.benchmark.BenchmarkRunMetrics
+import ai.localstudio.core.benchmark.BenchmarkRunOutput
 import ai.localstudio.core.benchmark.BenchmarkRunner
 import ai.localstudio.core.benchmark.BenchmarkStatus
 import ai.localstudio.core.benchmark.BenchmarkSummary
@@ -118,6 +122,16 @@ class BenchmarkOrchestrator(
         // why that distinction matters for a degradation measurement.
         val orderedRtfs = mutableListOf<Double>()
         var isFirstEngine = true
+        val startedAt = System.currentTimeMillis()
+        // Accumulated across the whole run so a partial-run JSON snapshot
+        // can be saved after every single file, not just once at the very
+        // end — see BenchmarkReportStore.save's own doc comment for the
+        // real device report this exists for. Keyed by (backendId, modelId)
+        // rather than appended blindly: onFileComplete fires once per file
+        // for the *same* engine several times in a row, and each call's
+        // own engine summary is already the authoritative up-to-date one.
+        val engineSummariesSoFar = LinkedHashMap<String, BenchmarkEngineSummary>()
+        val fileMetricsSoFar = LinkedHashMap<BenchmarkAudioFile, MutableList<BenchmarkRunMetrics>>()
         job = scope.launch {
             try {
                 val output = runner.run(
@@ -168,7 +182,7 @@ class BenchmarkOrchestrator(
                         }
                         isFirstEngine = false
                     },
-                    onFileComplete = { _, file, metrics ->
+                    onFileComplete = { engineSummary, file, metrics ->
                         // Persisted the moment each individual file finishes,
                         // not batched by engine or to the very end — see
                         // BenchmarkReportStore's own doc comment for the
@@ -179,6 +193,24 @@ class BenchmarkOrchestrator(
                         } else if (metrics.status == BenchmarkStatus.ERROR) {
                             appLog.record("BENCHMARK", "${metrics.modelId}: ${file.fileName} — ERROR: ${metrics.errorMessage}")
                         }
+                        engineSummariesSoFar["${engineSummary.backendId}:${engineSummary.modelId}"] = engineSummary
+                        fileMetricsSoFar.getOrPut(file) { mutableListOf() } += metrics
+                        val partialOutput = BenchmarkRunOutput(
+                            startedAtEpochMs = startedAt,
+                            finishedAtEpochMs = System.currentTimeMillis(),
+                            engines = engineSummariesSoFar.values.toList(),
+                            files = fileMetricsSoFar.map { (f, m) -> BenchmarkFileResult(f, m.toList()) },
+                        )
+                        val partialReport = reportStore.buildReport(
+                            partialOutput,
+                            sharedTask = "transcribe",
+                            sharedForcedLanguage = null,
+                            performanceMode = mode.name,
+                            sustainedModeSupported = sustainedSupported,
+                            sustainedModeActive = sustainedActive,
+                            performanceTrend = BenchmarkSummary.computeTrend(orderedRtfs),
+                        )
+                        reportStore.save(partialReport, logResult = false)
                     },
                 )
                 val report = reportStore.buildReport(
