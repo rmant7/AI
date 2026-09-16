@@ -44,6 +44,7 @@ import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.benchmark.BenchmarkOrchestrator
 import ai.localstudio.app.benchmark.BenchmarkReportStore
 import ai.localstudio.app.benchmark.BenchmarkService
+import ai.localstudio.app.benchmark.BenchmarkUiState
 import ai.localstudio.core.benchmark.BenchmarkRunner
 import ai.localstudio.core.benchmark.TranscriptionEngine
 import ai.localstudio.app.keys.BundledApiKeyStore
@@ -492,7 +493,22 @@ class AppContainer private constructor(private val context: Context) {
             // is what keeps that contract intact without weakening it on
             // the library side.
             while (true) {
-                if (settings.semanticMemoryEnabled) {
+                // Real device report: a benchmark run's own multi-GB Whisper
+                // model and this task's own E5 embedder were repeatedly
+                // fighting over the same limited RAM — every benchmark log
+                // this feature has produced shows SEMANTIC_MEMORY unloading
+                // and reloading itself every ~5 minutes throughout the run,
+                // and one model load that should take seconds took 138s
+                // right in the middle of that cycling. embedPending() being
+                // a no-op with nothing missing doesn't help here: it's
+                // ensureEmbedderLoaded() itself — reloading E5's own native
+                // weights back into memory — that competes for RAM a
+                // benchmark run needs kept free for its own model. Skipped
+                // entirely while a benchmark is running; the next iteration
+                // (at most SEMANTIC_BACKFILL_INTERVAL_MS after the run ends)
+                // resumes it, same as if pressure alone had held it off.
+                val benchmarkRunning = benchmarkOrchestrator.state.value is BenchmarkUiState.Running
+                if (settings.semanticMemoryEnabled && !benchmarkRunning) {
                     ensureEmbedderLoaded(spec)
                     runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
                         .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }

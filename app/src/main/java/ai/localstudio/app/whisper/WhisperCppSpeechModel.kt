@@ -16,6 +16,7 @@ import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.SpeechModelHandle
 import ai.localstudio.core.runtime.StreamingSpeechSession
 import ai.localstudio.whisper.WhisperBridge
+import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.CancellationException
@@ -74,7 +75,17 @@ class WhisperCppRuntime(
 
         val bridge = WhisperBridge()
         val loadStart = System.currentTimeMillis()
-        log("WHISPER_LOAD", "${file.name}: starting")
+        // freeRamMb, not a continuous sampler — real device report: one
+        // model load took 138s right after a different one took 4s, both
+        // from the same 1.1-3GB size class, with the app's own semantic-
+        // memory embedder cycling in and out of memory throughout the same
+        // run (see the guard in AppContainer's backfill loop this
+        // logging was added alongside). A before/after RAM reading brackets
+        // that without the cost/complexity of sampling every 1-2s through
+        // the whole load — if this still doesn't explain a slow load, that
+        // is the point at which continuous sampling earns its keep, not
+        // before.
+        log("WHISPER_LOAD", "${file.name}: starting (free RAM: ${freeRamMb()} MB)")
 
         var producedHandle = 0L
         val result = CompletableDeferred<Unit>()
@@ -99,9 +110,16 @@ class WhisperCppRuntime(
             log("WHISPER_LOAD", "${file.name}: FAILED after ${loadMs}ms")
             throw ModelLoadException("whisper.cpp could not load ${file.name}")
         }
-        log("WHISPER_LOAD", "${file.name}: ready in ${loadMs}ms")
+        log("WHISPER_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${freeRamMb()} MB)")
 
         return WhisperCppSpeechModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, threads, context, log)
+    }
+
+    private fun freeRamMb(): Long? {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
+        val info = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(info)
+        return info.availMem / (1024 * 1024)
     }
 }
 
