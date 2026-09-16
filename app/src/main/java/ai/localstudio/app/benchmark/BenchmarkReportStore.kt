@@ -139,7 +139,8 @@ class BenchmarkReportStore(private val context: Context, private val appLog: App
             appendLine("processing: ${metrics.processingMs} ms" + (metrics.rtf?.let { " (RTF ${"%.3f".format(Locale.US, it)})" } ?: ""))
             metrics.threads?.let { appendLine("threads: $it") }
             metrics.memoryMb?.let { appendLine("native heap: $it MB") }
-            metrics.freeRamMb?.let { appendLine("free RAM: $it MB") }
+            metrics.freeRamMbBefore?.let { appendLine("free RAM before: $it MB") }
+            metrics.freeRamMb?.let { appendLine("free RAM after: $it MB") }
             metrics.thermalStatus?.let { appendLine("thermal status: $it") }
             metrics.thermalHeadroom?.let { appendLine("thermal headroom: ${"%.3f".format(Locale.US, it)}") }
         }

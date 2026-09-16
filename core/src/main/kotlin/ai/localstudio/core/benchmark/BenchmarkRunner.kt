@@ -350,6 +350,7 @@ class BenchmarkRunner(
         thermalHeadroomSampler: (() -> Float?)?,
     ): BenchmarkRunMetrics {
         val start = clock()
+        val freeRamMbBefore = freeRamMbSampler?.invoke()
         val timeoutMs = maxOf(MIN_TRANSCRIBE_TIMEOUT_MS, (file.durationMs ?: 0L) * TRANSCRIBE_TIMEOUT_RTF_CEILING)
         return try {
             val transcript = withTimeout(timeoutMs) {
@@ -371,6 +372,7 @@ class BenchmarkRunner(
                 status = BenchmarkStatus.SUCCESS,
                 transcriptText = transcript.text,
                 freeRamMb = freeRamMbSampler?.invoke(),
+                freeRamMbBefore = freeRamMbBefore,
                 thermalStatus = thermalStatusSampler?.invoke(),
                 thermalHeadroom = thermalHeadroomSampler?.invoke(),
             )
@@ -390,6 +392,7 @@ class BenchmarkRunner(
                 status = BenchmarkStatus.TIMEOUT,
                 errorMessage = "no result after ${timeoutMs}ms",
                 freeRamMb = freeRamMbSampler?.invoke(),
+                freeRamMbBefore = freeRamMbBefore,
                 thermalStatus = thermalStatusSampler?.invoke(),
                 thermalHeadroom = thermalHeadroomSampler?.invoke(),
             )
@@ -418,6 +421,7 @@ class BenchmarkRunner(
                 status = BenchmarkStatus.ERROR,
                 errorMessage = e.describeForUser(),
                 freeRamMb = freeRamMbSampler?.invoke(),
+                freeRamMbBefore = freeRamMbBefore,
                 thermalStatus = thermalStatusSampler?.invoke(),
                 thermalHeadroom = thermalHeadroomSampler?.invoke(),
             )

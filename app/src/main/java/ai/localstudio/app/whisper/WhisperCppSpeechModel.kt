@@ -53,7 +53,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class WhisperCppRuntime(
     /** Application context, held for the process lifetime — used only to resolve `content://` URIs (see [WhisperCppSpeechModel.audioSourceFor]). */
     private val context: Context,
-    private val threads: Int = WhisperBridge.defaultThreads(),
+    /** Public so a benchmark session can report the *actual* thread count this runtime instance was built with — see [WhisperCppTranscriptionEngine.Session.threads]'s own doc comment for why that used to just recompute the app-wide default instead. */
+    val threads: Int = WhisperBridge.defaultThreads(),
     private val log: (tag: String, message: String) -> Unit = { _, _ -> },
 ) : ModelRuntime {
 

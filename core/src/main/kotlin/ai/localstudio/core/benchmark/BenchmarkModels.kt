@@ -36,6 +36,8 @@ data class BenchmarkRunMetrics(
     val transcriptText: String = "",
     /** Free system RAM right after the call returns, in MB — unlike [memoryMb] (this app's own native heap), this is device-wide headroom, sampled to correlate a slow/failed run against memory pressure from other processes. Null where the sampler wasn't wired up. */
     val freeRamMb: Long? = null,
+    /** Same sampler as [freeRamMb], but taken right *before* the call starts — added specifically so a before/after pair can show how much headroom this one call itself consumed, not just what was left over afterward. Null where the sampler wasn't wired up. */
+    val freeRamMbBefore: Long? = null,
     /** [android.os.PowerManager.currentThermalStatus]'s name (e.g. "NONE", "MODERATE", "SEVERE") sampled right after the call returns — API 29+ only; null below that or where unavailable. See [ai.localstudio.app.benchmark.ThermalGuard]. */
     val thermalStatus: String? = null,
     /** [android.os.PowerManager.getThermalHeadroom] sampled right after the call returns — a normalized 0..1+ forecast, not a raw Celsius reading (Android exposes no public raw-temperature API to apps). API 30+ only; null below that or where the OS itself couldn't produce a value. */

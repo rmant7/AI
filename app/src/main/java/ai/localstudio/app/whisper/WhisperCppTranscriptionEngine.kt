@@ -9,7 +9,6 @@ import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.runtime.SpeechModelHandle
-import ai.localstudio.whisper.WhisperBridge
 
 /**
  * The app's "current backend" (see docs/16-stt-benchmark.md) as a benchmark
@@ -61,17 +60,10 @@ class WhisperCppTranscriptionEngine(
             ),
         )
         val handle = runtime.load(descriptor, descriptor.bindings.first()) as SpeechModelHandle
-        return Session(handle)
+        return Session(handle, runtime.threads)
     }
 
-    private class Session(private val handle: SpeechModelHandle) : TranscriptionEngineSession {
-        // Not read back from the loaded handle (whisper.cpp's own JNI
-        // surface doesn't expose it) — this is the same
-        // WhisperBridge.defaultThreads() value WhisperCppRuntime itself
-        // was constructed with app-wide, so it is accurate as long as
-        // nothing constructs a differently-configured runtime instance —
-        // true everywhere in this app today (one shared instance).
-        override val threads: Int = WhisperBridge.defaultThreads()
+    private class Session(private val handle: SpeechModelHandle, override val threads: Int) : TranscriptionEngineSession {
 
         override suspend fun warmUp(sample: AudioRef) {
             handle.transcribe(sample, language = null)
