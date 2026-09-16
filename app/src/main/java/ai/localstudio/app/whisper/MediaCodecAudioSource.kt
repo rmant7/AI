@@ -212,8 +212,16 @@ class MediaCodecAudioSource private constructor(
                     e,
                 )
             } finally {
+                // Real device report: after a MediaCodec.CodecException, a
+                // bare codec.release() here could itself throw — and since
+                // a `finally` block stops running its own remaining
+                // statements the moment one of them throws, that skipped
+                // extractor.release() every time, leaking the extractor on
+                // top of whatever state the codec itself was left in.
+                // Each release attempted independently now, so one
+                // failing never prevents the other.
                 runCatching { codec.stop() }
-                codec.release()
+                runCatching { codec.release() }
                 extractor.release()
             }
 

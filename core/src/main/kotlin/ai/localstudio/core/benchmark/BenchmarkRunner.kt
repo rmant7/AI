@@ -17,6 +17,20 @@ private const val MIN_TRANSCRIBE_TIMEOUT_MS = 120_000L
 private const val TRANSCRIBE_TIMEOUT_RTF_CEILING = 10L
 
 /**
+ * Real device report: after one MediaCodec failure, every single file
+ * across every remaining engine (three whole models' worth, dozens of
+ * files) failed with the exact same generic, non-recoverable error for
+ * over two hours straight — a systemic problem (almost certainly Android's
+ * shared `mediaserver`, not this app), not a per-file one, so nothing about
+ * switching models or files was ever going to change the outcome. This many
+ * consecutive failures — across engine boundaries, so one bad *file* alone
+ * can't trigger it — aborts the rest of the run instead of grinding through
+ * guaranteed failures for hours; whatever ran before the streak still gets
+ * reported and saved normally.
+ */
+private const val CONSECUTIVE_FAILURE_ABORT_THRESHOLD = 10
+
+/**
  * Runs every registered [TranscriptionEngine] against every selected file
  * and returns the raw measurements — see [BenchmarkReport] for the full,
  * reproducible shape this feeds into (device/app metadata is attached by
@@ -44,7 +58,12 @@ private const val TRANSCRIBE_TIMEOUT_RTF_CEILING = 10L
  * **A failed load or warm-up does not abort the run**: that engine's rows
  * simply report [BenchmarkStatus.ERROR] for every file rather than
  * silently vanishing from a report someone will read weeks later trying to
- * understand why a backend is "missing."
+ * understand why a backend is "missing." The one exception is
+ * [CONSECUTIVE_FAILURE_ABORT_THRESHOLD]: too many failures in a row, across
+ * engine boundaries, is no longer "this backend is missing" but "something
+ * outside this app is broken," and grinding through the rest of the run at
+ * that point produces hours of guaranteed failures, not data — see that
+ * constant's own doc comment for the real device report behind it.
  */
 class BenchmarkRunner(
     private val clock: () -> Long = System::currentTimeMillis,
@@ -147,7 +166,13 @@ class BenchmarkRunner(
         // before any real measurement even started.
         val warmSample = warmupSample ?: files.minByOrNull { it.durationMs ?: Long.MAX_VALUE }
 
-        for (engine in engines) {
+        // Counts failures back to back across engine boundaries — see
+        // CONSECUTIVE_FAILURE_ABORT_THRESHOLD's own doc comment. Any
+        // SUCCESS resets it: an isolated bad file/engine is expected and
+        // must not trip this.
+        var consecutiveFailures = 0
+
+        engineLoop@ for (engine in engines) {
             beforeEngine()
             onStatus("Loading ${engine.displayName} (${engine.modelId})…")
             val loadStart = clock()
@@ -178,7 +203,9 @@ class BenchmarkRunner(
                     loadFailed = true,
                     loadErrorMessage = e.describeForUser(),
                 )
-                files.forEach { file ->
+                for (file in files) {
+                    consecutiveFailures++
+                    val aborting = consecutiveFailures >= CONSECUTIVE_FAILURE_ABORT_THRESHOLD
                     val metrics = BenchmarkRunMetrics(
                         backendId = engine.backendId,
                         backendVersion = engine.backendVersion,
@@ -191,12 +218,14 @@ class BenchmarkRunner(
                         rtf = null,
                         memoryMb = null,
                         status = BenchmarkStatus.ERROR,
-                        errorMessage = "engine failed to load: ${e.describeForUser()}",
+                        errorMessage = "engine failed to load: ${e.describeForUser()}" +
+                            if (aborting) "; aborting run — $consecutiveFailures consecutive failures, likely a systemic problem" else "",
                     )
                     perFileMetrics.getValue(file) += metrics
                     completed++
                     onProgress(completed, total)
                     onFileComplete(engineSummaries.last(), file, metrics)
+                    if (aborting) break@engineLoop
                 }
                 continue
             }
@@ -239,12 +268,24 @@ class BenchmarkRunner(
             )
 
             try {
-                files.forEachIndexed { index, file ->
+                for ((index, file) in files.withIndex()) {
                     onStatus("${engine.displayName}: ${file.fileName} (${index + 1}/${files.size})…")
-                    val metrics = runOneTimed(
+                    var metrics = runOneTimed(
                         engine, session, file, forcedLanguage,
                         memorySamplerMb, freeRamMbSampler, thermalStatusSampler, thermalHeadroomSampler,
                     )
+                    if (metrics.status == BenchmarkStatus.SUCCESS) {
+                        consecutiveFailures = 0
+                    } else {
+                        consecutiveFailures++
+                    }
+                    val aborting = consecutiveFailures >= CONSECUTIVE_FAILURE_ABORT_THRESHOLD
+                    if (aborting) {
+                        metrics = metrics.copy(
+                            errorMessage = (metrics.errorMessage ?: "") +
+                                "; aborting run — $consecutiveFailures consecutive failures, likely a systemic problem",
+                        )
+                    }
                     perFileMetrics.getValue(file) += metrics
                     onStatus(
                         "${engine.displayName}: ${file.fileName} — ${metrics.status}" +
@@ -254,6 +295,7 @@ class BenchmarkRunner(
                     completed++
                     onProgress(completed, total)
                     onFileComplete(engineSummaries.last(), file, metrics)
+                    if (aborting) break@engineLoop
                 }
             } finally {
                 // Always released before the next engine's own load() call —
