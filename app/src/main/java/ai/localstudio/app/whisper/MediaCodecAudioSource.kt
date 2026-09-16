@@ -193,11 +193,19 @@ class MediaCodecAudioSource private constructor(
                             val shortBuffer = outputBuffer.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
                             pending.append(shortBuffer)
                         }
-                        if (durationUs > 0 && onProgress != null) {
+                        if (durationUs > 0) {
                             val percent = ((bufferInfo.presentationTimeUs * 100) / durationUs).toInt().coerceIn(0, 100)
                             if (percent != lastReportedPercent) {
+                                // Tracked regardless of whether a caller
+                                // wired up onProgress — real device report:
+                                // no caller ever has, so this stayed at its
+                                // initial -1 forever, and the one time a
+                                // decode failure needed to say "died at 4%"
+                                // vs. "died at 96%" to tell two very
+                                // different bugs apart, AUDIO_DECODE's own
+                                // log line had nothing to show.
                                 lastReportedPercent = percent
-                                onProgress(percent)
+                                onProgress?.invoke(percent)
                             }
                         }
                         codec.releaseOutputBuffer(outputIndex, false)

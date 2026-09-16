@@ -438,6 +438,46 @@ cooldown between them remains the user's own best mitigation; `ThermalGuard`
 only stops the run from making the problem worse once it's already
 detectable.
 
+## Correction: the `MediaCodec` failures weren't thermal after all
+
+Later runs kept producing the exact same `MediaCodec.CodecException`
+(`errorCode -2147483648`) even with `ThermalGuard` in place, `thermalStatus`
+reporting `NONE`/`LIGHT` throughout, and — the detail that finally ruled
+thermal out — the **same short warm-up clip decoding in under 100ms every
+single time**, right before the real file failed. A genuinely throttled
+SoC does not decode a 1.5s clip instantly and then choke on the next file.
+
+Added diagnostic logging (`AUDIO_DECODE`: mime, the actual `codec.name()`
+Android picked, decode elapsed time, progress) found the real cause: the
+codec Android selects for AMR-NB (`c2.android.amrnb.decoder`) is the
+built-in *software* decoder, not a flaky vendor/hardware component — and
+`decodeMs` at failure matched `processingMs` almost exactly (5,381,433ms
+decode for a 5,381,443ms overall call). `MediaCodecAudioSource`'s decode
+loop was gated by a bounded `Channel(capacity = 8)` between decode and
+whisper.cpp inference — 8 *seconds* of margin. Once inference (large
+model, RTF 4-10x under load) fell behind, the decoder didn't fail or even
+slow down: it sat open, mid-stream, idling in backpressure, for as long as
+inference took — up to **90 minutes for one 13-minute file**. Android's
+`MediaCodec` is not something this app has ever seen tolerate being held
+open that long; every failure on record fits this shape.
+
+The 8-chunk cap was sized to avoid buffering "an hour-long file" fully in
+RAM — a problem this app doesn't actually have: even 2 hours of buffered
+16kHz mono PCM16 is ~225MB, trivial next to the multi-GB model already
+resident for that same call. The queue capacity was raised to 7,200 (2
+hours) so decode can outrun even a very slow consumer, finish in seconds,
+and close the codec immediately instead of holding it open for the rest of
+the transcription. `BenchmarkRunner`'s `CONSECUTIVE_FAILURE_ABORT_THRESHOLD`
+(see below) was also lowered from 10 to 3 for the same underlying reason:
+individual failures under the old buffering could themselves take up to 20
+minutes to surface, so counting to 10 still meant burning over an hour on
+guaranteed failures before the run gave up.
+
+`ThermalGuard` and the per-call timeouts above are not wasted work — real
+thermal throttling is a real, separate phenomenon this app can hit on a
+long enough run, and the mitigations for it stand on their own. This
+particular failure mode just was not that.
+
 ## Performance modes: does Sustained Performance Mode actually help?
 
 Three ways to pace a run (`BenchmarkPerformanceMode`, picked via a radio

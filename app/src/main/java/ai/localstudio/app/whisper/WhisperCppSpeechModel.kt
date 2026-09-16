@@ -112,12 +112,28 @@ private const val WINDOW_SAMPLES = WINDOW_SECONDS * SAMPLE_RATE
 
 /**
  * Raw decoder output ahead of inference, in [MediaCodecAudioSource]'s
- * ~1-second chunks — bounded so an hour-long file's decoder cannot race
- * arbitrarily far ahead of a slower inference pass; [AudioSource.stream]'s
- * producer suspends on [Channel.send] once this fills, which is the actual
- * backpressure mechanism between decode and inference.
+ * ~1-second chunks — [AudioSource.stream]'s producer suspends on
+ * [Channel.send] once this fills, which is the actual backpressure
+ * mechanism between decode and inference.
+ *
+ * Real device report: at the old value of 8 (8 seconds buffered), a slow
+ * model (RTF 4-10x on a large model under load) kept the *decoder* —
+ * `MediaCodec`, a real OS resource — blocked in backpressure for as long
+ * as inference itself took, up to 90 minutes for one 13-minute file.
+ * `AUDIO_DECODE` logging showed `decodeMs` matching `processingMs` almost
+ * exactly: the codec wasn't slow, it was open-but-idle, paced down to
+ * inference speed, for the entire run. Android's own software AMR-NB
+ * decoder (`c2.android.amrnb.decoder`, confirmed via that same logging —
+ * not a flaky vendor/hardware component) is not something this app has
+ * ever seen tolerate being held open that long: every failure on record
+ * has been exactly this shape. 8 seconds of margin was solving a memory
+ * problem this app doesn't actually have — even a full 2 hours of
+ * buffered 16kHz mono PCM16 is ~225MB, trivial next to the multi-GB model
+ * already resident during that same call — while creating a real one:
+ * decode racing ahead and finishing in seconds, closing the codec
+ * immediately, is *the* fix, not a tradeoff against memory.
  */
-private const val DECODE_QUEUE_CAPACITY = 8
+private const val DECODE_QUEUE_CAPACITY = 7_200
 
 internal class WhisperCppSpeechModel(
     override val modelId: String,
