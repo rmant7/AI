@@ -83,6 +83,20 @@ class BenchmarkOrchestrator(
     private companion object {
         /** Fixed pause between engines in [BenchmarkPerformanceMode.COOL_DOWN], on top of whatever [ThermalGuard.waitUntilSafe] itself waits for — a device can report a safe thermal status again well before it has actually recovered close to a resting state, so this mode's whole point (giving the device real recovery time) still applies a floor even when the guard returns immediately. */
         const val COOL_DOWN_MIN_DELAY_MS = 60_000L
+
+        /**
+         * Real device report: the per-file partial save (see [start]'s own
+         * accumulator doc comment) only fires at a *file* boundary — for a
+         * run with one very slow file (a large model on a ~13-minute
+         * recording, RTF 4-5x under load, roughly an hour of real inference
+         * time), that boundary might not arrive for the better part of an
+         * hour, and until it does no benchmark-*.json exists at all, even
+         * though the run has been going the whole time. This ticker saves
+         * the same accumulated-so-far snapshot on a fixed clock instead,
+         * so a run stuck on one slow file is still visible well before it
+         * finishes.
+         */
+        const val PARTIAL_SAVE_INTERVAL_MS = 2 * 60 * 1000L
     }
 
     /** A fixed short sample every engine warms up on instead of one of the user's own files — see [WarmupSample]'s own doc comment. Resolved once (the underlying asset never changes) rather than re-copied every run. */
@@ -132,7 +146,37 @@ class BenchmarkOrchestrator(
         // own engine summary is already the authoritative up-to-date one.
         val engineSummariesSoFar = LinkedHashMap<String, BenchmarkEngineSummary>()
         val fileMetricsSoFar = LinkedHashMap<BenchmarkAudioFile, MutableList<BenchmarkRunMetrics>>()
+        fun savePartialReport() {
+            val partialOutput = BenchmarkRunOutput(
+                startedAtEpochMs = startedAt,
+                finishedAtEpochMs = System.currentTimeMillis(),
+                engines = engineSummariesSoFar.values.toList(),
+                files = fileMetricsSoFar.map { (f, m) -> BenchmarkFileResult(f, m.toList()) },
+            )
+            val partialReport = reportStore.buildReport(
+                partialOutput,
+                sharedTask = "transcribe",
+                sharedForcedLanguage = null,
+                performanceMode = mode.name,
+                sustainedModeSupported = sustainedSupported,
+                sustainedModeActive = sustainedActive,
+                performanceTrend = BenchmarkSummary.computeTrend(orderedRtfs),
+            )
+            reportStore.save(partialReport, logResult = false)
+        }
         job = scope.launch {
+            // Runs alongside the file loop below for the whole run, saving
+            // on its own clock — see PARTIAL_SAVE_INTERVAL_MS's own doc
+            // comment. Cancelled in `finally` once the run itself ends, one
+            // way or another; the run's own final save (after the try
+            // block) is what actually matters once that happens, this is
+            // only for visibility while it's still going.
+            val partialSaveTicker = launch {
+                while (true) {
+                    delay(PARTIAL_SAVE_INTERVAL_MS)
+                    savePartialReport()
+                }
+            }
             try {
                 val output = runner.run(
                     engines = engines,
@@ -195,22 +239,7 @@ class BenchmarkOrchestrator(
                         }
                         engineSummariesSoFar["${engineSummary.backendId}:${engineSummary.modelId}"] = engineSummary
                         fileMetricsSoFar.getOrPut(file) { mutableListOf() } += metrics
-                        val partialOutput = BenchmarkRunOutput(
-                            startedAtEpochMs = startedAt,
-                            finishedAtEpochMs = System.currentTimeMillis(),
-                            engines = engineSummariesSoFar.values.toList(),
-                            files = fileMetricsSoFar.map { (f, m) -> BenchmarkFileResult(f, m.toList()) },
-                        )
-                        val partialReport = reportStore.buildReport(
-                            partialOutput,
-                            sharedTask = "transcribe",
-                            sharedForcedLanguage = null,
-                            performanceMode = mode.name,
-                            sustainedModeSupported = sustainedSupported,
-                            sustainedModeActive = sustainedActive,
-                            performanceTrend = BenchmarkSummary.computeTrend(orderedRtfs),
-                        )
-                        reportStore.save(partialReport, logResult = false)
+                        savePartialReport()
                     },
                 )
                 val report = reportStore.buildReport(
@@ -236,6 +265,8 @@ class BenchmarkOrchestrator(
             } catch (e: Exception) {
                 appLog.record("BENCHMARK", "run failed: ${e.describeForUser()}")
                 _state.value = BenchmarkUiState.Failed(e.describeForUser())
+            } finally {
+                partialSaveTicker.cancel()
             }
         }
     }
