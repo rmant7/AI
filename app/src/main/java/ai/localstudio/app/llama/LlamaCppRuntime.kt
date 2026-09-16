@@ -92,7 +92,13 @@ class LlamaCppRuntime(
 
         val bridge = LlamaBridge()
         val loadStart = System.currentTimeMillis()
-        log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads)")
+        // Free RAM before/after, same reasoning and same before/after-only
+        // shape as WHISPER_LOAD's own logging (see that log line's doc
+        // comment): a load that takes far longer than its size class
+        // predicts is otherwise invisible here until someone asks "was
+        // something else holding memory at the time" and has no log line to
+        // check.
+        log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads, free RAM: ${availableRamBytes() / (1024 * 1024)} MB)")
 
         // nativeLoad() is a single blocking JNI call — llama_model_load_from_file()
         // and llama_init_from_model() have no cancellation hook of their own,
@@ -133,7 +139,7 @@ class LlamaCppRuntime(
             log("LOCAL_LOAD", "${file.name}: FAILED after ${loadMs}ms")
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
-        log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms")
+        log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${availableRamBytes() / (1024 * 1024)} MB)")
 
         // Best-effort, and only if a projector was actually downloaded for
         // this model (see ModelStore.hasMmproj) — a model with none behaves

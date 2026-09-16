@@ -471,16 +471,13 @@ class AppContainer private constructor(private val context: Context) {
             if (!ensureEmbedderLoaded(spec)) return@launch
 
             // Periodic, not one-shot: consolidate() keeps adding new durable
-            // memories for as long as the app runs, and embedPending() is a
-            // cheap no-op whenever nothing is actually missing a vector (it
-            // starts by checking semanticMemoryIndex.missing(...) before ever
-            // calling the embedder) — this just keeps semantic coverage from
-            // permanently falling behind, without needing every write path
-            // in the app to remember to call it itself. ensureEmbedderLoaded
+            // memories for as long as the app runs, so this has to keep
+            // checking back rather than running once. ensureEmbedderLoaded
             // here too, not just once above: onTrimMemory (see init{} below)
             // can unload the model between iterations under real memory
             // pressure, and this is what reloads it once pressure passes,
-            // from the same on-disk file, no re-download.
+            // from the same on-disk file, no re-download — but only when
+            // there is real work to reload it *for*, per the check below.
             //
             // Skipped while settings.semanticMemoryEnabled is off, not just
             // "allowed to run but pointless": semanticMemoryEmbedder's own
@@ -498,34 +495,51 @@ class AppContainer private constructor(private val context: Context) {
                 // this feature has produced shows SEMANTIC_MEMORY unloading
                 // and reloading itself every ~5 minutes throughout the run,
                 // and one model load that should take seconds took 138s
-                // right in the middle of that cycling. embedPending() being
-                // a no-op with nothing missing doesn't help here: it's
-                // ensureEmbedderLoaded() itself — reloading E5's own native
-                // weights back into memory — that competes for RAM whatever
-                // else is loading needs kept free for itself.
-                //
-                // Gated on a direct RAM reading, not "is a benchmark
-                // running": a benchmark is just the one feature that
-                // happened to produce a log detailed enough to catch this,
-                // but chat generation, a live mic session, and a one-off
-                // file transcription all hold their own multi-GB models
-                // resident too, and this loop has no way to enumerate every
-                // feature that might be busy right now — nor should it need
-                // to, since a low reading already means *something* needs
-                // the room regardless of what. Same [currentAvailableRamBytes]
-                // "soft, best-effort" reading [LlamaCppRuntime] already uses
-                // to skip loading a vision projector, not routed through
-                // [DeviceProfile] for the same reason that one isn't (see
-                // that function's own doc comment). Threshold picked off
-                // observed failures: 2GB+ free ran fine, everything under
-                // that showed real symptoms (slow loads, decode failures).
-                val freeRamBytes = currentAvailableRamBytes(context)
-                if (settings.semanticMemoryEnabled && freeRamBytes >= SEMANTIC_BACKFILL_MIN_FREE_RAM_BYTES) {
-                    ensureEmbedderLoaded(spec)
-                    runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
-                        .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }
-                } else if (settings.semanticMemoryEnabled) {
-                    appLog.record("SEMANTIC_MEMORY", "backfill skipped: only ${freeRamBytes / (1024 * 1024)} MB free")
+                // right in the middle of that cycling, with no new memories
+                // written in between to justify it. embedPending() itself is
+                // a cheap no-op whenever nothing is missing a vector (it
+                // starts with the same semanticMemoryIndex.missing(...) check
+                // below), but that check happening *inside* embedPending()
+                // was too late — reaching it still required
+                // ensureEmbedderLoaded() to reload E5's native weights first,
+                // which is the actual RAM cost this loop was causing on every
+                // single tick, missing work or not. Checking missing() here,
+                // before ever touching the embedder, is what actually skips
+                // the reload rather than just skipping the (already-cheap)
+                // embedding call after paying for it.
+                if (settings.semanticMemoryEnabled) {
+                    val missing = semanticMemoryIndex.missing(memory.all().map { it.id })
+                    if (missing.isEmpty()) {
+                        // Nothing to backfill — the embedder never gets
+                        // touched this tick, so a quiet app produces zero
+                        // E5 load/unload cycles, not one every interval.
+                    } else {
+                        // Gated on a direct RAM reading, not "is a benchmark
+                        // running": a benchmark is just the one feature that
+                        // happened to produce a log detailed enough to catch
+                        // this, but chat generation, a live mic session, and
+                        // a one-off file transcription all hold their own
+                        // multi-GB models resident too, and this loop has no
+                        // way to enumerate every feature that might be busy
+                        // right now — nor should it need to, since a low
+                        // reading already means *something* needs the room
+                        // regardless of what. Same [currentAvailableRamBytes]
+                        // "soft, best-effort" reading [LlamaCppRuntime]
+                        // already uses to skip loading a vision projector,
+                        // not routed through [DeviceProfile] for the same
+                        // reason that one isn't (see that function's own doc
+                        // comment). Threshold picked off observed failures:
+                        // 2GB+ free ran fine, everything under that showed
+                        // real symptoms (slow loads, decode failures).
+                        val freeRamBytes = currentAvailableRamBytes(context)
+                        if (freeRamBytes >= SEMANTIC_BACKFILL_MIN_FREE_RAM_BYTES) {
+                            ensureEmbedderLoaded(spec)
+                            runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
+                                .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }
+                        } else {
+                            appLog.record("SEMANTIC_MEMORY", "backfill skipped: only ${freeRamBytes / (1024 * 1024)} MB free")
+                        }
+                    }
                 }
                 delay(SEMANTIC_BACKFILL_INTERVAL_MS)
             }
