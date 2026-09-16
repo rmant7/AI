@@ -44,7 +44,6 @@ import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.benchmark.BenchmarkOrchestrator
 import ai.localstudio.app.benchmark.BenchmarkReportStore
 import ai.localstudio.app.benchmark.BenchmarkService
-import ai.localstudio.app.benchmark.BenchmarkUiState
 import ai.localstudio.core.benchmark.BenchmarkRunner
 import ai.localstudio.core.benchmark.TranscriptionEngine
 import ai.localstudio.app.keys.BundledApiKeyStore
@@ -502,16 +501,31 @@ class AppContainer private constructor(private val context: Context) {
                 // right in the middle of that cycling. embedPending() being
                 // a no-op with nothing missing doesn't help here: it's
                 // ensureEmbedderLoaded() itself — reloading E5's own native
-                // weights back into memory — that competes for RAM a
-                // benchmark run needs kept free for its own model. Skipped
-                // entirely while a benchmark is running; the next iteration
-                // (at most SEMANTIC_BACKFILL_INTERVAL_MS after the run ends)
-                // resumes it, same as if pressure alone had held it off.
-                val benchmarkRunning = benchmarkOrchestrator.state.value is BenchmarkUiState.Running
-                if (settings.semanticMemoryEnabled && !benchmarkRunning) {
+                // weights back into memory — that competes for RAM whatever
+                // else is loading needs kept free for itself.
+                //
+                // Gated on a direct RAM reading, not "is a benchmark
+                // running": a benchmark is just the one feature that
+                // happened to produce a log detailed enough to catch this,
+                // but chat generation, a live mic session, and a one-off
+                // file transcription all hold their own multi-GB models
+                // resident too, and this loop has no way to enumerate every
+                // feature that might be busy right now — nor should it need
+                // to, since a low reading already means *something* needs
+                // the room regardless of what. Same [currentAvailableRamBytes]
+                // "soft, best-effort" reading [LlamaCppRuntime] already uses
+                // to skip loading a vision projector, not routed through
+                // [DeviceProfile] for the same reason that one isn't (see
+                // that function's own doc comment). Threshold picked off
+                // observed failures: 2GB+ free ran fine, everything under
+                // that showed real symptoms (slow loads, decode failures).
+                val freeRamBytes = currentAvailableRamBytes(context)
+                if (settings.semanticMemoryEnabled && freeRamBytes >= SEMANTIC_BACKFILL_MIN_FREE_RAM_BYTES) {
                     ensureEmbedderLoaded(spec)
                     runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
                         .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }
+                } else if (settings.semanticMemoryEnabled) {
+                    appLog.record("SEMANTIC_MEMORY", "backfill skipped: only ${freeRamBytes / (1024 * 1024)} MB free")
                 }
                 delay(SEMANTIC_BACKFILL_INTERVAL_MS)
             }
@@ -1827,6 +1841,14 @@ class AppContainer private constructor(private val context: Context) {
         // session, infrequent enough that it costs nothing noticeable while
         // (the common case) there is nothing new to embed.
         private const val SEMANTIC_BACKFILL_INTERVAL_MS = 5 * 60 * 1000L
+
+        // Real device report: reloading E5 below this much free RAM
+        // measurably slowed down or broke whatever else happened to be
+        // loading a model at the same time (chat, benchmark, file/mic
+        // transcription) — see the background task's own doc comment.
+        // 2GB+ free ran clean in every observed case; everything under
+        // that showed real symptoms.
+        private const val SEMANTIC_BACKFILL_MIN_FREE_RAM_BYTES = 2_000L * 1024 * 1024
 
         @Volatile
         private var instance: AppContainer? = null
