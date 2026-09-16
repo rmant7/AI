@@ -39,10 +39,11 @@ class MediaCodecAudioSource private constructor(
     private val configureExtractor: (MediaExtractor) -> Unit,
     private val chunkSeconds: Int,
     private val onProgress: ((Int) -> Unit)?,
+    private val log: (tag: String, message: String) -> Unit,
 ) : AudioSource {
 
     override suspend fun stream(onChunk: suspend (ShortArray) -> Unit) = withContext(Dispatchers.IO) {
-        decodeStreaming(configureExtractor, chunkSeconds, onProgress) { chunk ->
+        decodeStreaming(configureExtractor, chunkSeconds, onProgress, log) { chunk ->
             // decodeStreaming's own loop is synchronous MediaCodec/MediaExtractor
             // code, not itself suspending — runBlocking here just re-enters the
             // suspend world to deliver each chunk, and is where this producer
@@ -66,7 +67,8 @@ class MediaCodecAudioSource private constructor(
             uri: Uri,
             chunkSeconds: Int = DEFAULT_CHUNK_SECONDS,
             onProgress: ((Int) -> Unit)? = null,
-        ): MediaCodecAudioSource = MediaCodecAudioSource({ it.setDataSource(context, uri, null) }, chunkSeconds, onProgress)
+            log: (tag: String, message: String) -> Unit = { _, _ -> },
+        ): MediaCodecAudioSource = MediaCodecAudioSource({ it.setDataSource(context, uri, null) }, chunkSeconds, onProgress, log)
 
         /**
          * Streams [source] — a local file path *or* an http(s) URL — as 16kHz
@@ -77,14 +79,17 @@ class MediaCodecAudioSource private constructor(
             source: String,
             chunkSeconds: Int = DEFAULT_CHUNK_SECONDS,
             onProgress: ((Int) -> Unit)? = null,
-        ): MediaCodecAudioSource = MediaCodecAudioSource({ it.setDataSource(source) }, chunkSeconds, onProgress)
+            log: (tag: String, message: String) -> Unit = { _, _ -> },
+        ): MediaCodecAudioSource = MediaCodecAudioSource({ it.setDataSource(source) }, chunkSeconds, onProgress, log)
 
         private suspend fun decodeStreaming(
             setSource: (MediaExtractor) -> Unit,
             chunkSeconds: Int,
             onProgress: ((Int) -> Unit)?,
+            log: (tag: String, message: String) -> Unit,
             onChunk: (ShortArray) -> Unit,
         ) {
+            val decodeStart = System.currentTimeMillis()
             val extractor = MediaExtractor()
             try {
                 setSource(extractor)
@@ -133,6 +138,14 @@ class MediaCodecAudioSource private constructor(
             val codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
+            // Real device report: the exact same generic MediaCodec error
+            // (errorCode -2147483648, Android's own "unknown error" fallback)
+            // showed up anywhere from ~9 seconds to ~20 minutes into decoding
+            // the same AMR files, across different engines — codec.name here
+            // is the actual decision Android's framework made (hardware vs.
+            // software component for this MIME type), which the generic
+            // exception message never reveals on its own.
+            log("AUDIO_DECODE", "mime=$mime codec=${codec.name} sampleRate=$sourceSampleRate channels=$sourceChannels durationUs=$durationUs")
 
             val pending = PcmBuffer()
             val bufferInfo = MediaCodec.BufferInfo()
@@ -197,7 +210,20 @@ class MediaCodecAudioSource private constructor(
                 // audio, so it gets its own (short) final chunk rather than being
                 // dropped.
                 emit(pending.size)
+                log("AUDIO_DECODE", "success decodeMs=${System.currentTimeMillis() - decodeStart}")
             } catch (e: MediaCodec.CodecException) {
+                // progressPercent (from the last onProgress tick before this
+                // failure) is what tells apart the two very different
+                // real-world timings this has been seen with — failing in
+                // the first few seconds (near 0%) versus after most of a
+                // 30-minute file had already decoded (near 100%) are almost
+                // certainly different underlying causes, even though both
+                // surface as the exact same generic errorCode.
+                log(
+                    "AUDIO_DECODE",
+                    "FAILED decodeMs=${System.currentTimeMillis() - decodeStart} progressPercent=$lastReportedPercent " +
+                        "errorCode=${e.errorCode} recoverable=${e.isRecoverable} transient=${e.isTransient}",
+                )
                 // Real device report: this exception's own message() is a blank
                 // string, not null — Throwable.describeForUser()'s null-or-blank
                 // fallback to toString() doesn't help either, since the default

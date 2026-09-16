@@ -385,12 +385,12 @@ internal class WhisperCppSpeechModel(
         return when (parsed?.scheme) {
             // A SAF/file-picker URI (TranscribeActivity) — needs a Context to
             // resolve through ContentResolver, unlike a plain file path or URL.
-            "content" -> MediaCodecAudioSource.forUri(context, Uri.parse(audio.uri))
+            "content" -> MediaCodecAudioSource.forUri(context, Uri.parse(audio.uri), log = log)
             // Same convention as OpenAiRuntime.RemoteSpeechModel.audioFile():
             // a file:// URI is unwrapped to a bare path.
-            "file" -> MediaCodecAudioSource.forPathOrUrl(parsed.path ?: audio.uri)
+            "file" -> MediaCodecAudioSource.forPathOrUrl(parsed.path ?: audio.uri, log = log)
             // A plain path, or an http(s) URL MediaExtractor can fetch progressively.
-            else -> MediaCodecAudioSource.forPathOrUrl(audio.uri)
+            else -> MediaCodecAudioSource.forPathOrUrl(audio.uri, log = log)
         }
     }
 }

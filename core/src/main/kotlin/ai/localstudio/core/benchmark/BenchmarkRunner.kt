@@ -27,8 +27,15 @@ private const val TRANSCRIBE_TIMEOUT_RTF_CEILING = 10L
  * can't trigger it — aborts the rest of the run instead of grinding through
  * guaranteed failures for hours; whatever ran before the streak still gets
  * reported and saved normally.
+ *
+ * Originally 10 — lowered after a second real device report: individual
+ * failures aren't necessarily fast. One `session.transcribe()` call ran for
+ * roughly 20 minutes before finally surfacing the same generic error, so
+ * counting to 10 could still mean burning well over an hour on failures
+ * that were never going to succeed. 3 is enough to rule out "one unlucky
+ * file/engine" without waiting anywhere near that long.
  */
-private const val CONSECUTIVE_FAILURE_ABORT_THRESHOLD = 10
+private const val CONSECUTIVE_FAILURE_ABORT_THRESHOLD = 3
 
 /**
  * Runs every registered [TranscriptionEngine] against every selected file
