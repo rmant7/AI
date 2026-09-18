@@ -108,17 +108,30 @@ class OpenAiException(val status: Int, val body: String) : Exception(
  * added on top of the parsed value: the provider's own clock and this
  * device's are not perfectly synced, and retrying at the exact instant the
  * limit lifts risks landing on the wrong side of it by a few hundred
- * milliseconds. Returns null for any message that doesn't name a wait —
- * most notably an actual daily-quota 429, which callers should fall back to
- * [ApiKeyRotator.DEFAULT_COOLDOWN_MS] for instead.
+ * milliseconds.
+ *
+ * Real device report: a daily-quota 429 ("...on requests per day (RPD):
+ * Limit 14400, Used 14400... Please try again in 4.32s.") names a wait
+ * too, exactly like a per-minute burst does — this used to assume it never
+ * would, and took that few-second number at face value as the key's whole
+ * cooldown, so a genuinely-exhausted-for-the-day key came back out of
+ * cooldown within seconds and immediately re-hit the same daily limit,
+ * showing the user a nonsensical "frees up in ~0 min." [DAILY_LIMIT_PATTERN]
+ * catches the limit types that reset once a day (TPD/RPD, or the literal
+ * "per day") and forces the real 24h default for those regardless of
+ * whatever short wait Groq's own message happens to quote — that number is
+ * about Groq's internal bucket math, not about when the day actually rolls
+ * over.
  */
 private val RETRY_AFTER_PATTERN = Regex("""try again in ([0-9]+(?:\.[0-9]+)?)\s*s""", RegexOption.IGNORE_CASE)
+private val DAILY_LIMIT_PATTERN = Regex("""per day|\(TPD\)|\(RPD\)""", RegexOption.IGNORE_CASE)
 
-private fun retryAfterMs(message: String?): Long? =
-    message
-        ?.let { RETRY_AFTER_PATTERN.find(it) }
+private fun retryAfterMs(message: String?): Long? {
+    if (message == null || DAILY_LIMIT_PATTERN.containsMatchIn(message)) return null
+    return RETRY_AFTER_PATTERN.find(message)
         ?.groupValues?.get(1)?.toDoubleOrNull()
         ?.let { seconds -> (seconds * 1000).toLong() + 2_000L }
+}
 
 /**
  * Runs models on an OpenAI-compatible endpoint — Ollama, llama-server, or any
