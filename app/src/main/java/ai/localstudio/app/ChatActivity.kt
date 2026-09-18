@@ -1025,6 +1025,7 @@ class ChatActivity : AppCompatActivity() {
                         // whole point of textBeforeTranscribing above.
                     }
                     .onFailure { error ->
+                        container.appLog.record("MIC_TRANSCRIBE_ERROR", "${error.javaClass.simpleName}: ${error.message ?: error}")
                         Toast.makeText(this@ChatActivity, error.message ?: error.toString(), Toast.LENGTH_LONG).show()
                     }
             } finally {

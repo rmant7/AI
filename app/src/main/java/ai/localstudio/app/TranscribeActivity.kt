@@ -603,6 +603,7 @@ class TranscribeActivity : AppCompatActivity() {
             mediaPlayer = player
         } catch (e: Exception) {
             player.release()
+            container.appLog.record("PLAYBACK_ERROR", "${e.javaClass.simpleName}: ${e.message ?: e}")
             Toast.makeText(this, getString(R.string.transcribe_play_failed, e.describeForUser()), Toast.LENGTH_SHORT).show()
             stopPlayback()
         }
@@ -766,8 +767,15 @@ class TranscribeActivity : AppCompatActivity() {
      * say). This shows the whole message, selectable, with an explicit Copy
      * button and no auto-dismiss — closed only by the OK button or tapping
      * outside, like any other dialog.
+     *
+     * Also recorded to the app log here, once, for every caller — the Copy
+     * button above existed only because the log didn't already have this;
+     * a real device report is what asked for the log to hold every error
+     * a dialog shows in the first place, not to keep relying on someone
+     * copying it out of the dialog by hand.
      */
     private fun showErrorDialog(message: String) {
+        container.appLog.record("MIC_ERROR", message)
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.transcribe_error_dialog_title)
             .setMessage(message)
