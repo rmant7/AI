@@ -37,6 +37,7 @@ import ai.localstudio.app.whisper.WhisperModelSeed
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.ModelFit
+import ai.localstudio.core.speech.AsrEngineType
 import kotlinx.coroutines.launch
 
 /**
@@ -222,6 +223,7 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun useForVoice(seed: WhisperModelSeed) {
         container.settings.whisperModelId = seed.id
+        container.settings.activeSttEngine = AsrEngineType.WHISPER
         Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
         render()
     }
@@ -248,6 +250,7 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun useForVosk(seed: VoskModelSeed) {
         container.settings.voskModelId = seed.id
+        container.settings.activeSttEngine = AsrEngineType.VOSK
         Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
         render()
     }

@@ -9,6 +9,7 @@ import ai.localstudio.app.whisper.MicrophoneAudioSource
 import ai.localstudio.app.whisper.TranscriptionResult
 import ai.localstudio.app.whisper.TranscriptionStatus
 import ai.localstudio.app.whisper.WarmupSample
+import ai.localstudio.core.speech.AsrEngineType
 import ai.localstudio.core.speech.StreamingRoutingSession
 import ai.localstudio.core.util.describeForUser
 import android.Manifest
@@ -296,12 +297,31 @@ class TranscribeActivity : AppCompatActivity() {
         // be installed first (usually Tiny, the auto-downloaded default) no
         // matter what was selected — Tiny's transcription quality on real
         // speech is exactly what that looks like.
-        val seed = container.whisperStore.installedSeed(container.settings.whisperModelId)
-        if (seed == null) {
-            Toast.makeText(this, R.string.transcribe_no_model, Toast.LENGTH_LONG).show()
-            return
+        //
+        // Which *engine* runs the batch follows Settings.activeSttEngine —
+        // whichever of Whisper/Vosk was picked last with "Use" on the Models
+        // screen. Unlike file transcription (one button, no per-engine
+        // picker of its own), the two LIVE MIC sections below stay
+        // independent — each has always used its own Settings.whisperModelId/
+        // voskModelId regardless of which one is "active" here.
+        when (container.settings.activeSttEngine) {
+            AsrEngineType.VOSK -> {
+                val seed = VoskModelStore.installedSeed(this, container.settings.voskModelId)
+                if (seed == null) {
+                    Toast.makeText(this, R.string.transcribe_no_model, Toast.LENGTH_LONG).show()
+                    return
+                }
+                container.fileTranscriptionRunner.startVosk(seed)
+            }
+            else -> {
+                val seed = container.whisperStore.installedSeed(container.settings.whisperModelId)
+                if (seed == null) {
+                    Toast.makeText(this, R.string.transcribe_no_model, Toast.LENGTH_LONG).show()
+                    return
+                }
+                container.fileTranscriptionRunner.startWhisper(seed)
+            }
         }
-        container.fileTranscriptionRunner.start(seed)
     }
 
     private fun stop() {

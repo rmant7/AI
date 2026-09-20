@@ -67,6 +67,7 @@ import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
 import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.vosk.VoskDownloads
+import ai.localstudio.app.vosk.VoskFileTranscriber
 import ai.localstudio.app.vosk.VoskModels
 import ai.localstudio.app.vosk.VoskRegisteredSpeechModel
 import ai.localstudio.app.vosk.VoskSpeechRecognizer
@@ -675,6 +676,10 @@ class AppContainer private constructor(private val context: Context) {
             whisperFileTranscriber.release()
             appLog.record("WHISPER", "file-transcriber engine unloaded under memory pressure ($reason)")
         }
+        if (voskFileTranscriber.isLoaded && !skipFileTranscriber) {
+            voskFileTranscriber.release()
+            appLog.record("VOSK", "file-transcriber engine unloaded under memory pressure ($reason)")
+        }
         if (whisperMicSession.isLoaded) {
             whisperMicSession.release()
             appLog.record("WHISPER", "mic session unloaded under memory pressure ($reason)")
@@ -889,6 +894,17 @@ class AppContainer private constructor(private val context: Context) {
     val whisperFileTranscriber = WhisperFileTranscriber(whisperCppRuntime as WhisperCppRuntime, whisperStore)
 
     /**
+     * [VoskFileTranscriber]'s own loaded-model slot for file transcription —
+     * deliberately its own [VoskSpeechRecognizer] instance, separate from
+     * [voskRecognizer] (the live-mic one) below, for the exact same reason
+     * [whisperFileTranscriber] doesn't share a handle with [whisperMicSession]:
+     * a file transcription running in the background must not silently
+     * `cancel()` an unrelated live-mic session.
+     */
+    private val voskFileRecognizer = VoskSpeechRecognizer(context, appLog)
+    val voskFileTranscriber = VoskFileTranscriber(context, voskFileRecognizer)
+
+    /**
      * Owns [TranscribeActivity]'s batch file/folder transcription for the
      * whole app — see this class's own doc comment for the real device
      * report that made this necessary (Activity recreation under memory
@@ -898,7 +914,8 @@ class AppContainer private constructor(private val context: Context) {
      * so the process itself survives backgrounding, not just the Activity.
      */
     val fileTranscriptionRunner = FileTranscriptionRunner(
-        transcriber = whisperFileTranscriber,
+        whisperTranscriber = whisperFileTranscriber,
+        voskTranscriber = voskFileTranscriber,
         context = context,
         onTranscriptionStarted = { FileTranscriptionService.ensureStarted(context) },
     )

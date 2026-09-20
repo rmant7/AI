@@ -1,5 +1,6 @@
 package ai.localstudio.app
 
+import ai.localstudio.core.speech.AsrEngineType
 import android.content.Context
 import ai.localstudio.app.llama.LlamaBridge
 
@@ -79,10 +80,25 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_WHISPER_MODEL, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_WHISPER_MODEL, value).apply()
 
-    /** Which downloaded Vosk model (docs/14-vosk-spike.md) to use for the live-mic Vosk section. Empty means "whichever is installed". */
+    /** Which downloaded Vosk model (docs/14-vosk-spike.md) to use, whichever screen reads [activeSttEngine] as [ai.localstudio.core.speech.AsrEngineType.VOSK]. Empty means "whichever is installed". */
     var voskModelId: String
         get() = prefs.getString(KEY_VOSK_MODEL, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_VOSK_MODEL, value).apply()
+
+    /**
+     * Which engine both live-mic and file transcription in
+     * [ai.localstudio.app.TranscribeActivity] actually use — set by
+     * whichever of [whisperModelId]/[voskModelId] was picked last on the
+     * Models screen's Voice tab, so "Use" on either row is the one place
+     * that decides it, not two independent settings a screen has to guess
+     * between. [whisperModelId]/[voskModelId] each still remember their own
+     * pick even while the other engine is active, so switching back doesn't
+     * lose it.
+     */
+    var activeSttEngine: AsrEngineType
+        get() = runCatching { AsrEngineType.valueOf(prefs.getString(KEY_ACTIVE_STT_ENGINE, null) ?: "") }
+            .getOrDefault(AsrEngineType.WHISPER)
+        set(value) = prefs.edit().putString(KEY_ACTIVE_STT_ENGINE, value.name).apply()
 
     /**
      * Share of total RAM a model may claim, in percent.
@@ -247,6 +263,7 @@ class Settings(context: Context) {
         const val KEY_ASR_MODEL = "asrModel"
         const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_VOSK_MODEL = "voskModelId"
+        const val KEY_ACTIVE_STT_ENGINE = "activeSttEngine"
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_SEMANTIC_MEMORY = "semanticMemoryEnabled"
         const val KEY_COMPARE_MODE = "compareMode"

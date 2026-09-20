@@ -73,15 +73,28 @@ against the actual models list before spending more time on this path.
   Whisper one — Download/Use/Delete per model, same as Whisper's own rows.
   `Settings.voskModelId` remembers which one is selected, the same way
   `Settings.whisperModelId` does for Whisper.
-- **`TranscribeActivity`**: a second "LIVE MIC — VOSK (SPIKE)" section,
-  below the existing Whisper one, with its own Start/Stop button and
-  transcript box. Starting one stops the other (they'd otherwise fight over
-  the same microphone). Shows a plain "No Vosk model installed — download
-  one on the Models screen first" message (not a truncating Toast — see
-  below) if none of `VoskModels.SEEDS` is installed yet.
+- **`TranscribeActivity`**: a second "LIVE MIC — VOSK" section, below the
+  existing Whisper one, with its own Start/Stop button and transcript box.
+  Starting one stops the other (they'd otherwise fight over the same
+  microphone). Shows a plain "No Vosk model installed — download one on
+  the Models screen first" message (not a truncating Toast — see below) if
+  none of `VoskModels.SEEDS` is installed yet.
 - **`AppContainer.voskRecognizer`**/**`voskDownloads`** — shared instances,
   the model freed under memory pressure the same way `whisperMicSession`
   already is.
+- **Promoted to a normal model, not a spike-only path**: `Settings.activeSttEngine`
+  (`AsrEngineType.WHISPER`/`VOSK`) tracks which engine "Use" last picked on
+  the Models screen — both the live-mic Whisper/Vosk buttons and file
+  transcription in `TranscribeActivity` now read it, so Vosk works for
+  batch file transcription too, not just live mic. `VoskFileTranscriber`
+  is the file-transcription counterpart to `WhisperFileTranscriber`: it
+  feeds `MediaCodecAudioSource` (the same file-decode `AudioSource` Whisper
+  uses) into `VoskSpeechRecognizer` instead of a live mic — the recognizer
+  itself doesn't know or care which one it's fed. `FileTranscriptionRunner`
+  keeps a separate Vosk instance for this (`AppContainer.voskFileTranscriber`)
+  from the live-mic one, same split Whisper already has between
+  `whisperFileTranscriber` and `whisperMicSession`, so a background file
+  transcription never `cancel()`s an unrelated live-mic session.
 - **Error dialog, not a Toast**: a mic-session error (Whisper's or Vosk's)
   used to show as a Toast, which truncates long text and disappears on its
   own — exactly wrong for something you might need to read in full or copy
