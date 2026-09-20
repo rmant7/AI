@@ -4,8 +4,17 @@ plugins {
     // Both versions are declared here so AGP and the Kotlin Android plugin land
     // in the same classpath — the Kotlin plugin needs AGP's classes to apply.
     id("com.android.application") version "8.7.3"
-    id("org.jetbrains.kotlin.android") version "2.1.0"
-    kotlin("plugin.serialization") version "2.1.0"
+    // 2.3.21, not 2.1.0 like :core/:openai/:whisper: com.google.mlkit:genai-prompt/
+    // genai-common:1.0.0-beta4 ship Kotlin metadata compiled with 2.3.0 — a
+    // 2.1.0 compiler can't read it at all ("Module was compiled with an
+    // incompatible version of Kotlin", real CI failure, not a guess). Each
+    // module declares its own Kotlin plugin version (see this repo's root
+    // build.gradle.kts) specifically so a bump like this stays local to the
+    // one module that needs it — a newer compiler reading the other modules'
+    // 2.1.0-compiled output is the normal, supported direction; only the
+    // reverse breaks.
+    id("org.jetbrains.kotlin.android") version "2.3.21"
+    kotlin("plugin.serialization") version "2.3.21"
 }
 
 repositories {
