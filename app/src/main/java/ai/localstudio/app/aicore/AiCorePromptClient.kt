@@ -4,6 +4,7 @@ import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
 import com.google.mlkit.genai.prompt.Generation
 import com.google.mlkit.genai.prompt.GenerativeModel
+import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.generateContentRequest
 import kotlinx.coroutines.flow.collect
 
@@ -56,9 +57,21 @@ class AiCorePromptClient {
         model.download().collect { /* draining for its terminal signal only */ }
     }
 
-    /** Runs [prompt] against Gemini Nano and returns its plain-text answer. Only meaningful once [status] reports [FeatureStatus.AVAILABLE]. */
+    /**
+     * Runs [prompt] against Gemini Nano and returns its plain-text answer.
+     * Only meaningful once [status] reports [FeatureStatus.AVAILABLE].
+     *
+     * `generateContentRequest(TextPart(...))` needs the trailing config
+     * lambda to resolve at all here — confirmed against a real, published
+     * implementation using this exact SDK version, not just a search
+     * snippet, after a positional-args-only call and a lambda-only
+     * `{ text(...) }` call each failed to compile in turn. Left empty:
+     * this call has no generation parameters worth overriding for a smoke
+     * test. Response text comes from the first candidate, not a `.text`
+     * convenience property on the response itself — same source.
+     */
     suspend fun generate(prompt: String): String =
-        model.generateContent(generateContentRequest { text(prompt) }).text
+        model.generateContent(generateContentRequest(TextPart(prompt)) {}).candidates.firstOrNull()?.text.orEmpty()
 
     /** Releases whatever native/IPC resources the client holds. Safe to call even if [model] was never actually used. */
     fun close() {
