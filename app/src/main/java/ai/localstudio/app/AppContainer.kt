@@ -1783,8 +1783,26 @@ class AppContainer private constructor(private val context: Context) {
         context.assets.open(CATALOG_ASSET).bufferedReader().use { PipelineCodec.decodeCatalog(it.readText()) }
     }.getOrElse { ModelCatalog(models = emptyList()) }
 
+    /**
+     * Real device report (a fresh Samsung install, LOCAL enabled but no GGUF
+     * downloaded yet): this used to list every *enabled* provider regardless
+     * of whether it actually contributed anything to try, so the very same
+     * turn's own `ROUTER_REBUILD` log line showed `candidates=[Gemini Nano
+     * (AICore), ...]` — no local entry at all, since [localCandidate] returns
+     * null with nothing installed — right above a `SEND` line still claiming
+     * `route=Локально на устройстве (llama.cpp) → Gemini Nano (AICore) →
+     * ...`, as if llama.cpp genuinely led the route it was never even
+     * attempted in. [CloudProviders.LOCAL] is the one entry in
+     * [enabledProviders] that can be "on" with nothing to show for it this
+     * way (a fresh install, or the installed model deleted) — every other
+     * provider here either has a fixed endpoint or (AICore) always
+     * contributes a candidate and only fails once actually attempted, so
+     * only LOCAL needs this check.
+     */
     val runtimeLabel: String
-        get() = enabledProviders().takeIf { it.isNotEmpty() }
+        get() = enabledProviders()
+            .filter { it.id != CloudProviders.LOCAL.id || localCandidate() != null }
+            .takeIf { it.isNotEmpty() }
             ?.joinToString(" → ") { context.getString(it.titleRes) }
             ?: context.getString(CloudProviders.DEMO.titleRes)
 
