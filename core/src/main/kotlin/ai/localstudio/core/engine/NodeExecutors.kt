@@ -313,7 +313,16 @@ class NodeExecutors(
         context.userMessage?.let {
             provider.remember(it, scope, mapOf(CONVERSATION_KEY to context.conversationId, ROLE_KEY to "user"))
         }
-        answer?.let {
+        // Real device report: a cloud candidate that streams zero chunks
+        // (Groq/Gemini/GigaChat all did, independently, in the same Compare
+        // turn — a transient upstream hiccup, not this app's doing) leaves
+        // `answer` blank, and Mobile_mem0's own remember() throws outright
+        // on blank text rather than no-op-ing. That exception then surfaced
+        // as if the *provider's generation itself* had failed
+        // ("Groq: IllegalArgumentException: cannot remember blank text"),
+        // hiding the real, much less alarming story: the turn produced no
+        // text, which has nothing worth remembering.
+        answer?.takeIf { it.isNotBlank() }?.let {
             provider.remember(it, scope, mapOf(CONVERSATION_KEY to context.conversationId, ROLE_KEY to "assistant"))
         }
         inputs.firstOrNull() ?: NodeValue.Empty
