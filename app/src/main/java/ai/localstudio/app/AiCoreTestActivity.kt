@@ -81,7 +81,7 @@ class AiCoreTestActivity : AppCompatActivity() {
         }
     }
 
-    private fun describeStatus(status: FeatureStatus): String = when (status) {
+    private fun describeStatus(status: Int): String = when (status) {
         FeatureStatus.AVAILABLE -> getString(R.string.aicore_status_available)
         FeatureStatus.DOWNLOADABLE -> getString(R.string.aicore_status_downloadable)
         FeatureStatus.UNAVAILABLE -> getString(R.string.aicore_status_unavailable)
@@ -97,16 +97,13 @@ class AiCoreTestActivity : AppCompatActivity() {
         binding.aiCoreProgress.visibility = View.VISIBLE
         binding.aiCoreProgress.isIndeterminate = true
         lifecycleScope.launch {
-            val outcome = runCatching {
-                client.ensureDownloaded { downloaded, total ->
-                    runOnUiThread {
-                        if (total > 0) {
-                            binding.aiCoreProgress.isIndeterminate = false
-                            binding.aiCoreProgress.progress = (downloaded * 100 / total).toInt()
-                        }
-                    }
-                }
-            }
+            // No progress readout — see AiCorePromptClient.ensureDownloaded()'s
+            // own doc comment for why: GenerativeModel.download()'s
+            // DownloadStatus field names aren't verified against anything
+            // beyond a search snippet, unlike the calls this screen actually
+            // makes, so this only reports done-or-failed rather than guessing
+            // at fields a bad guess would silently misreport.
+            val outcome = runCatching { client.ensureDownloaded() }
             binding.aiCoreProgress.visibility = View.GONE
             outcome.fold(
                 onSuccess = {

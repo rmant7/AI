@@ -1,15 +1,11 @@
 package ai.localstudio.app.aicore
 
-import com.google.mlkit.genai.common.DownloadCallback
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
 import com.google.mlkit.genai.prompt.Generation
 import com.google.mlkit.genai.prompt.GenerativeModel
-import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.generateContentRequest
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.flow.collect
 
 /**
  * Thin wrapper around ML Kit's GenAI Prompt API (ships AICore/Gemini Nano's
@@ -34,8 +30,14 @@ class AiCorePromptClient {
 
     private val model: GenerativeModel by lazy { Generation.getClient() }
 
-    /** [FeatureStatus.AVAILABLE]/[FeatureStatus.DOWNLOADABLE]/[FeatureStatus.UNAVAILABLE] (and whatever else this SDK version adds — see its own doc comment for why callers should not assume this is exhaustive). */
-    suspend fun status(): FeatureStatus = model.checkStatus()
+    /**
+     * `checkStatus()` itself returns a plain `Int` (an `@FeatureStatus`-annotated
+     * constant, not a distinct enum type) — compare the result against
+     * [FeatureStatus.AVAILABLE]/[FeatureStatus.DOWNLOADABLE]/[FeatureStatus.UNAVAILABLE]
+     * (and whatever else this SDK version adds — this app has no way to
+     * assume that list is exhaustive).
+     */
+    suspend fun status(): Int = model.checkStatus()
 
     /**
      * Suspends until Gemini Nano itself has finished downloading onto this
@@ -43,38 +45,20 @@ class AiCorePromptClient {
      * shared model weights AICore keeps once, system-wide (see
      * docs/04-runtime.md's own note on why that's structurally different
      * from a per-app GGUF download like [ai.localstudio.app.vosk.VoskNativeLibrary]'s).
-     * [onProgress] reports (downloadedBytes, totalBytes) — totalBytes is 0
-     * until [DownloadCallback.onDownloadStarted] fires.
+     * `GenerativeModel.download()` reports progress as a `Flow<DownloadStatus>`,
+     * not a callback like the Summarization API's own `downloadFeature()` —
+     * this just drains it to completion; `DownloadStatus`'s own fields
+     * aren't read here; that would need its own verification, unlike the
+     * calls made from this class, whose names came back confirmed against
+     * this SDK's real compiler errors, not just search snippets.
      */
-    suspend fun ensureDownloaded(onProgress: (downloaded: Long, total: Long) -> Unit = { _, _ -> }) {
-        var totalBytes = 0L
-        suspendCancellableCoroutine<Unit> { cont ->
-            model.downloadFeature(
-                object : DownloadCallback {
-                    override fun onDownloadStarted(bytesToDownload: Long) {
-                        totalBytes = bytesToDownload
-                        onProgress(0L, totalBytes)
-                    }
-
-                    override fun onDownloadProgress(totalBytesDownloaded: Long) {
-                        onProgress(totalBytesDownloaded, totalBytes)
-                    }
-
-                    override fun onDownloadCompleted() {
-                        if (cont.isActive) cont.resume(Unit)
-                    }
-
-                    override fun onDownloadFailed(e: GenAiException) {
-                        if (cont.isActive) cont.resumeWithException(e)
-                    }
-                },
-            )
-        }
+    suspend fun ensureDownloaded() {
+        model.download().collect { /* draining for its terminal signal only */ }
     }
 
     /** Runs [prompt] against Gemini Nano and returns its plain-text answer. Only meaningful once [status] reports [FeatureStatus.AVAILABLE]. */
     suspend fun generate(prompt: String): String =
-        model.generateContent(generateContentRequest(TextPart(prompt))).text
+        model.generateContent(generateContentRequest { text(prompt) }).text
 
     /** Releases whatever native/IPC resources the client holds. Safe to call even if [model] was never actually used. */
     fun close() {
