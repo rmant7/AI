@@ -122,14 +122,28 @@ jobs:
       # A release asset is downloadable with a plain URL, which an artifact is
       # not — that is the difference between "the build produced an APK" and
       # "you can install it".
-      - name: Publish the APK as a release asset
+      #
+      # One rolling release at a fixed "rolling" tag, not a fresh apk-<run>
+      # release every single build: the old per-build scheme left well over
+      # a hundred releases behind in under two weeks of iterating — a
+      # separate download link per commit nobody ever needed once a newer
+      # one existed, and no way to just bookmark "the latest APK" once. Any
+      # leftover apk-* release from before this changed (or any prior
+      # "rolling" release, if this step is what's re-running after one
+      # already exists) is deleted first, --cleanup-tag so the underlying
+      # git tag goes with it rather than accumulating those instead — this
+      # is what makes the very next build after this change self-clean the
+      # entire backlog rather than needing a separate one-off pass.
+      - name: Publish the APK as a rolling release asset
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="apk-${GITHUB_RUN_NUMBER}"
-          gh release create "$tag" "${{ steps.apk.outputs.path }}" \
-            --title "Local AI Studio debug APK (build ${GITHUB_RUN_NUMBER})" \
+          for tag in $(gh release list --limit 500 --json tagName --jq '.[].tagName' | grep -E '^(apk-[0-9]+|rolling)$' || true); do
+            gh release delete "$tag" -y --cleanup-tag
+          done
+          gh release create rolling "${{ steps.apk.outputs.path }}" \
+            --title "Local AI Studio debug APK (latest — build ${GITHUB_RUN_NUMBER})" \
             --notes "Debug build of ${GITHUB_SHA}. Устанавливается без подписи релиза; runtime по умолчанию — встроенный демонстрационный, адрес OpenAI-совместимого сервера задаётся в настройках." \
             --prerelease
 
