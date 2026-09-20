@@ -484,10 +484,16 @@ class ModelsActivity : AppCompatActivity() {
     private fun voiceRows(device: DeviceProfile): List<Row> = buildList {
         add(Row.Header(getString(R.string.models_voice_header)))
         val selectedSeed = container.whisperStore.installedSeed(container.settings.whisperModelId)
+        // Real device report: this used to check only whisperModelId, so a
+        // Vosk pick below could show as "selected" here too — both engines
+        // remember their own last pick (see Settings.activeSttEngine's own
+        // doc comment), but only one is ever actually in use. "Selected"
+        // here means *that*, not merely "this is the id stored for Whisper".
+        val whisperActive = container.settings.activeSttEngine == AsrEngineType.WHISPER
 
         WhisperModels.SEEDS.forEach { seed ->
             val state = container.whisperDownloads.stateOf(seed)
-            val selected = selectedSeed?.id == seed.id
+            val selected = whisperActive && selectedSeed?.id == seed.id
 
             add(
                 Row.Model(
@@ -536,10 +542,11 @@ class ModelsActivity : AppCompatActivity() {
         // as possible.
         add(Row.Header(getString(R.string.models_vosk_header)))
         val selectedVoskSeed = VoskModelStore.installedSeed(this@ModelsActivity, container.settings.voskModelId)
+        val voskActive = container.settings.activeSttEngine == AsrEngineType.VOSK
 
         VoskModels.SEEDS.forEach { seed ->
             val state = container.voskDownloads.stateOf(seed)
-            val selected = selectedVoskSeed?.id == seed.id
+            val selected = voskActive && selectedVoskSeed?.id == seed.id
 
             add(
                 Row.Model(
