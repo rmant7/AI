@@ -117,6 +117,19 @@ android {
         buildConfig = true
     }
 
+    // libvosk.so specifically — not JNA's own libjnidispatch.so, which stays
+    // bundled since it's what makes Native.register() work at all. Real
+    // device report: bundling vosk-android's own .so for every install cost
+    // ~19.5MB (arm64-v8a + x86_64, both stored uncompressed under minSdk 26)
+    // for a feature most installs never touch. VoskNativeLibrary downloads
+    // this file on first actual use and points JNA's own jna.library.path
+    // at it instead — see that class's own doc comment for why that works.
+    packaging {
+        jniLibs {
+            excludes += "**/libvosk.so"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

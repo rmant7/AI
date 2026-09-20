@@ -54,6 +54,7 @@ class VoskRegisteredSpeechModel(
         loaded?.let { return it }
         return loadMutex.withLock {
             loaded?.let { return@withLock it }
+            VoskNativeLibrary.ensureReady(context)
             withContext(Dispatchers.IO) {
                 val dir = VoskModelStore.modelDir(context, seed)
                 val model = Model(dir.absolutePath)

@@ -976,7 +976,7 @@ class AppContainer private constructor(private val context: Context) {
      * model too, and so [ai.localstudio.app.TranscribeActivity] can reuse
      * one instance across recordings instead of reloading the model each time.
      */
-    val voskRecognizer = VoskSpeechRecognizer()
+    val voskRecognizer = VoskSpeechRecognizer(context, appLog)
 
     /** In-app downloader for [ai.localstudio.app.vosk.VoskModels.SEEDS] — same role for the Voice tab's Vosk rows as [whisperDownloads] has for Whisper's. */
     val voskDownloads = VoskDownloads(

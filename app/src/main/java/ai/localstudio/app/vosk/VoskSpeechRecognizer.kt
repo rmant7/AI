@@ -1,7 +1,9 @@
 package ai.localstudio.app.vosk
 
+import ai.localstudio.app.log.AppLog
 import ai.localstudio.core.audio.AudioSource
 import ai.localstudio.core.model.Transcript
+import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +37,7 @@ import org.vosk.Recognizer
  * contained here; callers only ever see [Transcript], same as every other
  * speech-to-text producer in this app.
  */
-class VoskSpeechRecognizer {
+class VoskSpeechRecognizer(private val context: Context, private val appLog: AppLog? = null) {
 
     private var model: Model? = null
     private var loadedModelPath: String? = null
@@ -63,12 +65,15 @@ class VoskSpeechRecognizer {
         private set
 
     /** Loads (or reuses) the Vosk model directory at [modelPath] — see [VoskModelStore]. `Model(String)` is a blocking native call, so this always runs on [Dispatchers.IO]. */
-    private suspend fun ensureLoaded(modelPath: String): Model = withContext(Dispatchers.IO) {
-        model?.let { if (loadedModelPath == modelPath) return@withContext it }
-        model?.close()
-        Model(modelPath).also {
-            model = it
-            loadedModelPath = modelPath
+    private suspend fun ensureLoaded(modelPath: String): Model {
+        model?.let { if (loadedModelPath == modelPath) return it }
+        VoskNativeLibrary.ensureReady(context, appLog)
+        return withContext(Dispatchers.IO) {
+            model?.close()
+            Model(modelPath).also {
+                model = it
+                loadedModelPath = modelPath
+            }
         }
     }
 

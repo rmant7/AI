@@ -60,6 +60,15 @@ against the actual models list before spending more time on this path.
 - **`ai.localstudio.app.vosk.VoskDownloads`** — downloads (via the same
   `ModelDownloader` Whisper/chat models use) then unzips, per seed, so
   several models can download at once — mirrors `WhisperDownloads`.
+- **`ai.localstudio.app.vosk.VoskNativeLibrary`**: `libvosk.so` itself is no
+  longer bundled in the APK (real device report: ~19.5MB across the two
+  shipped ABIs, paid by every install whether or not Vosk was ever touched —
+  see `app/build.gradle.kts`'s `packaging.jniLibs.excludes`). Downloaded on
+  first actual use instead, from the same published AAR this app already
+  depends on for Vosk's Java API. Works because `org.vosk.LibVosk` resolves
+  its native library through JNA (`Native.register`, not
+  `System.loadLibrary` — confirmed by decompiling the AAR), and JNA searches
+  `jna.library.path` before the APK's own bundled libs.
 - **Models → Voice tab**: a second catalogue, "Vosk (spike)", below the
   Whisper one — Download/Use/Delete per model, same as Whisper's own rows.
   `Settings.voskModelId` remembers which one is selected, the same way
