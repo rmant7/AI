@@ -1,5 +1,6 @@
 package ai.localstudio.app.aicore
 
+import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
 import com.google.mlkit.genai.prompt.Generation
@@ -46,15 +47,20 @@ class AiCorePromptClient {
      * shared model weights AICore keeps once, system-wide (see
      * docs/04-runtime.md's own note on why that's structurally different
      * from a per-app GGUF download like [ai.localstudio.app.vosk.VoskNativeLibrary]'s).
-     * `GenerativeModel.download()` reports progress as a `Flow<DownloadStatus>`,
-     * not a callback like the Summarization API's own `downloadFeature()` —
-     * this just drains it to completion; `DownloadStatus`'s own fields
-     * aren't read here; that would need its own verification, unlike the
-     * calls made from this class, whose names came back confirmed against
-     * this SDK's real compiler errors, not just search snippets.
+     *
+     * Real device report: a Pixel already having Gemini Nano resident for
+     * Google's own first-party features (Recorder, Screenshots, ...) does
+     * *not* mean this app's own `GenerativeModel.checkStatus()` reports
+     * `AVAILABLE` — it reported `DOWNLOADABLE` and the resulting download
+     * ran for several real minutes, not an instant per-app activation.
+     * Whatever AICore is fetching here, it's a genuine network transfer on
+     * that device, cancellable or not on AICore's own side is unverified —
+     * [onStatus] exists so a caller can show real progress instead of a
+     * silent multi-minute wait, which is what surfaced this in the first
+     * place.
      */
-    suspend fun ensureDownloaded() {
-        model.download().collect { /* draining for its terminal signal only */ }
+    suspend fun ensureDownloaded(onStatus: (DownloadStatus) -> Unit = {}) {
+        model.download().collect { status -> onStatus(status) }
     }
 
     /**

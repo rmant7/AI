@@ -239,6 +239,9 @@
     <string name="aicore_screen_explainer">Проверяет, доступен ли Gemini Nano на этом устройстве через AICore, скачивает его при необходимости и позволяет отправить один тестовый запрос. Ничего здесь не подключено к чату или извлечению памяти — см. docs/04-runtime.md, зачем этот экран нужен и на какой вопрос должен ответить.</string>
     <string name="aicore_check_status">Проверить статус</string>
     <string name="aicore_download">Скачать Gemini Nano</string>
+    <string name="aicore_cancel_download">Отменить скачивание</string>
+    <string name="aicore_download_progress">Скачивание: %1$s / %2$s</string>
+    <string name="aicore_download_cancelled">Скачивание отменено</string>
     <string name="aicore_prompt_hint">Тестовый запрос</string>
     <string name="aicore_prompt_default">Кратко перечисли три главных еврейских осенних праздника.</string>
     <string name="aicore_test">Тест</string>

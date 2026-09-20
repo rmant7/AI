@@ -7,7 +7,10 @@ import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -33,6 +36,7 @@ class AiCoreTestActivity : AppCompatActivity() {
     private lateinit var binding: ActivityAiCoreTestBinding
     private val client = AiCorePromptClient()
     private var busy = false
+    private var downloadJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,31 +96,60 @@ class AiCoreTestActivity : AppCompatActivity() {
     }
 
     private fun download() {
-        if (busy) return
+        if (downloadJob != null) {
+            // Real device report: this ran for several real minutes with no
+            // visible progress at all — the first thing that needed fixing
+            // was not silence-vs-noise, it was having no way to stop it.
+            downloadJob?.cancel()
+            return
+        }
         setBusy(true)
+        binding.aiCoreDownloadButton.isEnabled = true
+        binding.aiCoreDownloadButton.text = getString(R.string.aicore_cancel_download)
         binding.aiCoreProgress.visibility = View.VISIBLE
         binding.aiCoreProgress.isIndeterminate = true
-        lifecycleScope.launch {
-            // No progress readout — see AiCorePromptClient.ensureDownloaded()'s
-            // own doc comment for why: GenerativeModel.download()'s
-            // DownloadStatus field names aren't verified against anything
-            // beyond a search snippet, unlike the calls this screen actually
-            // makes, so this only reports done-or-failed rather than guessing
-            // at fields a bad guess would silently misreport.
-            val outcome = runCatching { client.ensureDownloaded() }
+        downloadJob = lifecycleScope.launch {
+            var totalBytes = 0L
+            val outcome = runCatching {
+                client.ensureDownloaded { status ->
+                    when (status) {
+                        is DownloadStatus.DownloadStarted -> totalBytes = status.bytesToDownload
+                        is DownloadStatus.DownloadProgress -> {
+                            binding.aiCoreProgress.isIndeterminate = totalBytes <= 0
+                            if (totalBytes > 0) {
+                                binding.aiCoreProgress.progress = (status.totalBytesDownloaded * 100 / totalBytes).toInt()
+                            }
+                            binding.aiCoreStatus.text = getString(
+                                R.string.aicore_download_progress,
+                                mb(status.totalBytesDownloaded),
+                                if (totalBytes > 0) mb(totalBytes) else "?",
+                            )
+                        }
+                        else -> Unit
+                    }
+                }
+            }
             binding.aiCoreProgress.visibility = View.GONE
+            binding.aiCoreDownloadButton.text = getString(R.string.aicore_download)
             outcome.fold(
                 onSuccess = {
                     binding.aiCoreStatus.text = getString(R.string.aicore_status_line, getString(R.string.aicore_status_available))
                     binding.aiCoreDownloadButton.visibility = View.GONE
                 },
                 onFailure = { error ->
-                    binding.aiCoreStatus.text = getString(R.string.aicore_status_error, error.describeForUser())
+                    if (error is CancellationException) {
+                        binding.aiCoreStatus.text = getString(R.string.aicore_download_cancelled)
+                    } else {
+                        binding.aiCoreStatus.text = getString(R.string.aicore_status_error, error.describeForUser())
+                    }
                 },
             )
+            downloadJob = null
             setBusy(false)
         }
     }
+
+    private fun mb(bytes: Long): String = "%.0f MB".format(bytes / 1_000_000.0)
 
     private fun runTest() {
         if (busy) return
