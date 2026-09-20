@@ -29,7 +29,7 @@
     <string name="menu_history">История чатов</string>
     <string name="menu_share_chat">Поделиться чатом</string>
     <string name="menu_log">Журнал ошибок</string>
-    <string name="menu_transcribe">Транскрибация файлов</string>
+    <string name="menu_transcribe">Аудио</string>
     <string name="menu_benchmark">STT Benchmark</string>
 
     <string name="benchmark_hint">Выбираешь папку с аудиофайлами — приложение прогоняет каждый файл через все зарегистрированные STT-движки, чтобы сравнить скорость и результат на одинаковом входе. См. docs/16-stt-benchmark.md.</string>

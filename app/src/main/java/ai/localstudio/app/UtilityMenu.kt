@@ -28,14 +28,18 @@ object UtilityMenu {
     // IDs start well above anything a target screen might ever add for its
     // own toolbar — none of these Activities has any options menu of its
     // own today, but this keeps a future one from colliding by accident.
+    // Display order follows this list's order (every entry shares the same
+    // Menu.add "order" value below, so Android falls back to insertion
+    // order) — Log goes last, same position it held before Transcribe and
+    // Benchmark were added after History instead of after it.
     private val ENTRIES = listOf(
         Entry(9001, R.string.menu_models, ModelsActivity::class.java),
         Entry(9002, R.string.menu_files, FilesActivity::class.java),
         Entry(9003, R.string.menu_settings, SettingsActivity::class.java),
         Entry(9004, R.string.menu_history, HistoryActivity::class.java),
-        Entry(9005, R.string.menu_log, LogActivity::class.java),
         Entry(9006, R.string.menu_transcribe, TranscribeActivity::class.java),
         Entry(9007, R.string.menu_benchmark, BenchmarkActivity::class.java),
+        Entry(9005, R.string.menu_log, LogActivity::class.java),
     )
 
     /** Adds every entry except the one for [activity]'s own screen — no point offering "go to where you already are." */

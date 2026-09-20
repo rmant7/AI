@@ -27,7 +27,7 @@
     <string name="menu_history">Chat history</string>
     <string name="menu_share_chat">Share chat</string>
     <string name="menu_log">Error log</string>
-    <string name="menu_transcribe">Transcribe files</string>
+    <string name="menu_transcribe">Audio</string>
     <string name="menu_benchmark">STT Benchmark</string>
 
     <string name="benchmark_hint">Picks a folder of audio files and runs every registered speech-to-text backend against every file, so their speed and output can be compared on identical input. See docs/16-stt-benchmark.md.</string>
