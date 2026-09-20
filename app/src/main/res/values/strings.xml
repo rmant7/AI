@@ -405,6 +405,7 @@
     <string name="chat_timeout_message">The model didn\'t reply within %1$d s. It may be too heavy for this device, or something hung — try again or pick a lighter model.</string>
     <string name="chat_compare_timeout_error">Error: no reply within %1$d s</string>
     <string name="chat_compare_generic_error">Error: %1$s</string>
+    <string name="chat_compare_waiting_elapsed">… (%1$d s)</string>
     <string name="chat_default_file_name">file</string>
     <string name="chat_default_image_name">image</string>
     <string name="error_could_not_decode_image">Couldn\'t decode the image</string>

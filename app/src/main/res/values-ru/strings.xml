@@ -407,6 +407,7 @@
     <string name="chat_timeout_message">Модель не ответила за %1$d с. Возможно, модель слишком тяжёлая для этого устройства, или что-то зависло — попробуйте ещё раз или выберите модель полегче.</string>
     <string name="chat_compare_timeout_error">Ошибка: не ответила за %1$d с</string>
     <string name="chat_compare_generic_error">Ошибка: %1$s</string>
+    <string name="chat_compare_waiting_elapsed">… (%1$d с)</string>
     <string name="chat_default_file_name">файл</string>
     <string name="chat_default_image_name">изображение</string>
     <string name="error_could_not_decode_image">Не удалось распознать изображение</string>
