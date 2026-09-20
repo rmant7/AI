@@ -144,10 +144,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     // The model catalog is a repository asset, not a copy: the Models screen
     // reads exactly the file the tests validate.
     sourceSets["main"].assets.srcDir(rootProject.file("registry"))
@@ -160,6 +156,16 @@ android {
         release {
             isMinifyEnabled = false
         }
+    }
+}
+
+// android.kotlinOptions { jvmTarget = "17" } was removed outright by the
+// Kotlin 2.3.21 plugin bump above (a hard compile error now, not just a
+// deprecation) — this is the replacement DSL, same shape :core's own
+// build.gradle.kts already uses.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
