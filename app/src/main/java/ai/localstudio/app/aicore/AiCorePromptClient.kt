@@ -1,10 +1,12 @@
 package ai.localstudio.app.aicore
 
+import android.graphics.Bitmap
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
 import com.google.mlkit.genai.prompt.Generation
 import com.google.mlkit.genai.prompt.GenerativeModel
+import com.google.mlkit.genai.prompt.ImagePart
 import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.generateContentRequest
 import kotlinx.coroutines.flow.collect
@@ -64,8 +66,9 @@ class AiCorePromptClient {
     }
 
     /**
-     * Runs [prompt] against Gemini Nano and returns its plain-text answer.
-     * Only meaningful once [status] reports [FeatureStatus.AVAILABLE].
+     * Runs [prompt] (optionally with [image] attached) against Gemini Nano
+     * and returns its plain-text answer. Only meaningful once [status]
+     * reports [FeatureStatus.AVAILABLE].
      *
      * `generateContentRequest(TextPart(...))` needs the trailing config
      * lambda to resolve at all here — confirmed against a real, published
@@ -75,9 +78,25 @@ class AiCorePromptClient {
      * this call has no generation parameters worth overriding for a smoke
      * test. Response text comes from the first candidate, not a `.text`
      * convenience property on the response itself — same source.
+     *
+     * [image], when present, is passed as a leading [ImagePart] alongside
+     * [prompt]'s [TextPart] — confirmed against several real, published
+     * implementations on this exact API (`android/androidify`'s
+     * `GeminiNanoGenerationDataSource.kt`, `google-ai-edge/gallery`'s
+     * `AICoreModelHelper.kt`, `sceneview/sceneview`'s `AskEngine.kt`), all
+     * of which also note the Prompt API accepts only a single image per
+     * request — same one-image-per-turn constraint
+     * [ai.localstudio.app.llama.LlamaCppRuntime] already has for its own
+     * mmproj vision path (see its own `request.images.firstOrNull()`).
      */
-    suspend fun generate(prompt: String): String =
-        model.generateContent(generateContentRequest(TextPart(prompt)) {}).candidates.firstOrNull()?.text.orEmpty()
+    suspend fun generate(prompt: String, image: Bitmap? = null): String {
+        val request = if (image != null) {
+            generateContentRequest(ImagePart(image), TextPart(prompt)) {}
+        } else {
+            generateContentRequest(TextPart(prompt)) {}
+        }
+        return model.generateContent(request).candidates.firstOrNull()?.text.orEmpty()
+    }
 
     /** Releases whatever native/IPC resources the client holds. Safe to call even if [model] was never actually used. */
     fun close() {

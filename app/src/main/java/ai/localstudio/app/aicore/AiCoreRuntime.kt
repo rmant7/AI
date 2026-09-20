@@ -8,6 +8,8 @@ import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.TextModelHandle
+import android.graphics.BitmapFactory
+import android.util.Base64
 import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -114,14 +116,30 @@ private class AiCoreTextModel(
      */
     override fun generate(request: GenerationRequest): Flow<String> = callbackFlow {
         val start = System.currentTimeMillis()
-        log("AICORE_GENERATE", "$modelId: starting (prompt=${request.prompt.length} chars)")
+        // ImageRef.uri is always a "data:<mime>;base64,<payload>" string here,
+        // never a content:// or file path — ChatActivity.attachImage() builds
+        // it that way specifically because core/openai are plain JVM modules
+        // with no Android Context to resolve a real URI against; same source
+        // and same one-image-per-turn assumption LlamaCppRuntime's own image
+        // handling uses (see its generate()'s own comment on ImageRef.uri).
+        val image = request.images.firstOrNull()?.let { ref ->
+            runCatching {
+                val bytes = Base64.decode(ref.uri.substringAfter(",", ""), Base64.NO_WRAP)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }.getOrNull()
+        }
+        log(
+            "AICORE_GENERATE",
+            "$modelId: starting (prompt=${request.prompt.length} chars" +
+                (if (request.images.isNotEmpty()) ", with image (decoded=${image != null})" else "") + ")",
+        )
         // AiCorePromptClient.generate() has no separate system-prompt slot
         // confirmed to exist in this SDK version's generateContentRequest —
         // folded into the same prompt text instead, same as every candidate
         // here treats a missing feature: degrade, don't drop the field.
         val fullPrompt = request.systemPrompt?.let { "$it\n\n${request.prompt}" } ?: request.prompt
         val worker = CoroutineScope(Dispatchers.IO).launch {
-            val outcome = runCatching { client.generate(fullPrompt) }
+            val outcome = runCatching { client.generate(fullPrompt, image) }
             outcome.fold(
                 onSuccess = { text ->
                     log("AICORE_GENERATE", "$modelId: done in ${System.currentTimeMillis() - start}ms, ${text.length} chars")
