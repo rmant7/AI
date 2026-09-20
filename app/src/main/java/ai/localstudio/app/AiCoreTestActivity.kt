@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 class AiCoreTestActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityAiCoreTestBinding
+    private lateinit var container: AppContainer
     private val client = AiCorePromptClient()
     private var busy = false
     private var downloadJob: Job? = null
@@ -41,6 +42,7 @@ class AiCoreTestActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        container = AppContainer.get(this)
         binding = ActivityAiCoreTestBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.root.applySystemBarInsets()
@@ -75,10 +77,12 @@ class AiCoreTestActivity : AppCompatActivity() {
             val outcome = runCatching { client.status() }
             outcome.fold(
                 onSuccess = { status ->
+                    container.appLog.record("AICORE_TEST", "check status: ${describeStatus(status)} (raw=$status)")
                     binding.aiCoreStatus.text = getString(R.string.aicore_status_line, describeStatus(status))
                     binding.aiCoreDownloadButton.visibility = if (status == FeatureStatus.DOWNLOADABLE) View.VISIBLE else View.GONE
                 },
                 onFailure = { error ->
+                    container.appLog.record("AICORE_TEST", "check status FAILED: ${error.javaClass.simpleName}: ${error.message}")
                     binding.aiCoreStatus.text = getString(R.string.aicore_status_error, error.describeForUser())
                 },
             )
@@ -109,6 +113,8 @@ class AiCoreTestActivity : AppCompatActivity() {
         binding.aiCoreDownloadButton.text = getString(R.string.aicore_cancel_download)
         binding.aiCoreProgress.visibility = View.VISIBLE
         binding.aiCoreProgress.isIndeterminate = true
+        container.appLog.record("AICORE_TEST", "download: starting")
+        val downloadStart = System.currentTimeMillis()
         downloadJob = lifecycleScope.launch {
             var totalBytes = 0L
             val outcome = runCatching {
@@ -132,15 +138,19 @@ class AiCoreTestActivity : AppCompatActivity() {
             }
             binding.aiCoreProgress.visibility = View.GONE
             binding.aiCoreDownloadButton.text = getString(R.string.aicore_download)
+            val downloadMs = System.currentTimeMillis() - downloadStart
             outcome.fold(
                 onSuccess = {
+                    container.appLog.record("AICORE_TEST", "download: done in ${downloadMs}ms, ${mb(totalBytes)} total")
                     binding.aiCoreStatus.text = getString(R.string.aicore_status_line, getString(R.string.aicore_status_available))
                     binding.aiCoreDownloadButton.visibility = View.GONE
                 },
                 onFailure = { error ->
                     if (error is CancellationException) {
+                        container.appLog.record("AICORE_TEST", "download: cancelled after ${downloadMs}ms")
                         binding.aiCoreStatus.text = getString(R.string.aicore_download_cancelled)
                     } else {
+                        container.appLog.record("AICORE_TEST", "download: FAILED after ${downloadMs}ms: ${error.javaClass.simpleName}: ${error.message}")
                         binding.aiCoreStatus.text = getString(R.string.aicore_status_error, error.describeForUser())
                     }
                 },
@@ -174,16 +184,24 @@ class AiCoreTestActivity : AppCompatActivity() {
         binding.aiCoreProgress.isIndeterminate = true
         binding.aiCoreResult.visibility = View.VISIBLE
         binding.aiCoreResult.text = getString(R.string.aicore_testing)
+        container.appLog.record("AICORE_TEST", "test: starting (prompt=${prompt.length} chars)")
+        val testStart = System.currentTimeMillis()
         testJob = lifecycleScope.launch {
             val outcome = runCatching { client.generate(prompt) }
+            val testMs = System.currentTimeMillis() - testStart
             binding.aiCoreProgress.visibility = View.GONE
             binding.aiCoreTestButton.text = getString(R.string.aicore_test)
             binding.aiCoreResult.text = outcome.fold(
-                onSuccess = { it },
+                onSuccess = { text ->
+                    container.appLog.record("AICORE_TEST", "test: done in ${testMs}ms, ${text.length} chars")
+                    text
+                },
                 onFailure = { error ->
                     if (error is CancellationException) {
+                        container.appLog.record("AICORE_TEST", "test: cancelled after ${testMs}ms")
                         getString(R.string.aicore_test_cancelled)
                     } else {
+                        container.appLog.record("AICORE_TEST", "test: FAILED after ${testMs}ms: ${error.javaClass.simpleName}: ${error.message}")
                         getString(R.string.aicore_result_error, error.describeForUser())
                     }
                 },

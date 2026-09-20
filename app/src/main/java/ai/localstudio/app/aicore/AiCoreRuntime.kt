@@ -46,6 +46,13 @@ class AiCoreRuntime(
         binding.runtime == RuntimeKind.AICORE
 
     override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel {
+        // Real device report: nothing related to AICore ever showed up in
+        // the app's own log, even when it silently failed to load — the
+        // only trace was the fallback chain quietly moving on to the next
+        // provider (or "no source answered" if it was the only one enabled).
+        // Every branch below now logs before it returns or throws, same as
+        // LlamaCppRuntime.load()'s LOCAL_LOAD lines.
+        log("AICORE_LOAD", "$AICORE_MODEL_LABEL: checking status")
         val client = AiCorePromptClient()
         val status = try {
             client.status()
@@ -54,20 +61,26 @@ class AiCoreRuntime(
             throw e
         } catch (e: Exception) {
             client.close()
+            log("AICORE_LOAD", "$AICORE_MODEL_LABEL: FAILED status check: ${e.javaClass.simpleName}: ${e.message}")
             throw ModelLoadException("AICore status check failed: ${e.message}", e)
         }
         if (status != FeatureStatus.AVAILABLE) {
             client.close()
-            throw ModelLoadException(
-                if (status == FeatureStatus.DOWNLOADABLE) {
-                    "Gemini Nano is not downloaded yet — open Settings → Advanced → " +
-                        "Gemini Nano (AICore) and tap Download"
-                } else {
-                    "Gemini Nano is unavailable on this device (status=$status)"
-                },
-            )
+            val reason = if (status == FeatureStatus.DOWNLOADABLE) {
+                "Gemini Nano is not downloaded yet — open Settings → Advanced → " +
+                    "Gemini Nano (AICore) and tap Download"
+            } else {
+                "Gemini Nano is unavailable on this device (status=$status)"
+            }
+            log("AICORE_LOAD", "$AICORE_MODEL_LABEL: SKIPPED — $reason")
+            throw ModelLoadException(reason)
         }
+        log("AICORE_LOAD", "$AICORE_MODEL_LABEL: ready (status=AVAILABLE)")
         return AiCoreTextModel(model.id, binding.effectiveRequiredRamBytes, client, log)
+    }
+
+    private companion object {
+        const val AICORE_MODEL_LABEL = "gemini-nano-aicore"
     }
 }
 
