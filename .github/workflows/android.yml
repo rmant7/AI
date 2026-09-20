@@ -139,8 +139,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # First real run of this step failed outright: one delete among the
+          # ~250 pre-existing apk-* releases errored ("release not found" --
+          # plausibly a listing/deletion race on GitHub's side over that many
+          # back-to-back calls, never actually confirmed) and, under set -e,
+          # took the whole step down with it *before* the release this step
+          # exists to publish ever got created. A stray delete failure isn't
+          # worth failing the build over -- warn and move on, same as the
+          # grep above already tolerates finding nothing to delete.
           for tag in $(gh release list --limit 500 --json tagName --jq '.[].tagName' | grep -E '^(apk-[0-9]+|rolling)$' || true); do
-            gh release delete "$tag" -y --cleanup-tag
+            gh release delete "$tag" -y --cleanup-tag || echo "::warning::could not delete old release $tag, continuing"
           done
           gh release create rolling "${{ steps.apk.outputs.path }}" \
             --title "Local AI Studio debug APK (latest — build ${GITHUB_RUN_NUMBER})" \
