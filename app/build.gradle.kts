@@ -187,6 +187,15 @@ dependencies {
     // text instead of the raw asterisks and hashes an LLM's output is full of.
     implementation("io.noties.markwon:core:4.6.2")
 
+    // Gemini Nano via AICore (docs/04-runtime.md's own feasibility section):
+    // a thin client that talks to the on-device AICore *system service* over
+    // IPC — the model weights are AICore's own, shared system-wide, never
+    // part of this app's process (see that doc's own findings on why that
+    // structurally avoids the RAM contention llama.cpp/whisper.cpp GGUF
+    // loads compete in). Google Maven only (declared in this module's own
+    // `repositories` block above), no native code of this app's own.
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
+
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

@@ -111,6 +111,9 @@ class SettingsActivity : AppCompatActivity() {
         binding.experimentalEmbeddingsButton.setOnClickListener {
             startActivity(Intent(this, ExperimentalEmbeddingsActivity::class.java))
         }
+        binding.aiCoreOpenButton.setOnClickListener {
+            startActivity(Intent(this, AiCoreTestActivity::class.java))
+        }
         setupDownloadPolicy()
 
         lifecycleScope.launch { container.whisperDownloads.state.collect { renderWhisper() } }

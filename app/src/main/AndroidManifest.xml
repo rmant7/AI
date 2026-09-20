@@ -47,6 +47,12 @@
             android:parentActivityName=".SettingsActivity" />
 
         <activity
+            android:name=".AiCoreTestActivity"
+            android:exported="false"
+            android:label="@string/aicore_screen_title"
+            android:parentActivityName=".SettingsActivity" />
+
+        <activity
             android:name=".GenerationSettingsActivity"
             android:exported="false"
             android:label="@string/settings_generation_header"
