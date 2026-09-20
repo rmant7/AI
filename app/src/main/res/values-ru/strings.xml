@@ -245,7 +245,9 @@
     <string name="aicore_prompt_hint">Тестовый запрос</string>
     <string name="aicore_prompt_default">Кратко перечисли три главных еврейских осенних праздника.</string>
     <string name="aicore_test">Тест</string>
-    <string name="aicore_testing">Тестируем…</string>
+    <string name="aicore_cancel_test">Отменить тест</string>
+    <string name="aicore_testing">Тестируем… (нажмите ещё раз для отмены)</string>
+    <string name="aicore_test_cancelled">Тест отменён</string>
     <string name="aicore_status_line">Статус: %1$s</string>
     <string name="aicore_status_available">доступен</string>
     <string name="aicore_status_downloadable">можно скачать — нажмите «Скачать»</string>

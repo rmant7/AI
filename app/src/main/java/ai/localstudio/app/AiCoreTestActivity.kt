@@ -37,6 +37,7 @@ class AiCoreTestActivity : AppCompatActivity() {
     private val client = AiCorePromptClient()
     private var busy = false
     private var downloadJob: Job? = null
+    private var testJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -152,18 +153,42 @@ class AiCoreTestActivity : AppCompatActivity() {
     private fun mb(bytes: Long): String = "%.0f MB".format(bytes / 1_000_000.0)
 
     private fun runTest() {
+        if (testJob != null) {
+            // Real device report: after Check status reported "available",
+            // tapping Test produced no visible feedback at all — same class
+            // of bug as the download flow's silent multi-minute wait. The
+            // Prompt API exposes no intermediate progress for generateContent
+            // (unlike download()'s Flow<DownloadStatus>), so the best this
+            // screen can offer is: make it obvious a request is in flight,
+            // and let the user bail out instead of wondering if it's stuck.
+            testJob?.cancel()
+            return
+        }
         if (busy) return
         val prompt = binding.aiCorePromptInput.text?.toString().orEmpty().trim()
         if (prompt.isBlank()) return
         setBusy(true)
+        binding.aiCoreTestButton.isEnabled = true
+        binding.aiCoreTestButton.text = getString(R.string.aicore_cancel_test)
+        binding.aiCoreProgress.visibility = View.VISIBLE
+        binding.aiCoreProgress.isIndeterminate = true
         binding.aiCoreResult.visibility = View.VISIBLE
         binding.aiCoreResult.text = getString(R.string.aicore_testing)
-        lifecycleScope.launch {
+        testJob = lifecycleScope.launch {
             val outcome = runCatching { client.generate(prompt) }
+            binding.aiCoreProgress.visibility = View.GONE
+            binding.aiCoreTestButton.text = getString(R.string.aicore_test)
             binding.aiCoreResult.text = outcome.fold(
                 onSuccess = { it },
-                onFailure = { error -> getString(R.string.aicore_result_error, error.describeForUser()) },
+                onFailure = { error ->
+                    if (error is CancellationException) {
+                        getString(R.string.aicore_test_cancelled)
+                    } else {
+                        getString(R.string.aicore_result_error, error.describeForUser())
+                    }
+                },
             )
+            testJob = null
             setBusy(false)
         }
     }
