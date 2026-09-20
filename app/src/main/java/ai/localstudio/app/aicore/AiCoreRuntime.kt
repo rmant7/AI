@@ -61,16 +61,27 @@ class AiCoreRuntime(
             throw e
         } catch (e: Exception) {
             client.close()
+            val reason = "Gemini Nano (AICore) status check failed: ${e.message} — pick a different model in Settings instead."
             log("AICORE_LOAD", "$AICORE_MODEL_LABEL: FAILED status check: ${e.javaClass.simpleName}: ${e.message}")
-            throw ModelLoadException("AICore status check failed: ${e.message}", e)
+            throw ModelLoadException(reason, e)
         }
         if (status != FeatureStatus.AVAILABLE) {
             client.close()
+            // This exact message is what a real user sees, one of three ways
+            // (per this app's existing, unchanged error handling — nothing
+            // new needed here): the whole error bubble when AICore is the
+            // only enabled candidate (ChatActivity's onFailure), the inline
+            // "⚠ ..." line FallbackTextRuntime's own attribution footer adds
+            // when a later candidate answers instead, or a Compare-mode
+            // source's own bubble. Says what's wrong AND names the fix that
+            // doesn't require waiting on AICore at all — switching models —
+            // rather than only explaining how to make AICore itself work.
             val reason = if (status == FeatureStatus.DOWNLOADABLE) {
-                "Gemini Nano is not downloaded yet — open Settings → Advanced → " +
-                    "Gemini Nano (AICore) and tap Download"
+                "Gemini Nano (AICore) isn't downloaded yet — open Settings → Advanced → " +
+                    "Gemini Nano (AICore) to download it, or pick a different model in Settings until then."
             } else {
-                "Gemini Nano is unavailable on this device (status=$status)"
+                "Gemini Nano (AICore) isn't available on this device (status=$status) — " +
+                    "pick a different model in Settings instead."
             }
             log("AICORE_LOAD", "$AICORE_MODEL_LABEL: SKIPPED — $reason")
             throw ModelLoadException(reason)
