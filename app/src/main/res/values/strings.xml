@@ -323,6 +323,8 @@
     <string name="provider_keyhint_demo">No key needed: the built-in runtime answers, and you can see the route and context.</string>
     <string name="provider_title_local">Local, on-device (llama.cpp)</string>
     <string name="provider_keyhint_local">No key or network needed. The model downloads once on the Models screen and then runs offline.</string>
+    <string name="provider_title_aicore">Gemini Nano (AICore)</string>
+    <string name="provider_keyhint_aicore">No key or network needed. Runs via Google\'s AICore system service, not a file this app downloads — see Settings → Advanced → Gemini Nano (AICore) to download the model once if it isn\'t ready yet. Falls through to the next enabled provider until it is.</string>
     <string name="provider_title_gemini">Google Gemini</string>
     <string name="provider_keyhint_gemini">Key: aistudio.google.com → Get API key. Free tier is Flash/Flash-Lite only; Pro is paid.</string>
     <string name="provider_title_mistral">Mistral</string>

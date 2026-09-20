@@ -34,6 +34,15 @@ enum class RuntimeKind(val id: String) {
     REMOTE_OPENAI("remote_openai"),
 
     /**
+     * Gemini Nano via Google's AICore system service (ML Kit's GenAI Prompt
+     * API) — unlike [LLAMA_CPP], inference runs out-of-process against
+     * shared, system-wide weights rather than this app's own heap. See
+     * docs/04-runtime.md's "Gemini Nano / AICore feasibility" section.
+     */
+    @SerialName("aicore")
+    AICORE("aicore"),
+
+    /**
      * In-process stub: no weights, no network. Exists so the app runs — and can
      * be demonstrated — before any real runtime is installed, and so tests can
      * exercise the full stack without one.

@@ -325,6 +325,8 @@
     <string name="provider_keyhint_demo">Ключ не нужен: отвечает встроенный runtime, видно маршрут и контекст.</string>
     <string name="provider_title_local">Локально на устройстве (llama.cpp)</string>
     <string name="provider_keyhint_local">Ключ и сеть не нужны. Модель скачивается один раз на экране «Модели» и дальше работает офлайн.</string>
+    <string name="provider_title_aicore">Gemini Nano (AICore)</string>
+    <string name="provider_keyhint_aicore">Ключ и сеть не нужны. Работает через системный сервис AICore от Google, это не файл, который скачивает это приложение — см. Настройки → Advanced → Gemini Nano (AICore), чтобы скачать модель один раз, если она ещё не готова. Пока не готова — используется следующий включённый провайдер.</string>
     <string name="provider_title_gemini">Google Gemini</string>
     <string name="provider_keyhint_gemini">Ключ: aistudio.google.com → Get API key. Бесплатный уровень — только Flash/Flash-Lite; Pro — платно.</string>
     <string name="provider_title_mistral">Mistral</string>
