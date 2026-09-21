@@ -1523,6 +1523,19 @@ class AppContainer private constructor(private val context: Context) {
         cachedTranslationManager?.let { existing -> kotlinx.coroutines.runBlocking { existing.evictIdle() } }
 
         val isLocalOnly = candidate.binding.runtime == RuntimeKind.LLAMA_CPP
+        if (isLocalOnly) {
+            // [releaseMemoryUnderPressure] otherwise only runs reactively,
+            // off Android's own onTrimMemory callback — real device logs
+            // showed that callback landing the same second a translation's
+            // fresh model load started, with the embedding model (and
+            // whatever chat model was still resident) not yet freed by the
+            // time llama.cpp's own allocations ran, on a device already
+            // down to ~1-2 GB free. A native encoder-decoder allocation
+            // failing partway through has nothing graceful to do about
+            // it — freeing everything else *before* this load starts is
+            // cheaper than finding out after the fact.
+            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("translation model load") }
+        }
         val manager = RuntimeManager(
             budgetBytes = device.usableRamBytes,
             runtimes = buildMap {
