@@ -268,7 +268,7 @@
     <string name="models_translation_specialized_header">Специализированные модели перевода</string>
     <string name="models_translation_specialized_note">Обучена именно для перевода, а не через промпт как чат-модель — поддерживает много языков, включая малоресурсные. Новый нативный код в этом приложении (encoder-decoder инференс); если перевод выглядит странно — отметь это через журнал ошибок.</string>
     <string name="models_translation_note">Обычная чат-модель, переводит через промпт — нормально работает с распространёнными языками, но почти не видела малоресурсный сейшельский креольский. Выбор независим от модели чата выше: можно взять модель поменьше и побыстрее только для перевода, не трогая чат.</string>
-    <string name="note_madlad400_3b">Google MADLAD-400: 450+ языков, включая сейшельский креольский. ~1.65ГБ.</string>
+    <string name="note_madlad400_3b">Google MADLAD-400: 450+ языков. ~1.65ГБ.</string>
     <string name="models_switched_voice">Голосовой ввод переключён на %1$s</string>
     <string name="model_state_installed">Установлена</string>
     <string name="model_state_resolving">Ищу файл: %1$s…</string>
