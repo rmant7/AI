@@ -11,6 +11,7 @@ import ai.localstudio.commercialmemory.ExperimentRecord
 import ai.localstudio.commercialmemory.JsonlExperimentLogger
 import ai.localstudio.commercialmemory.MemoryExperimentRunner
 import ai.localstudio.commercialmemory.RankingWeights
+import ai.localstudio.app.aicore.AiCoreRuntime
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.context.ContextEngine
 import ai.localstudio.core.engine.ModelSelector
@@ -1152,7 +1153,11 @@ class AppContainer private constructor(private val context: Context) {
         // still what makes the policy real: local first, then each enabled
         // provider's own model list before the next provider's first model.
         val candidates = enabled.flatMap { provider ->
-            if (provider.id == CloudProviders.LOCAL.id) listOfNotNull(localCandidate()) else cloudCandidates(provider)
+            when (provider.id) {
+                CloudProviders.LOCAL.id -> listOfNotNull(localCandidate())
+                CloudProviders.AICORE.id -> listOf(aicoreCandidate())
+                else -> cloudCandidates(provider)
+            }
         }
         lastCandidates = candidates
 
@@ -1343,10 +1348,10 @@ class AppContainer private constructor(private val context: Context) {
 
     fun compareCandidates(): List<CompareSource> =
         enabledProviders().mapNotNull { provider ->
-            val candidates = if (provider.id == CloudProviders.LOCAL.id) {
-                listOfNotNull(localCandidate())
-            } else {
-                cloudCandidates(provider)
+            val candidates = when (provider.id) {
+                CloudProviders.LOCAL.id -> listOfNotNull(localCandidate())
+                CloudProviders.AICORE.id -> listOf(aicoreCandidate())
+                else -> cloudCandidates(provider)
             }
             if (candidates.isEmpty()) return@mapNotNull null
             // Always wrapped, even for a single candidate: this is what gives
@@ -1467,6 +1472,34 @@ class AppContainer private constructor(private val context: Context) {
             ),
             model = selected.model,
             binding = selected.binding,
+        )
+    }
+
+    /**
+     * Gemini Nano via AICore, as a [FallbackCandidate] — unlike [localCandidate],
+     * always contributed when the provider is enabled, since there is no file
+     * to check "is it installed" against: readiness is only knowable by
+     * actually asking AICore, which [ai.localstudio.app.aicore.AiCoreRuntime.load]
+     * does. An unready device (not downloaded, or AICore absent entirely)
+     * surfaces as this candidate failing fast and [FallbackTextRuntime] moving
+     * on to whichever candidate comes next — same as any other candidate that
+     * turns out not to be ready, not a special case.
+     *
+     * [RuntimeBinding.fileSizeBytes]/[RuntimeBinding.requiredRamBytes] are
+     * both nominal ([servedModel]'s usual `1`) rather than measured, same as
+     * every other [servedModel]-built candidate — deliberately not the
+     * llama.cpp-sized estimate [localCandidate] uses: AICore's own weights
+     * live in AICore's system service, not this app's process, so there is
+     * nothing here for [RuntimeManager]'s RAM budget to actually plan for.
+     * See docs/04-runtime.md's "Gemini Nano / AICore feasibility" section.
+     */
+    private fun aicoreCandidate(): FallbackCandidate {
+        val model = servedModel("gemini-nano-aicore", RuntimeKind.AICORE, Capability.TEXT_GENERATION, Capability.REASONING)
+        return FallbackCandidate(
+            label = context.getString(CloudProviders.AICORE.titleRes),
+            runtime = AiCoreRuntime(log = appLog::record),
+            model = model,
+            binding = model.bindings.first(),
         )
     }
 
@@ -1750,8 +1783,26 @@ class AppContainer private constructor(private val context: Context) {
         context.assets.open(CATALOG_ASSET).bufferedReader().use { PipelineCodec.decodeCatalog(it.readText()) }
     }.getOrElse { ModelCatalog(models = emptyList()) }
 
+    /**
+     * Real device report (a fresh Samsung install, LOCAL enabled but no GGUF
+     * downloaded yet): this used to list every *enabled* provider regardless
+     * of whether it actually contributed anything to try, so the very same
+     * turn's own `ROUTER_REBUILD` log line showed `candidates=[Gemini Nano
+     * (AICore), ...]` — no local entry at all, since [localCandidate] returns
+     * null with nothing installed — right above a `SEND` line still claiming
+     * `route=Локально на устройстве (llama.cpp) → Gemini Nano (AICore) →
+     * ...`, as if llama.cpp genuinely led the route it was never even
+     * attempted in. [CloudProviders.LOCAL] is the one entry in
+     * [enabledProviders] that can be "on" with nothing to show for it this
+     * way (a fresh install, or the installed model deleted) — every other
+     * provider here either has a fixed endpoint or (AICore) always
+     * contributes a candidate and only fails once actually attempted, so
+     * only LOCAL needs this check.
+     */
     val runtimeLabel: String
-        get() = enabledProviders().takeIf { it.isNotEmpty() }
+        get() = enabledProviders()
+            .filter { it.id != CloudProviders.LOCAL.id || localCandidate() != null }
+            .takeIf { it.isNotEmpty() }
             ?.joinToString(" → ") { context.getString(it.titleRes) }
             ?: context.getString(CloudProviders.DEMO.titleRes)
 

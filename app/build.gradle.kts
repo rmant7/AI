@@ -4,8 +4,17 @@ plugins {
     // Both versions are declared here so AGP and the Kotlin Android plugin land
     // in the same classpath — the Kotlin plugin needs AGP's classes to apply.
     id("com.android.application") version "8.7.3"
-    id("org.jetbrains.kotlin.android") version "2.1.0"
-    kotlin("plugin.serialization") version "2.1.0"
+    // 2.3.21, not 2.1.0 like :core/:openai/:whisper: com.google.mlkit:genai-prompt/
+    // genai-common:1.0.0-beta4 ship Kotlin metadata compiled with 2.3.0 — a
+    // 2.1.0 compiler can't read it at all ("Module was compiled with an
+    // incompatible version of Kotlin", real CI failure, not a guess). Each
+    // module declares its own Kotlin plugin version (see this repo's root
+    // build.gradle.kts) specifically so a bump like this stays local to the
+    // one module that needs it — a newer compiler reading the other modules'
+    // 2.1.0-compiled output is the normal, supported direction; only the
+    // reverse breaks.
+    id("org.jetbrains.kotlin.android") version "2.3.21"
+    kotlin("plugin.serialization") version "2.3.21"
 }
 
 repositories {
@@ -135,10 +144,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     // The model catalog is a repository asset, not a copy: the Models screen
     // reads exactly the file the tests validate.
     sourceSets["main"].assets.srcDir(rootProject.file("registry"))
@@ -151,6 +156,16 @@ android {
         release {
             isMinifyEnabled = false
         }
+    }
+}
+
+// android.kotlinOptions { jvmTarget = "17" } was removed outright by the
+// Kotlin 2.3.21 plugin bump above (a hard compile error now, not just a
+// deprecation) — this is the replacement DSL, same shape :core's own
+// build.gradle.kts already uses.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -186,6 +201,15 @@ dependencies {
     // Renders the assistant's markdown (lists, **bold**, code) as formatted
     // text instead of the raw asterisks and hashes an LLM's output is full of.
     implementation("io.noties.markwon:core:4.6.2")
+
+    // Gemini Nano via AICore (docs/04-runtime.md's own feasibility section):
+    // a thin client that talks to the on-device AICore *system service* over
+    // IPC — the model weights are AICore's own, shared system-wide, never
+    // part of this app's process (see that doc's own findings on why that
+    // structurally avoids the RAM contention llama.cpp/whisper.cpp GGUF
+    // loads compete in). Google Maven only (declared in this module's own
+    // `repositories` block above), no native code of this app's own.
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")

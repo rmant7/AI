@@ -94,9 +94,40 @@ object CloudProviders {
         needsKey = false,
     )
 
+    /**
+     * Gemini Nano via AICore — on-device like [LOCAL], but not a file this
+     * app downloads or manages itself: [ai.localstudio.app.aicore.AiCoreRuntime]
+     * routes to it via [ai.localstudio.app.aicore.AiCorePromptClient], not
+     * through [ai.localstudio.app.AppContainer.cloudCandidates] (it doesn't
+     * speak the OpenAI-compatible protocol every other entry in [ALL] does),
+     * so no [baseUrl]/[freeModels] here actually matter — this exists only
+     * so the provider picker in Settings has an enable checkbox for it, same
+     * as [LOCAL]. See docs/04-runtime.md's "Gemini Nano / AICore feasibility"
+     * section for why this only degrades to the next enabled provider rather
+     * than downloading Gemini Nano mid-chat: see [AiCoreRuntime]'s own doc
+     * comment.
+     */
+    val AICORE = CloudProvider(
+        id = "aicore",
+        titleRes = R.string.provider_title_aicore,
+        baseUrl = "",
+        defaultModel = "gemini-nano-aicore",
+        keyHintRes = R.string.provider_keyhint_aicore,
+        needsKey = false,
+        // A fixed property of the Prompt API itself (ImagePart + TextPart in
+        // one request), not per-installed-model state the way LOCAL's own
+        // vision support is — see ChatActivity.attachImage's own comment on
+        // why LOCAL needs a dynamic check (container.localVisionAvailable())
+        // instead of this static flag. AICore has no equivalent "did the
+        // projector download" question: the same Gemini Nano weights either
+        // support image input or they don't, for every install.
+        visionCapable = true,
+    )
+
     /** [DEMO] is deliberately absent — see its own doc comment for why it was never a real, selectable choice here. */
     val ALL = listOf(
         LOCAL,
+        AICORE,
         CloudProvider(
             id = "groq",
             titleRes = R.string.provider_title_groq,

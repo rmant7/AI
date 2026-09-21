@@ -488,7 +488,26 @@ class ChatActivity : AppCompatActivity() {
                     }
                 }
             } else {
-                null
+                // Real device report: an AICore-only route (isLocalOnlyRoute
+                // only recognizes LLAMA_CPP, so an AICore candidate falls
+                // into this branch same as a cloud one) answers in a single
+                // non-streaming blob that can genuinely take over a minute —
+                // see sendCompare's own identical ticker and its doc comment
+                // for the same gap in the compare-mode path. A plain cloud
+                // reply finishes before this ticker's first second, so it
+                // costs nothing there.
+                launch {
+                    var seconds = 0
+                    while (isActive) {
+                        delay(1_000L)
+                        seconds++
+                        adapter.update(
+                            placeholderIndex,
+                            Message.assistant(body = getString(R.string.chat_compare_waiting_elapsed, seconds), details = null)
+                                .copy(timestamp = startedAt),
+                        )
+                    }
+                }
             }
 
             val result = withContext(Dispatchers.IO) {
@@ -652,7 +671,35 @@ class ChatActivity : AppCompatActivity() {
                                 }
                             }
                         } else {
-                            null
+                            // Real device report: a non-local source with no
+                            // incremental output at all (AICore's Prompt API
+                            // — see AiCoreRuntime — answers in one final blob,
+                            // never a stream of chunks the way llama.cpp or a
+                            // cloud SSE response does) left the "…" placeholder
+                            // completely static while its actual answer took
+                            // over 80 real seconds — indistinguishable from a
+                            // hang, the exact same silent-long-wait complaint
+                            // that AiCoreTestActivity's own progress/cancel
+                            // handling exists to fix, just this time in the
+                            // real chat flow instead of the smoke-test screen.
+                            // A once-a-second elapsed-time tick costs nothing
+                            // for an ordinary cloud reply (it finishes before
+                            // the first tick), and turns a multi-minute AICore
+                            // wait into something visibly still working.
+                            launch(Dispatchers.Main) {
+                                var seconds = 0
+                                while (isActive) {
+                                    delay(1_000L)
+                                    seconds++
+                                    adapter.update(
+                                        placeholderIndex,
+                                        Message.assistant(
+                                            body = "**$label:**\n" + getString(R.string.chat_compare_waiting_elapsed, seconds),
+                                            details = null,
+                                        ).copy(timestamp = startedAt),
+                                    )
+                                }
+                            }
                         }
                         // Deliberately not a blanket runCatching: a per-source
                         // timeout must render as this source's own error while

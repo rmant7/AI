@@ -29,7 +29,7 @@
     <string name="menu_history">История чатов</string>
     <string name="menu_share_chat">Поделиться чатом</string>
     <string name="menu_log">Журнал ошибок</string>
-    <string name="menu_transcribe">Транскрибация файлов</string>
+    <string name="menu_transcribe">Аудио</string>
     <string name="menu_benchmark">STT Benchmark</string>
 
     <string name="benchmark_hint">Выбираешь папку с аудиофайлами — приложение прогоняет каждый файл через все зарегистрированные STT-движки, чтобы сравнить скорость и результат на одинаковом входе. См. docs/16-stt-benchmark.md.</string>
@@ -232,6 +232,28 @@
     <string name="embed_result_ok">✓ похожий фрагмент оценён выше непохожего — выглядит разумно</string>
     <string name="embed_result_suspicious">⚠ непохожий фрагмент оценён так же высоко или выше — проверьте pooling и query/passage-префиксы</string>
     <string name="embed_result_error">Ошибка: %1$s</string>
+    <string name="aicore_settings_title">Эксперимент: Gemini Nano (AICore)</string>
+    <string name="aicore_settings_subtitle">Ручной смоук-тест встроенной модели Gemini Nano через AICore/ML Kit — пока не используется в чате или извлечении памяти. См. docs/04-runtime.md.</string>
+    <string name="aicore_settings_open">Открыть</string>
+    <string name="aicore_screen_title">Тест Gemini Nano (AICore)</string>
+    <string name="aicore_screen_explainer">Проверяет, доступен ли Gemini Nano на этом устройстве через AICore, скачивает его при необходимости и позволяет отправить один тестовый запрос. Ничего здесь не подключено к чату или извлечению памяти — см. docs/04-runtime.md, зачем этот экран нужен и на какой вопрос должен ответить.</string>
+    <string name="aicore_check_status">Проверить статус</string>
+    <string name="aicore_download">Скачать Gemini Nano</string>
+    <string name="aicore_cancel_download">Отменить скачивание</string>
+    <string name="aicore_download_progress">Скачивание: %1$s / %2$s</string>
+    <string name="aicore_download_cancelled">Скачивание отменено</string>
+    <string name="aicore_prompt_hint">Тестовый запрос</string>
+    <string name="aicore_prompt_default">Кратко перечисли три главных еврейских осенних праздника.</string>
+    <string name="aicore_test">Тест</string>
+    <string name="aicore_cancel_test">Отменить тест</string>
+    <string name="aicore_testing">Тестируем… (нажмите ещё раз для отмены)</string>
+    <string name="aicore_test_cancelled">Тест отменён</string>
+    <string name="aicore_status_line">Статус: %1$s</string>
+    <string name="aicore_status_available">доступен</string>
+    <string name="aicore_status_downloadable">можно скачать — нажмите «Скачать»</string>
+    <string name="aicore_status_unavailable">недоступен на этом устройстве</string>
+    <string name="aicore_status_error">Проверка статуса не удалась: %1$s</string>
+    <string name="aicore_result_error">Ошибка: %1$s</string>
     <string name="models_voice_header">Модели распознавания речи — работают офлайн</string>
     <string name="models_vosk_header">Vosk — потоковое распознавание, альтернатива Whisper и для живого микрофона, и для транскрипции файлов</string>
     <string name="models_vosk_note">Модели Vosk работают полностью офлайн после загрузки. «Использовать» делает Vosk активным движком и для секции живого микрофона, и для транскрипции файлов на экране «Транскрипция» — см. docs/14-vosk-spike.md. Переключение обратно на модель Whisper делает активным его; каждый движок помнит свой последний выбор отдельно.</string>
@@ -303,6 +325,8 @@
     <string name="provider_keyhint_demo">Ключ не нужен: отвечает встроенный runtime, видно маршрут и контекст.</string>
     <string name="provider_title_local">Локально на устройстве (llama.cpp)</string>
     <string name="provider_keyhint_local">Ключ и сеть не нужны. Модель скачивается один раз на экране «Модели» и дальше работает офлайн.</string>
+    <string name="provider_title_aicore">Gemini Nano (AICore)</string>
+    <string name="provider_keyhint_aicore">Ключ и сеть не нужны. Работает через системный сервис AICore от Google, это не файл, который скачивает это приложение — см. Настройки → Advanced → Gemini Nano (AICore), чтобы скачать модель один раз, если она ещё не готова. Пока не готова — используется следующий включённый провайдер.</string>
     <string name="provider_title_gemini">Google Gemini</string>
     <string name="provider_keyhint_gemini">Ключ: aistudio.google.com → Get API key. Бесплатный уровень — только Flash/Flash-Lite; Pro — платно.</string>
     <string name="provider_title_mistral">Mistral</string>
@@ -383,6 +407,7 @@
     <string name="chat_timeout_message">Модель не ответила за %1$d с. Возможно, модель слишком тяжёлая для этого устройства, или что-то зависло — попробуйте ещё раз или выберите модель полегче.</string>
     <string name="chat_compare_timeout_error">Ошибка: не ответила за %1$d с</string>
     <string name="chat_compare_generic_error">Ошибка: %1$s</string>
+    <string name="chat_compare_waiting_elapsed">… (%1$d с)</string>
     <string name="chat_default_file_name">файл</string>
     <string name="chat_default_image_name">изображение</string>
     <string name="error_could_not_decode_image">Не удалось распознать изображение</string>
