@@ -244,8 +244,21 @@ private class LlamaTextModel(
             runCatching {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
             }
-            val produced = LlamaBridge.nativeOpMutex.withLock {
-                if (hasEncoder) {
+            // A real device report: this whole launch body used to have
+            // nothing catching a thrown exception (as opposed to the
+            // negative-return-code failure path just below, which was
+            // already handled) — bridge.nativeGenerateT5 throwing anything
+            // (an OutOfMemoryError allocating a large buffer is the obvious
+            // candidate on a memory-constrained device) had nothing to stop
+            // it propagating out of this coroutine and killing the whole
+            // process, logged by Android as a plain "unhandled exception"
+            // with no indication which exception or where. Caught and
+            // logged here instead: one translation fails cleanly, and the
+            // exception's own message/stack finally reaches the same
+            // user-copyable log everything else in this app does.
+            val produced = try {
+                LlamaBridge.nativeOpMutex.withLock {
+                    if (hasEncoder) {
                     // T5-family (MADLAD-400): request.prompt is already the
                     // model's own expected input (`<2xx> source text`, built
                     // by TranslationActivity) — there is no chat template, no
@@ -298,6 +311,19 @@ private class LlamaTextModel(
                         callback = sink,
                     )
                 }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                completed.set(true)
+                val elapsedMs = System.currentTimeMillis() - start
+                log(
+                    "LOCAL_GENERATE",
+                    "$modelId: THREW ${e::class.java.simpleName}: ${e.message} after ${elapsedMs}ms, " +
+                        "$tokenCount tokens\n${e.stackTraceToString().take(4000)}",
+                )
+                close(e)
+                return@launch
             }
             completed.set(true)
             val elapsedMs = System.currentTimeMillis() - start
