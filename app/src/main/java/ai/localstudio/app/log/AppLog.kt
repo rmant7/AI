@@ -76,11 +76,45 @@ class AppLog(private val context: Context) {
         // only realistic way a native segfault's actual trace ever reaches a
         // user-copyable log at all. Null or empty on most calls is expected,
         // not a bug.
+        //
+        // Modern Android tombstones are Protobuf, not plain text — a real
+        // device capture confirmed this (readable fragments like the device
+        // fingerprint and signal name sat inside otherwise binary noise).
+        // Decoding the schema properly would need a protobuf dependency this
+        // app has no other use for; [extractPrintableStrings] is the same
+        // trick the `strings` command uses instead — every symbol name,
+        // library path, thread name, and (crucially) any assertion message a
+        // library compiled in as a literal C string survives as a clean
+        // readable line, just with the binary offsets/addresses between them
+        // dropped. That is exactly the trade worth making here: a person
+        // reading this log wants "which function, which message", not raw
+        // hex.
         runCatching {
-            last.traceInputStream?.bufferedReader()?.use { it.readText() }
-                ?.takeIf { it.isNotBlank() }
-                ?.let { trace -> record("PROCESS_EXIT_TRACE", trace.take(MAX_TRACE_CHARS)) }
+            last.traceInputStream?.use { it.readBytes() }
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { bytes -> record("PROCESS_EXIT_TRACE", extractPrintableStrings(bytes).take(MAX_TRACE_CHARS)) }
         }
+    }
+
+    private fun extractPrintableStrings(bytes: ByteArray, minLength: Int = 4): String {
+        val out = StringBuilder()
+        var runStart = -1
+        fun flush(end: Int) {
+            if (runStart >= 0 && end - runStart >= minLength) {
+                out.append(String(bytes, runStart, end - runStart, Charsets.US_ASCII)).append('\n')
+            }
+            runStart = -1
+        }
+        for (i in bytes.indices) {
+            val b = bytes[i].toInt() and 0xFF
+            if (b in 0x20..0x7E) {
+                if (runStart < 0) runStart = i
+            } else {
+                flush(i)
+            }
+        }
+        flush(bytes.size)
+        return out.toString()
     }
 
     private fun describeExitReason(reason: Int): String? = when (reason) {
@@ -105,8 +139,13 @@ class AppLog(private val context: Context) {
         const val MAX_BYTES = 200_000L
         const val MAX_LINES = 1_000
 
-        // A native trace can run long; capped well under MAX_BYTES so one
-        // crash's trace can't crowd out everything else already in the log.
-        const val MAX_TRACE_CHARS = 20_000
+        // A native trace can run long — and a real capture showed the
+        // actually-crashing thread's own frames sitting past the previous
+        // 20,000-char cutoff, after several unrelated idle threads' dumps
+        // that come first in the tombstone. Raised well past MAX_BYTES on
+        // purpose: trimIfTooLarge() only fires on the *next* record() call,
+        // so this one trace is allowed to fill the whole log by itself —
+        // better than truncating the one entry actually worth reading.
+        const val MAX_TRACE_CHARS = 150_000
     }
 }
