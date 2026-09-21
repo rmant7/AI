@@ -17,7 +17,7 @@ import kotlinx.serialization.json.Json
 data class MadladLanguage(val code: String, val name: String)
 
 @Serializable
-private data class MadladLanguages(val languages: List<MadladLanguage>)
+private data class MadladLanguageFile(val languages: List<MadladLanguage>)
 
 /**
  * The full language list [TranslationActivity]'s language pickers search —
@@ -40,6 +40,6 @@ object MadladLanguages {
     fun load(context: Context): List<MadladLanguage> {
         cached?.let { return it }
         val text = context.assets.open(ASSET_PATH).bufferedReader(Charsets.UTF_8).use { it.readText() }
-        return json.decodeFromString<MadladLanguages>(text).languages.also { cached = it }
+        return json.decodeFromString<MadladLanguageFile>(text).languages.also { cached = it }
     }
 }
