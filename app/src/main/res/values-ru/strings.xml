@@ -31,6 +31,8 @@
     <string name="menu_log">Журнал ошибок</string>
     <string name="menu_transcribe">Аудио</string>
     <string name="menu_benchmark">STT Benchmark</string>
+    <string name="menu_translation">Перевод</string>
+    <string name="menu_phrasebook">Разговорник</string>
 
     <string name="benchmark_hint">Выбираешь папку с аудиофайлами — приложение прогоняет каждый файл через все зарегистрированные STT-движки, чтобы сравнить скорость и результат на одинаковом входе. См. docs/16-stt-benchmark.md.</string>
     <string name="benchmark_pick_folder">Выбрать папку</string>
@@ -411,4 +413,27 @@
     <string name="chat_default_file_name">файл</string>
     <string name="chat_default_image_name">изображение</string>
     <string name="error_could_not_decode_image">Не удалось распознать изображение</string>
+
+    <string name="translation_hint">Перевод делает та же модель, что выбрана для чата, — через промпт, отдельной модели перевода пока нет. Русский и английский обычно переводятся надёжно; сейшельский креольский — малоресурсный язык, который модели почти не видели при обучении, так что его перевод — черновик, а не проверенный текст. Для проверенных креольских фраз см. Разговорник.</string>
+    <string name="translation_swap">Поменять языки местами</string>
+    <string name="translation_input_hint">Текст для перевода</string>
+    <string name="translation_translate">Перевести</string>
+    <string name="translation_copy">Скопировать перевод</string>
+    <string name="translation_copied">Скопировано</string>
+    <string name="translation_same_language">Исходный и целевой язык совпадают</string>
+    <string name="translation_failed">Не удалось перевести: %1$s</string>
+    <string name="translation_model_note">Отвечает: %1$s (сменить в разделе Модели)</string>
+    <string name="translation_model_note_none">локальная модель не выбрана — используется облачный провайдер, если настроен</string>
+    <string name="translation_lang_ru">Русский</string>
+    <string name="translation_lang_en">Английский</string>
+    <string name="translation_lang_crs">Сейшельский креольский</string>
+
+    <string name="phrasebook_situation_basics">Базовые фразы</string>
+    <string name="phrasebook_situation_taxi">Такси</string>
+    <string name="phrasebook_situation_travel">Транспорт</string>
+    <string name="phrasebook_situation_food">Еда</string>
+    <string name="phrasebook_situation_shopping">Покупки</string>
+    <string name="phrasebook_badge_verified">проверено</string>
+    <string name="phrasebook_badge_unverified">не проверено</string>
+    <string name="phrasebook_load_failed">Не удалось загрузить разговорник. Подробности — в журнале ошибок.</string>
 </resources>

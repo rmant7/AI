@@ -29,6 +29,8 @@
     <string name="menu_log">Error log</string>
     <string name="menu_transcribe">Audio</string>
     <string name="menu_benchmark">STT Benchmark</string>
+    <string name="menu_translation">Translation</string>
+    <string name="menu_phrasebook">Phrasebook</string>
 
     <string name="benchmark_hint">Picks a folder of audio files and runs every registered speech-to-text backend against every file, so their speed and output can be compared on identical input. See docs/16-stt-benchmark.md.</string>
     <string name="benchmark_pick_folder">Pick folder</string>
@@ -409,4 +411,33 @@
     <string name="chat_default_file_name">file</string>
     <string name="chat_default_image_name">image</string>
     <string name="error_could_not_decode_image">Couldn\'t decode the image</string>
+
+    <!-- Translation screen: prompts the currently selected chat model to
+         translate, rather than running a dedicated MT model — see
+         TranslationActivity's own doc comment for why. -->
+    <string name="translation_hint">Uses your currently selected chat model to translate, prompted for the task — there is no dedicated translation model installed yet. Russian and English are usually reliable; Seychellois Creole is a low-resource language most models have seen very little of, so treat its output as a rough draft, not a checked translation. For pre-checked Creole phrases, see Phrasebook instead.</string>
+    <string name="translation_swap">Swap languages</string>
+    <string name="translation_input_hint">Text to translate</string>
+    <string name="translation_translate">Translate</string>
+    <string name="translation_copy">Copy translation</string>
+    <string name="translation_copied">Copied</string>
+    <string name="translation_same_language">Source and target language are the same</string>
+    <string name="translation_failed">Translation failed: %1$s</string>
+    <string name="translation_model_note">Answered by: %1$s (change under Models)</string>
+    <string name="translation_model_note_none">no local model selected — falls back to a configured cloud provider, if any</string>
+    <string name="translation_lang_ru">Russian</string>
+    <string name="translation_lang_en">English</string>
+    <string name="translation_lang_crs">Seychellois Creole</string>
+
+    <!-- Phrasebook screen: a fixed, pre-checked set of situational phrases —
+         see PhrasebookActivity's own doc comment and the pilot data at
+         app/src/main/assets/phrasebook_crs.json. -->
+    <string name="phrasebook_situation_basics">Basics</string>
+    <string name="phrasebook_situation_taxi">Taxi</string>
+    <string name="phrasebook_situation_travel">Getting around</string>
+    <string name="phrasebook_situation_food">Food</string>
+    <string name="phrasebook_situation_shopping">Shopping</string>
+    <string name="phrasebook_badge_verified">checked</string>
+    <string name="phrasebook_badge_unverified">unverified</string>
+    <string name="phrasebook_load_failed">Couldn\'t load the phrasebook. See Error log for details.</string>
 </resources>

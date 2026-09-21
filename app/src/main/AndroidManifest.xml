@@ -100,6 +100,19 @@
             android:label="@string/menu_benchmark"
             android:parentActivityName=".ChatActivity" />
 
+        <activity
+            android:name=".TranslationActivity"
+            android:exported="false"
+            android:label="@string/menu_translation"
+            android:parentActivityName=".ChatActivity"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".PhrasebookActivity"
+            android:exported="false"
+            android:label="@string/menu_phrasebook"
+            android:parentActivityName=".ChatActivity" />
+
         <service
             android:name=".models.ModelDownloadService"
             android:exported="false"

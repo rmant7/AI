@@ -1,0 +1,900 @@
+{
+  "situations": [
+    "basics",
+    "taxi",
+    "travel",
+    "food",
+    "shopping"
+  ],
+  "phrases": [
+    {
+      "id": "basic_01",
+      "situation": "basics",
+      "intent": "greeting",
+      "ru": "Здравствуйте / Добрый день",
+      "en": "Hello / Good day",
+      "crs": "Bonzour",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad; Seychelles Tourism",
+      "answers": [
+        {
+          "id": "basic_01_a",
+          "intent": "greeting_answer",
+          "ru": "Здравствуйте / добрый день",
+          "en": "Hello / good day",
+          "crs": "Bonzour",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "basic_01_b",
+          "intent": "greeting_answer",
+          "ru": "Привет",
+          "en": "Hello",
+          "crs": "Allo",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "basic_02",
+      "situation": "basics",
+      "intent": "evening_greeting",
+      "ru": "Добрый вечер",
+      "en": "Good evening",
+      "crs": "Bonswar",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad; Seychelles Tourism",
+      "answers": [
+        {
+          "id": "basic_02_a",
+          "intent": "greeting_answer",
+          "ru": "Добрый вечер",
+          "en": "Good evening",
+          "crs": "Bonswar",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "basic_03",
+      "situation": "basics",
+      "intent": "how_are_you",
+      "ru": "Как дела?",
+      "en": "How are you?",
+      "crs": "Ki mannyer?",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad; Seychelles Tourism",
+      "answers": [
+        {
+          "id": "basic_03_a",
+          "intent": "how_are_you_answer",
+          "ru": "Хорошо, спасибо",
+          "en": "Fine, thank you",
+          "crs": "Byen mersi",
+          "verified": false,
+          "confidence": "medium"
+        },
+        {
+          "id": "basic_03_b",
+          "intent": "how_are_you_answer",
+          "ru": "Хорошо, спасибо, а вы?",
+          "en": "Fine, thank you, and you?",
+          "crs": "Byen mersi, oumenm?",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "basic_04",
+      "situation": "basics",
+      "intent": "fine_thanks",
+      "ru": "У меня всё хорошо, спасибо",
+      "en": "I am well, thanks",
+      "crs": "Mon byen, mersi",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad",
+      "answers": []
+    },
+    {
+      "id": "basic_05",
+      "situation": "basics",
+      "intent": "goodbye",
+      "ru": "До свидания",
+      "en": "Goodbye",
+      "crs": "Orevwar",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad; Seychelles Tourism",
+      "answers": [
+        {
+          "id": "basic_05_a",
+          "intent": "goodbye",
+          "ru": "До свидания",
+          "en": "Goodbye",
+          "crs": "Orevwar",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "basic_06",
+      "situation": "basics",
+      "intent": "thank_you",
+      "ru": "Спасибо",
+      "en": "Thank you",
+      "crs": "Mersi",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad; Seychelles Tourism",
+      "answers": [
+        {
+          "id": "basic_06_a",
+          "intent": "thanks_answer",
+          "ru": "Пожалуйста / не за что",
+          "en": "You're welcome",
+          "crs": "Avek plezir",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "basic_06_b",
+          "intent": "thanks_answer",
+          "ru": "Не за что",
+          "en": "No problem",
+          "crs": "Napa problenm",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "basic_07",
+      "situation": "basics",
+      "intent": "please",
+      "ru": "Пожалуйста / прошу",
+      "en": "Please",
+      "crs": "Silvouple",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad; Seychelles Tourism",
+      "answers": []
+    },
+    {
+      "id": "basic_08",
+      "situation": "basics",
+      "intent": "excuse_me",
+      "ru": "Извините / простите",
+      "en": "Excuse me",
+      "crs": "Eskiz mwan",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad",
+      "answers": [
+        {
+          "id": "basic_08_b",
+          "intent": "politeness",
+          "ru": "Простите",
+          "en": "Sorry",
+          "crs": "Pardon",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "basic_09",
+      "situation": "basics",
+      "intent": "dont_understand",
+      "ru": "Я не понимаю",
+      "en": "I don't understand",
+      "crs": "Mon pa konpran",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Abroad; Seychelles Tourism",
+      "answers": [
+        {
+          "id": "basic_09_a",
+          "intent": "understand",
+          "ru": "Я понимаю",
+          "en": "I understand",
+          "crs": "Mon konpran",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "basic_09_b",
+          "intent": "understand",
+          "ru": "Я не понимаю",
+          "en": "I don't understand",
+          "crs": "Mon pa konpran",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "basic_10",
+      "situation": "basics",
+      "intent": "speak_english",
+      "ru": "Вы говорите по-английски?",
+      "en": "Do you speak English?",
+      "crs": "Eski ou koz Angle?",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Tourism",
+      "answers": [
+        {
+          "id": "ans_yes",
+          "intent": "english",
+          "ru": "Да",
+          "en": "Yes",
+          "crs": "Wi",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "ans_no",
+          "intent": "english",
+          "ru": "Нет",
+          "en": "No",
+          "crs": "Non",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "taxi_01",
+      "situation": "taxi",
+      "intent": "ask_price",
+      "ru": "Сколько стоит такси?",
+      "en": "How much is the taxi?",
+      "crs": "Konbyen pou al?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage taxi pattern; adapted",
+      "answers": [
+        {
+          "id": "taxi_01_a",
+          "intent": "price",
+          "ru": "300 рупий",
+          "en": "300 rupees",
+          "crs": "Trwa san roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_01_b",
+          "intent": "price",
+          "ru": "400 рупий",
+          "en": "400 rupees",
+          "crs": "Kat san roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_01_c",
+          "intent": "price",
+          "ru": "500 рупий",
+          "en": "500 rupees",
+          "crs": "Senk san roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_01_d",
+          "intent": "price",
+          "ru": "Это слишком дорого",
+          "en": "That is too expensive",
+          "crs": "I tro ser",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "taxi_02",
+      "situation": "taxi",
+      "intent": "to_airport",
+      "ru": "Сколько стоит до аэропорта?",
+      "en": "How much is it to the airport?",
+      "crs": "Konbyen pou al leropor?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage + Seychelles vocabulary; adapted",
+      "answers": [
+        {
+          "id": "taxi_02_a",
+          "intent": "price",
+          "ru": "300–400 рупий",
+          "en": "300–400 rupees",
+          "crs": "Trwa san ziska kat san roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_02_b",
+          "intent": "price",
+          "ru": "300 рупий",
+          "en": "300 rupees",
+          "crs": "Trwa san roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_02_c",
+          "intent": "price",
+          "ru": "400 рупий",
+          "en": "400 rupees",
+          "crs": "Kat san roupi",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "taxi_03",
+      "situation": "taxi",
+      "intent": "to_victoria",
+      "ru": "Сколько стоит до Виктории?",
+      "en": "How much is it to Victoria?",
+      "crs": "Konbyen pou al Victoria?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage taxi pattern; adapted",
+      "answers": [
+        {
+          "id": "taxi_03_a",
+          "intent": "price",
+          "ru": "300 рупий",
+          "en": "300 rupees",
+          "crs": "Trwa san roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_03_b",
+          "intent": "price",
+          "ru": "400 рупий",
+          "en": "400 rupees",
+          "crs": "Kat san roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_03_c",
+          "intent": "price",
+          "ru": "Слишком дорого",
+          "en": "Too expensive",
+          "crs": "I tro ser",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "taxi_04",
+      "situation": "taxi",
+      "intent": "destination_airport",
+      "ru": "Я хочу поехать в аэропорт",
+      "en": "I want to go to the airport",
+      "crs": "Mon le al leropor",
+      "verified": false,
+      "confidence": "medium",
+      "source": "Wikivoyage taxi pattern + Seychelles Tourism vocabulary",
+      "answers": [
+        {
+          "id": "ans_yes",
+          "intent": "english",
+          "ru": "Да",
+          "en": "Yes",
+          "crs": "Wi",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "ans_no",
+          "intent": "english",
+          "ru": "Нет",
+          "en": "No",
+          "crs": "Non",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "taxi_04_c",
+          "intent": "wait",
+          "ru": "Подождите",
+          "en": "Wait",
+          "crs": "Atann",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "taxi_05",
+      "situation": "taxi",
+      "intent": "destination_victoria",
+      "ru": "Я хочу поехать в Викторию",
+      "en": "I want to go to Victoria",
+      "crs": "Mon le al Victoria",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage taxi pattern; adapted",
+      "answers": [
+        {
+          "id": "ans_yes",
+          "intent": "english",
+          "ru": "Да",
+          "en": "Yes",
+          "crs": "Wi",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "ans_no",
+          "intent": "english",
+          "ru": "Нет",
+          "en": "No",
+          "crs": "Non",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "taxi_05_c",
+          "intent": "wait",
+          "ru": "Подождите немного",
+          "en": "Wait a little",
+          "crs": "Atann en pti pe",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "taxi_06",
+      "situation": "taxi",
+      "intent": "travel_time",
+      "ru": "Сколько времени ехать?",
+      "en": "How long does it take?",
+      "crs": "Konbyen letan i pran?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Adapted from source vocabulary",
+      "answers": [
+        {
+          "id": "taxi_06_a",
+          "intent": "duration",
+          "ru": "10 минут",
+          "en": "10 minutes",
+          "crs": "Dis minit",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_06_b",
+          "intent": "duration",
+          "ru": "15 минут",
+          "en": "15 minutes",
+          "crs": "Kenz minit",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_06_c",
+          "intent": "duration",
+          "ru": "30 минут",
+          "en": "30 minutes",
+          "crs": "Trant minit",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "taxi_07",
+      "situation": "taxi",
+      "intent": "negotiate_price",
+      "ru": "Можно дешевле?",
+      "en": "Can you make it cheaper?",
+      "crs": "Ou kav fer en bon pri?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage shopping phrase adapted to taxi",
+      "answers": []
+    },
+    {
+      "id": "taxi_08",
+      "situation": "taxi",
+      "intent": "wait",
+      "ru": "Подождите, пожалуйста",
+      "en": "Please wait",
+      "crs": "Atann, silvouple",
+      "verified": false,
+      "confidence": "low",
+      "source": "Generated from documented vocabulary",
+      "answers": [
+        {
+          "id": "ans_ok",
+          "intent": "confirm",
+          "ru": "Хорошо",
+          "en": "Okay",
+          "crs": "Dakor",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_08_b",
+          "intent": "confirm",
+          "ru": "Без проблем",
+          "en": "No problem",
+          "crs": "Napa problenm",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "taxi_09",
+      "situation": "taxi",
+      "intent": "ready",
+      "ru": "Мы готовы ехать",
+      "en": "We are ready to go",
+      "crs": "Nou pare pou ale",
+      "verified": false,
+      "confidence": "low",
+      "source": "Generated",
+      "answers": [
+        {
+          "id": "ans_ok",
+          "intent": "confirm",
+          "ru": "Хорошо",
+          "en": "Okay",
+          "crs": "Dakor",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "taxi_10",
+      "situation": "taxi",
+      "intent": "pay_card",
+      "ru": "Можно оплатить картой?",
+      "en": "Can I pay by card?",
+      "crs": "Mon kapab peye avek kat?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Commission de l'océan Indien audio-guide topic; wording adapted",
+      "answers": [
+        {
+          "id": "ans_yes",
+          "intent": "english",
+          "ru": "Да",
+          "en": "Yes",
+          "crs": "Wi",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "ans_no",
+          "intent": "english",
+          "ru": "Нет",
+          "en": "No",
+          "crs": "Non",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "taxi_11",
+      "situation": "taxi",
+      "intent": "repeat",
+      "ru": "Повторите, пожалуйста",
+      "en": "Please repeat",
+      "crs": "Silvouple, dir ankor",
+      "verified": false,
+      "confidence": "low",
+      "source": "Generated",
+      "answers": [
+        {
+          "id": "taxi_11_b",
+          "intent": "english",
+          "ru": "Вы говорите по-английски?",
+          "en": "Do you speak English?",
+          "crs": "Eski ou koz Angle?",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "taxi_12",
+      "situation": "taxi",
+      "intent": "stop_here",
+      "ru": "Остановите здесь, пожалуйста",
+      "en": "Please stop here",
+      "crs": "Silvouple, aret isi",
+      "verified": false,
+      "confidence": "medium",
+      "source": "Generated from Seychelles Tourism 'Stop'",
+      "answers": [
+        {
+          "id": "ans_ok",
+          "intent": "confirm",
+          "ru": "Хорошо",
+          "en": "Okay",
+          "crs": "Dakor",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "taxi_12_b",
+          "intent": "location",
+          "ru": "Где?",
+          "en": "Where?",
+          "crs": "Oli?",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "taxi_13",
+      "situation": "taxi",
+      "intent": "where_taxi",
+      "ru": "Где такси?",
+      "en": "Where is the taxi?",
+      "crs": "Oli taxi?",
+      "verified": false,
+      "confidence": "medium",
+      "source": "Seychelles Tourism 'Oli [place]?' pattern",
+      "answers": []
+    },
+    {
+      "id": "travel_01",
+      "situation": "travel",
+      "intent": "bus_stop",
+      "ru": "Где автобусная остановка?",
+      "en": "Where is the bus stop?",
+      "crs": "Oli bus stop?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage",
+      "answers": []
+    },
+    {
+      "id": "travel_02",
+      "situation": "travel",
+      "intent": "which_bus",
+      "ru": "Какой автобус идёт до ...?",
+      "en": "Which bus goes to ...?",
+      "crs": "Ki bis ki al...?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage",
+      "answers": []
+    },
+    {
+      "id": "travel_03",
+      "situation": "travel",
+      "intent": "ticket",
+      "ru": "Мне нужен билет",
+      "en": "I need a ticket",
+      "crs": "Mon bizwen en tikè",
+      "verified": false,
+      "confidence": "low",
+      "source": "Translate Watu; needs native verification",
+      "answers": [
+        {
+          "id": "ans_yes",
+          "intent": "english",
+          "ru": "Да",
+          "en": "Yes",
+          "crs": "Wi",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "ans_no",
+          "intent": "english",
+          "ru": "Нет",
+          "en": "No",
+          "crs": "Non",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "travel_04",
+      "situation": "travel",
+      "intent": "toilet",
+      "ru": "Где туалет?",
+      "en": "Where is the toilet?",
+      "crs": "Oli twalet?",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Wikivoyage; Seychelles Tourism",
+      "answers": []
+    },
+    {
+      "id": "travel_05",
+      "situation": "travel",
+      "intent": "lost",
+      "ru": "Я потерялся",
+      "en": "I'm lost",
+      "crs": "Monn perdi",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Tourism",
+      "answers": [
+        {
+          "id": "travel_05_a",
+          "intent": "help",
+          "ru": "Помогите",
+          "en": "Help",
+          "crs": "Ed mwan!",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "travel_06",
+      "situation": "travel",
+      "intent": "help",
+      "ru": "Помогите!",
+      "en": "Help!",
+      "crs": "Ed mwan!",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Tourism",
+      "answers": [
+        {
+          "id": "ans_yes",
+          "intent": "english",
+          "ru": "Да",
+          "en": "Yes",
+          "crs": "Wi",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "ans_no",
+          "intent": "english",
+          "ru": "Нет",
+          "en": "No",
+          "crs": "Non",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "food_01",
+      "situation": "food",
+      "intent": "restaurant",
+      "ru": "Где хороший ресторан?",
+      "en": "Where is a good restaurant?",
+      "crs": "Kote ki annan en bon restoran?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage",
+      "answers": [
+        {
+          "id": "ans_yes",
+          "intent": "english",
+          "ru": "Да",
+          "en": "Yes",
+          "crs": "Wi",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "ans_no",
+          "intent": "english",
+          "ru": "Нет",
+          "en": "No",
+          "crs": "Non",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "food_02",
+      "situation": "food",
+      "intent": "recommend_restaurant",
+      "ru": "Какой ресторан вы рекомендуете?",
+      "en": "What restaurant would you recommend?",
+      "crs": "Ki restoran ou rekomande?",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage",
+      "answers": []
+    },
+    {
+      "id": "shopping_01",
+      "situation": "shopping",
+      "intent": "price",
+      "ru": "Сколько это стоит?",
+      "en": "How much is this?",
+      "crs": "Konbyen sa?",
+      "verified": true,
+      "confidence": "medium",
+      "source": "Seychelles Tourism; Wikivoyage",
+      "answers": [
+        {
+          "id": "shopping_01_a",
+          "intent": "price",
+          "ru": "100 рупий",
+          "en": "100 rupees",
+          "crs": "San roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "shopping_01_b",
+          "intent": "price",
+          "ru": "200 рупий",
+          "en": "200 rupees",
+          "crs": "Desan roupi",
+          "verified": false,
+          "confidence": "low"
+        },
+        {
+          "id": "shopping_01_c",
+          "intent": "price",
+          "ru": "Слишком дорого",
+          "en": "Too expensive",
+          "crs": "I tro ser",
+          "verified": false,
+          "confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "shopping_02",
+      "situation": "shopping",
+      "intent": "good_price",
+      "ru": "Сделайте хорошую цену",
+      "en": "Make me a good price",
+      "crs": "Fer mwan en bon pri",
+      "verified": false,
+      "confidence": "low",
+      "source": "Wikivoyage; secondary travel source",
+      "answers": [
+        {
+          "id": "ans_yes",
+          "intent": "english",
+          "ru": "Да",
+          "en": "Yes",
+          "crs": "Wi",
+          "verified": true,
+          "confidence": "medium"
+        },
+        {
+          "id": "ans_no",
+          "intent": "english",
+          "ru": "Нет",
+          "en": "No",
+          "crs": "Non",
+          "verified": true,
+          "confidence": "medium"
+        }
+      ]
+    }
+  ]
+}

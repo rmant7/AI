@@ -39,6 +39,8 @@ object UtilityMenu {
         Entry(9004, R.string.menu_history, HistoryActivity::class.java),
         Entry(9006, R.string.menu_transcribe, TranscribeActivity::class.java),
         Entry(9007, R.string.menu_benchmark, BenchmarkActivity::class.java),
+        Entry(9008, R.string.menu_translation, TranslationActivity::class.java),
+        Entry(9009, R.string.menu_phrasebook, PhrasebookActivity::class.java),
         Entry(9005, R.string.menu_log, LogActivity::class.java),
     )
 
