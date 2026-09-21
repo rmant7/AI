@@ -2116,8 +2116,26 @@ class AppContainer private constructor(private val context: Context) {
                 androidApiLevel = Build.VERSION.SDK_INT,
                 // Only what this build can actually execute on this device:
                 // llama.cpp appears once its native library loads for this ABI.
+                //
+                // AICORE belongs here for the same reason REMOTE_OPENAI does
+                // — real availability is only knowable by actually asking it
+                // (see AiCoreRuntime), not something DeviceProfile can gate
+                // on ahead of time, same as a cloud endpoint's reachability
+                // isn't. Missing until a real device report: AICore-only
+                // chat happened to always work anyway because every tested
+                // device had at least one other provider enabled alongside
+                // it, so AICore's candidate was always wrapped in a
+                // FALLBACK_CHAIN binding (which IS in this set) rather than
+                // standing alone — translationOrchestrator() deliberately
+                // never wraps a single candidate that way (see its own doc
+                // comment), which is what first exposed this: picking
+                // Gemini Nano for translation made SuitabilityScorer reject
+                // its own candidate as NO_SUPPORTED_RUNTIME before
+                // AiCoreRuntime ever got a chance to say whether it was
+                // actually available.
                 supportedRuntimes = buildSet {
                     add(RuntimeKind.REMOTE_OPENAI)
+                    add(RuntimeKind.AICORE)
                     add(RuntimeKind.STUB)
                     add(RuntimeKind.FALLBACK_CHAIN)
                     if (LlamaBridge.isAvailable) add(RuntimeKind.LLAMA_CPP)

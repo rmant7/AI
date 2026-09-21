@@ -234,15 +234,28 @@ class TranslationActivity : AppCompatActivity() {
             "```\n$text\n```"
 
     /**
-     * Strips wrapping quotes/backticks a model sometimes adds despite the
-     * prompt asking it not to, and — defensively, should this screen ever
-     * end up wired to a multi-candidate orchestrator again — a
-     * [ai.localstudio.core.runtime.FallbackTextRuntime] attribution footer,
-     * which always starts with this exact "\n\n---\n" delimiter
-     * ([ai.localstudio.core.runtime.FallbackTextRuntime.attributionFooter]).
+     * Strips three things: wrapping quotes/backticks a model sometimes adds
+     * despite the prompt asking it not to; a
+     * [ai.localstudio.core.runtime.FallbackTextRuntime] attribution footer
+     * (defensively, should this screen ever end up wired to a
+     * multi-candidate orchestrator again), which always starts with this
+     * exact "\n\n---\n" delimiter
+     * ([ai.localstudio.core.runtime.FallbackTextRuntime.attributionFooter]);
+     * and a literal turn-marker token leaking into the text. That last one
+     * is a real device report: gemma-4-e4b's official chat template
+     * sometimes fails to apply (see [ai.localstudio.app.llama.LlamaCppRuntime]'s
+     * own doc comments on that), and native llama.cpp code decides whether a
+     * sampled token means "stop" ([llama_vocab_is_eog] in llama_jni.cpp) —
+     * for this GGUF, that check doesn't recognize `<end_of_turn>` as one, so
+     * it comes out as ordinary text instead of ending generation. Root cause
+     * is native and shared with every other chat turn this app generates,
+     * not specific to translation; this is the narrow, low-risk half of the
+     * fix that actually matters here — a clean copy-paste result — without
+     * touching that shared native path.
      */
     private fun cleanTranslation(raw: String): String {
         var text = raw.substringBefore("\n\n---\n").trim()
+        for (marker in TURN_MARKERS) text = text.substringBefore(marker).trim()
         if (text.startsWith("```") && text.endsWith("```")) text = text.removePrefix("```").removeSuffix("```").trim()
         if (text.length >= 2 && text.first() == text.last() && text.first() in "\"'«»") {
             text = text.substring(1, text.length - 1).trim()
@@ -271,5 +284,11 @@ class TranslationActivity : AppCompatActivity() {
 
     private companion object {
         const val GENERATION_TIMEOUT_MS = 120_000L
+
+        // Turn-marker tokens a model's own EOG detection sometimes fails to
+        // recognize (see cleanTranslation's own doc comment) — covers every
+        // chat-template family this app's catalog actually includes
+        // (Gemma, Qwen/ChatML, Llama), not just the one seen on-device so far.
+        val TURN_MARKERS = listOf("<end_of_turn>", "<|im_end|>", "<|eot_id|>", "<|end|>")
     }
 }
