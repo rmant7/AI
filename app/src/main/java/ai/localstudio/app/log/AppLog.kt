@@ -67,6 +67,20 @@ class AppLog(private val context: Context) {
         val reason = describeExitReason(last.reason) ?: return // ordinary exits aren't worth logging
         val description = last.description?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
         record("PROCESS_EXIT", context.getString(R.string.log_process_exit, reason, description))
+
+        // Documented as populated for REASON_ANR; on some OS versions it also
+        // carries a native crash's trace (Android keeps one regardless of
+        // reason and doesn't guarantee which reasons get it attached). Worth
+        // trying unconditionally on every notable exit rather than only for
+        // REASON_ANR — this device has no adb/root, so this stream is the
+        // only realistic way a native segfault's actual trace ever reaches a
+        // user-copyable log at all. Null or empty on most calls is expected,
+        // not a bug.
+        runCatching {
+            last.traceInputStream?.bufferedReader()?.use { it.readText() }
+                ?.takeIf { it.isNotBlank() }
+                ?.let { trace -> record("PROCESS_EXIT_TRACE", trace.take(MAX_TRACE_CHARS)) }
+        }
     }
 
     private fun describeExitReason(reason: Int): String? = when (reason) {
@@ -90,5 +104,9 @@ class AppLog(private val context: Context) {
         // still small enough that "copy" and "paste into a chat" stay fast.
         const val MAX_BYTES = 200_000L
         const val MAX_LINES = 1_000
+
+        // A native trace can run long; capped well under MAX_BYTES so one
+        // crash's trace can't crowd out everything else already in the log.
+        const val MAX_TRACE_CHARS = 20_000
     }
 }
