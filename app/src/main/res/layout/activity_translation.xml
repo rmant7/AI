@@ -10,23 +10,13 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/translationHint"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="?attr/colorSurfaceVariant"
-            android:padding="16dp"
-            android:text="@string/translation_hint"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:textSize="12sp" />
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingHorizontal="12dp"
-            android:paddingTop="12dp">
+            android:paddingTop="16dp">
 
             <Spinner
                 android:id="@+id/sourceLanguageSpinner"
@@ -38,10 +28,12 @@
                 android:id="@+id/swapLanguagesButton"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
+                android:layout_marginHorizontal="4dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/translation_swap"
-                android:text="⇄"
-                android:textSize="18sp" />
+                android:padding="10dp"
+                android:src="@drawable/ic_swap_horiz"
+                app:tint="?attr/colorPrimary" />
 
             <Spinner
                 android:id="@+id/targetLanguageSpinner"
@@ -50,6 +42,46 @@
                 android:layout_weight="1" />
 
         </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/translationModelRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp">
+
+            <TextView
+                android:id="@+id/translationModelNote"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:alpha="0.65"
+                android:textSize="12sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/translation_change_model"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/translationCaveat"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="4dp"
+            android:alpha="0.65"
+            android:text="@string/translation_crs_caveat"
+            android:textSize="11sp"
+            android:visibility="gone" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
@@ -121,15 +153,6 @@
             </LinearLayout>
 
         </com.google.android.material.card.MaterialCardView>
-
-        <TextView
-            android:id="@+id/translationModelNote"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingHorizontal="16dp"
-            android:paddingBottom="16dp"
-            android:alpha="0.65"
-            android:textSize="11sp" />
 
     </LinearLayout>
 

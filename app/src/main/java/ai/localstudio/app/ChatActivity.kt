@@ -199,6 +199,8 @@ class ChatActivity : AppCompatActivity() {
         menu.add(0, MENU_LOG, 7, R.string.menu_log)
         menu.add(0, MENU_TRANSCRIBE, 8, R.string.menu_transcribe)
         menu.add(0, MENU_BENCHMARK, 9, R.string.menu_benchmark)
+        menu.add(0, MENU_TRANSLATION, 10, R.string.menu_translation)
+        menu.add(0, MENU_PHRASEBOOK, 11, R.string.menu_phrasebook)
         return true
     }
 
@@ -250,6 +252,16 @@ class ChatActivity : AppCompatActivity() {
 
         MENU_BENCHMARK -> {
             startActivity(Intent(this, BenchmarkActivity::class.java))
+            true
+        }
+
+        MENU_TRANSLATION -> {
+            startActivity(Intent(this, TranslationActivity::class.java))
+            true
+        }
+
+        MENU_PHRASEBOOK -> {
+            startActivity(Intent(this, PhrasebookActivity::class.java))
             true
         }
 
@@ -1176,6 +1188,8 @@ class ChatActivity : AppCompatActivity() {
         const val MENU_CLEAR = 8
         const val MENU_TRANSCRIBE = 9
         const val MENU_BENCHMARK = 10
+        const val MENU_TRANSLATION = 11
+        const val MENU_PHRASEBOOK = 12
 
         // Was temporarily raised to 30 minutes to measure real on-device
         // timing for heavier local models before picking a production value

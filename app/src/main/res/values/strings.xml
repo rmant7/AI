@@ -192,6 +192,7 @@
     <string name="models_category_text">Chat</string>
     <string name="models_category_voice">Voice</string>
     <string name="models_category_embedding">Embedding</string>
+    <string name="models_category_translation">Translation</string>
     <string name="embed_status_loaded">Loaded ✓</string>
     <string name="embed_status_memory_off">Not loaded — Long-term memory is off (Memory settings)</string>
     <string name="embed_status_semantic_off">Not loaded — Semantic retrieval is off (Memory settings)</string>
@@ -258,6 +259,8 @@
     <string name="models_vosk_header">Vosk — genuinely streaming, an alternative to Whisper for both live mic and file transcription</string>
     <string name="models_vosk_note">Vosk models work fully offline once downloaded. \"Use\" makes Vosk the active engine for both the live-mic section and file transcription on the Transcribe screen — see docs/14-vosk-spike.md. Switching back to a Whisper model does the same for Whisper; each engine still remembers its own last pick.</string>
     <string name="models_switched_chat">Chat switched to %1$s</string>
+    <string name="models_switched_translation">Translation now uses %1$s</string>
+    <string name="models_translation_note">Prompts this model to translate — there is no dedicated translation engine installed. Independent of the chat model above: pick a smaller, faster one here if you want, without changing what chat answers with.</string>
     <string name="models_switched_voice">Voice input switched to %1$s</string>
     <string name="model_state_installed">Installed</string>
     <string name="model_state_resolving">Looking for file: %1$s…</string>
@@ -415,16 +418,18 @@
     <!-- Translation screen: prompts the currently selected chat model to
          translate, rather than running a dedicated MT model — see
          TranslationActivity's own doc comment for why. -->
-    <string name="translation_hint">Uses your currently selected chat model to translate, prompted for the task — there is no dedicated translation model installed yet. Russian and English are usually reliable; Seychellois Creole is a low-resource language most models have seen very little of, so treat its output as a rough draft, not a checked translation. For pre-checked Creole phrases, see Phrasebook instead.</string>
     <string name="translation_swap">Swap languages</string>
+    <string name="translation_change_model">Change</string>
+    <string name="translation_crs_caveat">Seychellois Creole is low-resource — treat this as a rough draft. For pre-checked phrases, see Phrasebook.</string>
+    <string name="translation_no_model">No local model installed. Open Models → Translation to download one.</string>
     <string name="translation_input_hint">Text to translate</string>
     <string name="translation_translate">Translate</string>
     <string name="translation_copy">Copy translation</string>
     <string name="translation_copied">Copied</string>
     <string name="translation_same_language">Source and target language are the same</string>
     <string name="translation_failed">Translation failed: %1$s</string>
-    <string name="translation_model_note">Answered by: %1$s (change under Models)</string>
-    <string name="translation_model_note_none">no local model selected — falls back to a configured cloud provider, if any</string>
+    <string name="translation_model_note">Model: %1$s</string>
+    <string name="translation_model_note_none">No model installed</string>
     <string name="translation_lang_ru">Russian</string>
     <string name="translation_lang_en">English</string>
     <string name="translation_lang_crs">Seychellois Creole</string>

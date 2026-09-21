@@ -18,24 +18,35 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 /**
- * Free-text translation, routed through the same [ai.localstudio.core.engine.Orchestrator]
- * chat already uses ([AppContainer.orchestrator]) — whichever chat model is
- * currently selected (Settings → Models) answers a one-shot translation
- * prompt instead of a conversational turn. `memoryEnabled = false` and a
- * fresh, never-persisted `conversationId` per request keep this out of chat
- * history and out of memory retrieval: a translation isn't a conversation
- * turn worth remembering, and pulling unrelated memory into the prompt would
- * only add noise here.
+ * Free-text translation, routed through [AppContainer.translationOrchestrator] —
+ * a single local GGUF, chosen on the Models screen's Translation tab
+ * ([ModelsActivity.Category.TRANSLATION]), prompted for the task rather than
+ * run through a dedicated MT model. `memoryEnabled = false` and a fresh,
+ * never-persisted `conversationId` per request keep this out of chat history
+ * and memory retrieval — a translation isn't a conversation turn worth
+ * remembering.
  *
- * This is prompting a general-purpose model, not a dedicated translation
- * model — this app's llama.cpp bridge ([ai.localstudio.app.llama.LlamaCppRuntime])
- * only drives decoder-only chat GGUFs today, and a real bilingual engine
- * (MarianMT/OPUS-MT, or a T5 model like MADLAD-400) would need a new native
- * runtime this app doesn't have yet. For en/ru that limitation barely shows;
- * for Seychellois Creole it matters — it's a low-resource language most
- * general models have seen very little of (see [R.string.translation_hint]),
- * so CRS output here is a best-effort starting point, not a verified
- * translation the way [PhrasebookActivity]'s pre-checked phrases are.
+ * Deliberately not [AppContainer.orchestrator] (what [ChatActivity] uses):
+ * that one routes to whatever chat is currently configured for — AICore,
+ * a cloud provider, or a multi-candidate fallback chain — which answered a
+ * real translation request with Gemini Nano because AICore happened to also
+ * be enabled for chat, with nothing on this screen explaining why. A
+ * dedicated single-local-candidate orchestrator is predictable (always the
+ * model this screen says it's using) and, as a side effect, never wrapped in
+ * [ai.localstudio.core.runtime.FallbackTextRuntime] — so its "Answer from: X"
+ * attribution footer is never appended to the text in the first place, and
+ * copying the result copies only the translation.
+ *
+ * This is still prompting a general-purpose chat model, not a dedicated
+ * translation model — this app's llama.cpp bridge
+ * ([ai.localstudio.app.llama.LlamaCppRuntime]) only drives decoder-only chat
+ * GGUFs, and a real bilingual engine (MarianMT/OPUS-MT, or a T5 model like
+ * MADLAD-400) would need a new native runtime this app doesn't have yet. For
+ * en/ru that limitation barely shows; for Seychellois Creole it matters — a
+ * low-resource language most general models have seen very little of (see
+ * [R.string.translation_crs_caveat]) — so CRS output here is a best-effort
+ * draft, not a verified translation the way [PhrasebookActivity]'s
+ * pre-checked phrases are.
  */
 class TranslationActivity : AppCompatActivity() {
 
@@ -71,6 +82,8 @@ class TranslationActivity : AppCompatActivity() {
         // not an arbitrary first entry.
         binding.sourceLanguageSpinner.setSelection(Language.RUSSIAN.ordinal)
         binding.targetLanguageSpinner.setSelection(Language.CREOLE.ordinal)
+        binding.sourceLanguageSpinner.onItemSelectedListener = onLanguageChanged
+        binding.targetLanguageSpinner.onItemSelectedListener = onLanguageChanged
 
         binding.swapLanguagesButton.setOnClickListener {
             val source = binding.sourceLanguageSpinner.selectedItemPosition
@@ -81,12 +94,19 @@ class TranslationActivity : AppCompatActivity() {
 
         binding.translateButton.setOnClickListener { translate() }
         binding.copyOutputButton.setOnClickListener { copyOutput() }
+        binding.translationModelRow.setOnClickListener {
+            startActivity(ModelsActivity.intent(this, ModelsActivity.Category.TRANSLATION))
+        }
 
-        updateModelNote()
+        updateCaveat()
     }
 
     override fun onResume() {
         super.onResume()
+        // The Translation tab in Models can change settings.translationModel
+        // while this screen is stopped underneath it — refreshed here rather
+        // than only in onCreate so coming back from picking a model actually
+        // shows the pick.
         updateModelNote()
     }
 
@@ -103,8 +123,20 @@ class TranslationActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean =
         UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
 
+    private val onLanguageChanged = object : android.widget.AdapterView.OnItemSelectedListener {
+        override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) =
+            updateCaveat()
+        override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+    }
+
+    private fun updateCaveat() {
+        binding.translationCaveat.visibility =
+            if (selectedLanguage(binding.targetLanguageSpinner) == Language.CREOLE) View.VISIBLE else View.GONE
+    }
+
     private fun updateModelNote() {
-        val label = container.settings.chatModel.ifBlank { null }
+        val label = container.settings.translationModel.ifBlank { container.settings.chatModelFor(CloudProviders.LOCAL.id) }
+            .ifBlank { null }
         binding.translationModelNote.text = getString(R.string.translation_model_note, label ?: getString(R.string.translation_model_note_none))
     }
 
@@ -122,6 +154,12 @@ class TranslationActivity : AppCompatActivity() {
             return
         }
 
+        val orchestrator = container.translationOrchestrator()
+        if (orchestrator == null) {
+            Toast.makeText(this, R.string.translation_no_model, Toast.LENGTH_LONG).show()
+            return
+        }
+
         translateJob?.cancel()
         setBusy(true)
         // Length only, never the text itself — this log is meant to be
@@ -135,7 +173,7 @@ class TranslationActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     withTimeout(GENERATION_TIMEOUT_MS) {
-                        container.orchestrator().handle(
+                        orchestrator.handle(
                             UserRequest(
                                 // Unique per request and never saved to
                                 // ChatHistoryStore — this is one-shot, not a
@@ -171,9 +209,16 @@ class TranslationActivity : AppCompatActivity() {
             "Reply with only the translation itself, nothing else — no quotes, no notes, no explanation.\n\n" +
             "```\n$text\n```"
 
-    /** Strips wrapping quotes/backticks a model sometimes adds despite the prompt asking it not to. */
+    /**
+     * Strips wrapping quotes/backticks a model sometimes adds despite the
+     * prompt asking it not to, and — defensively, should this screen ever
+     * end up wired to a multi-candidate orchestrator again — a
+     * [ai.localstudio.core.runtime.FallbackTextRuntime] attribution footer,
+     * which always starts with this exact "\n\n---\n" delimiter
+     * ([ai.localstudio.core.runtime.FallbackTextRuntime.attributionFooter]).
+     */
     private fun cleanTranslation(raw: String): String {
-        var text = raw.trim()
+        var text = raw.substringBefore("\n\n---\n").trim()
         if (text.startsWith("```") && text.endsWith("```")) text = text.removePrefix("```").removeSuffix("```").trim()
         if (text.length >= 2 && text.first() == text.last() && text.first() in "\"'«»") {
             text = text.substring(1, text.length - 1).trim()
@@ -191,6 +236,7 @@ class TranslationActivity : AppCompatActivity() {
         binding.translationOutputCard.visibility = if (text.isNotBlank()) View.VISIBLE else View.GONE
     }
 
+    /** Copies only the translation — no model name, no language labels. */
     private fun copyOutput() {
         val text = binding.translationOutput.text?.toString().orEmpty()
         if (text.isBlank()) return

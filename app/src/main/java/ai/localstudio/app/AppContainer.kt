@@ -1409,18 +1409,82 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * Same resolution [localCandidate] uses — the explicit choice from
-     * Models if it's actually installed, [ModelSelector]'s best fit
-     * otherwise — factored out so [localVisionAvailable] can ask "which
-     * model, specifically" without also building a runtime and a
-     * [FallbackCandidate] just to answer that.
+     * The explicit choice from Models if it's actually installed,
+     * [ModelSelector]'s best fit otherwise — factored out so
+     * [localVisionAvailable] can ask "which model, specifically" without also
+     * building a runtime and a [FallbackCandidate] just to answer that.
+     *
+     * [chosenId] defaults to the chat model ([localCandidate]'s own use), but
+     * takes an explicit id too — [translationOrchestrator] passes
+     * [Settings.translationModel] here so a model picked for translation
+     * doesn't have to be the same one chat is currently using.
      */
-    private fun effectiveLocalSelection(registry: ModelRegistry): SelectedModel? {
-        val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
+    private fun effectiveLocalSelection(
+        registry: ModelRegistry,
+        chosenId: String = settings.chatModelFor(CloudProviders.LOCAL.id),
+    ): SelectedModel? {
         val chosen = registry.find(chosenId)
             ?.takeIf { it.state == InstallState.INSTALLED }
             ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
         return chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION)
+    }
+
+    private var cachedTranslationOrchestrator: Orchestrator? = null
+    private var cachedTranslationSignature: String? = null
+
+    /**
+     * A dedicated single-local-candidate orchestrator for [TranslationActivity] —
+     * deliberately not [orchestrator], which wires whatever chat is currently
+     * configured for (AICore, a cloud provider, or a multi-candidate fallback
+     * chain). Two reasons to keep this separate rather than reuse it:
+     *
+     * 1. Predictability — a translation should always come from the model the
+     *    Models screen's Translation tab has selected, not silently from
+     *    whichever provider chat's own fallback chain happens to answer with
+     *    first (a real report: AICore/Gemini Nano answered a translation
+     *    request because it was also enabled for chat, with no way to tell
+     *    from the Translation screen alone).
+     * 2. A single candidate never gets wrapped in [ai.localstudio.core.runtime.FallbackTextRuntime]
+     *    (see [orchestrator]'s own `candidates.size == 1` branch), so its
+     *    "Answer from: X · Ns" footer is never appended to the answer text in
+     *    the first place — no stripping needed on the way back out.
+     *
+     * Null when no local model is installed at all — [TranslationActivity]
+     * shows that as "download a model first" rather than silently falling
+     * back to AICore or a cloud provider behind the user's back.
+     */
+    fun translationOrchestrator(): Orchestrator? {
+        val registry = localRegistry()
+        val chosenId = settings.translationModel
+        val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
+            ?: effectiveLocalSelection(registry)
+            ?: return null
+
+        val signature = listOf(
+            selected.model.id,
+            effectiveContextTokens(),
+            settings.temperature,
+            settings.topP,
+            settings.topK,
+            settings.repeatPenalty,
+            settings.maxResponseTokens,
+        ).joinToString("|")
+        cachedTranslationOrchestrator?.takeIf { cachedTranslationSignature == signature }?.let { return it }
+
+        val candidate = FallbackCandidate(
+            label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
+            runtime = LlamaCppRuntime(
+                contextTokens = effectiveContextTokens(),
+                log = appLog::record,
+                availableRamBytes = { currentAvailableRamBytes(context) },
+            ),
+            model = selected.model,
+            binding = selected.binding,
+        )
+        return buildOrchestrator(candidate.runtime, true, listOf(candidate)).also {
+            cachedTranslationOrchestrator = it
+            cachedTranslationSignature = signature
+        }
     }
 
     /**

@@ -67,7 +67,7 @@ class ModelsActivity : AppCompatActivity() {
      * choose between" framing this tab exists to avoid: nothing here ever
      * changes [Settings.chatModel].
      */
-    enum class Category { TEXT, VOICE, EMBEDDING }
+    enum class Category { TEXT, VOICE, EMBEDDING, TRANSLATION }
 
     private lateinit var binding: ActivityModelsBinding
     private lateinit var container: AppContainer
@@ -104,6 +104,10 @@ class ModelsActivity : AppCompatActivity() {
                 category = Category.EMBEDDING
                 binding.categoryToggle.check(R.id.categoryEmbedding)
             }
+            Category.TRANSLATION.name -> {
+                category = Category.TRANSLATION
+                binding.categoryToggle.check(R.id.categoryTranslation)
+            }
         }
 
         binding.categoryToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
@@ -111,6 +115,7 @@ class ModelsActivity : AppCompatActivity() {
             category = when (checkedId) {
                 R.id.categoryVoice -> Category.VOICE
                 R.id.categoryEmbedding -> Category.EMBEDDING
+                R.id.categoryTranslation -> Category.TRANSLATION
                 else -> Category.TEXT
             }
             render()
@@ -201,6 +206,41 @@ class ModelsActivity : AppCompatActivity() {
     private fun fitsRamBudget(seed: LocalModelSeed, device: DeviceProfile): Boolean =
         seed.approxSizeBytes == 0L || seed.approxSizeBytes * 13 / 10 <= device.usableRamBytes
 
+    // ── Translation model ─────────────────────────────────────────────────
+    //
+    // Shares [LocalModels.SEEDS]/[AppContainer.downloads] with the Text tab —
+    // there is no separate catalog of translation-only models to download
+    // (see TranslationActivity's own doc comment on why: this app's
+    // llama.cpp bridge only runs decoder-only chat GGUFs, so "the translation
+    // model" is really just whichever chat model has been prompted for the
+    // task). What this tab adds on top is letting that choice be independent
+    // of [Settings.chatModel] — e.g. a small, fast model for translation
+    // while chat keeps using a larger one.
+
+    private fun onTranslationPrimary(seed: LocalModelSeed) {
+        when (container.downloads.stateOf(seed)) {
+            is DownloadState.Installed -> useForTranslation(seed)
+            is DownloadState.Running, is DownloadState.Resolving -> container.downloads.cancel(seed)
+            else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
+        }
+    }
+
+    private fun onTranslationSecondary(seed: LocalModelSeed) {
+        when (val state = container.downloads.stateOf(seed)) {
+            is DownloadState.Failed -> showDetails(seed.title, state.message)
+            else -> {
+                container.downloads.delete(seed)
+                render()
+            }
+        }
+    }
+
+    private fun useForTranslation(seed: LocalModelSeed) {
+        container.settings.translationModel = seed.id
+        Toast.makeText(this, getString(R.string.models_switched_translation, seed.title), Toast.LENGTH_SHORT).show()
+        render()
+    }
+
     // ── Voice models ───────────────────────────────────────────────────────
 
     private fun onVoicePrimary(seed: WhisperModelSeed) {
@@ -273,6 +313,7 @@ class ModelsActivity : AppCompatActivity() {
                 Category.VOICE -> voiceRows(device)
                 Category.EMBEDDING -> embeddingRows()
                 Category.TEXT -> textRows(device)
+                Category.TRANSLATION -> translationRows(device)
             },
         )
     }
@@ -356,6 +397,53 @@ class ModelsActivity : AppCompatActivity() {
                     secondaryLabel = null,
                     onPrimary = { confirmDeleteOrphans(orphans) },
                     onSecondary = {},
+                ),
+            )
+        }
+
+        add(Row.Custom)
+    }
+
+    private fun translationRows(device: DeviceProfile): List<Row> = buildList {
+        if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
+        add(Row.Note(getString(R.string.models_translation_note)))
+        add(Row.Header(getString(R.string.models_local_header)))
+
+        val translationModel = container.settings.translationModel
+
+        (LocalModels.SEEDS + customSeeds).forEach { seed ->
+            val state = container.downloads.stateOf(seed)
+            val selected = translationModel == seed.id
+            val fitsBudget = fitsRamBudget(seed, device)
+
+            add(
+                Row.Model(
+                    title = seed.title,
+                    subtitle = buildString {
+                        append(seed.paramsLabel)
+                        if (seed.approxSizeBytes > 0) append(" · ~${size(seed.approxSizeBytes)}")
+                        append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
+                        if (!fitsBudget) append(" · ").append(getString(R.string.model_exceeds_ram_budget))
+                    },
+                    selected = selected,
+                    status = textStatus(state, container.modelStore.installedSize(seed)),
+                    progress = (state as? DownloadState.Running)?.progress?.fraction,
+                    indeterminate = state is DownloadState.Resolving,
+                    primaryLabel = when (state) {
+                        is DownloadState.Installed ->
+                            getString(if (selected) R.string.model_installed else R.string.model_use)
+                        is DownloadState.Running, is DownloadState.Resolving -> getString(R.string.model_cancel)
+                        is DownloadState.Failed -> getString(R.string.model_retry)
+                        DownloadState.Idle -> getString(R.string.model_download)
+                    },
+                    primaryEnabled = !(state is DownloadState.Installed && selected),
+                    secondaryLabel = when (state) {
+                        is DownloadState.Failed -> getString(R.string.model_details)
+                        is DownloadState.Installed -> getString(R.string.model_delete)
+                        else -> null
+                    },
+                    onPrimary = { onTranslationPrimary(seed) },
+                    onSecondary = { onTranslationSecondary(seed) },
                 ),
             )
         }

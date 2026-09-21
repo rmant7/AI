@@ -194,6 +194,7 @@
     <string name="models_category_text">Чат</string>
     <string name="models_category_voice">Голос</string>
     <string name="models_category_embedding">Эмбеддинги</string>
+    <string name="models_category_translation">Перевод</string>
     <string name="embed_status_loaded">Загружена ✓</string>
     <string name="embed_status_memory_off">Не загружена — долговременная память выключена (настройки Памяти)</string>
     <string name="embed_status_semantic_off">Не загружена — семантический поиск выключен (настройки Памяти)</string>
@@ -260,6 +261,8 @@
     <string name="models_vosk_header">Vosk — потоковое распознавание, альтернатива Whisper и для живого микрофона, и для транскрипции файлов</string>
     <string name="models_vosk_note">Модели Vosk работают полностью офлайн после загрузки. «Использовать» делает Vosk активным движком и для секции живого микрофона, и для транскрипции файлов на экране «Транскрипция» — см. docs/14-vosk-spike.md. Переключение обратно на модель Whisper делает активным его; каждый движок помнит свой последний выбор отдельно.</string>
     <string name="models_switched_chat">Чат переключён на %1$s</string>
+    <string name="models_switched_translation">Перевод теперь использует %1$s</string>
+    <string name="models_translation_note">Эта модель переводит через промпт — отдельного движка перевода нет. Выбор независим от модели чата выше: можно взять модель поменьше и побыстрее только для перевода, не трогая чат.</string>
     <string name="models_switched_voice">Голосовой ввод переключён на %1$s</string>
     <string name="model_state_installed">Установлена</string>
     <string name="model_state_resolving">Ищу файл: %1$s…</string>
@@ -414,16 +417,18 @@
     <string name="chat_default_image_name">изображение</string>
     <string name="error_could_not_decode_image">Не удалось распознать изображение</string>
 
-    <string name="translation_hint">Перевод делает та же модель, что выбрана для чата, — через промпт, отдельной модели перевода пока нет. Русский и английский обычно переводятся надёжно; сейшельский креольский — малоресурсный язык, который модели почти не видели при обучении, так что его перевод — черновик, а не проверенный текст. Для проверенных креольских фраз см. Разговорник.</string>
     <string name="translation_swap">Поменять языки местами</string>
+    <string name="translation_change_model">Сменить</string>
+    <string name="translation_crs_caveat">Сейшельский креольский — малоресурсный язык, перевод может быть черновым. Проверенные фразы — в Разговорнике.</string>
+    <string name="translation_no_model">Локальная модель не установлена. Откройте Модели → Перевод и скачайте одну.</string>
     <string name="translation_input_hint">Текст для перевода</string>
     <string name="translation_translate">Перевести</string>
     <string name="translation_copy">Скопировать перевод</string>
     <string name="translation_copied">Скопировано</string>
     <string name="translation_same_language">Исходный и целевой язык совпадают</string>
     <string name="translation_failed">Не удалось перевести: %1$s</string>
-    <string name="translation_model_note">Отвечает: %1$s (сменить в разделе Модели)</string>
-    <string name="translation_model_note_none">локальная модель не выбрана — используется облачный провайдер, если настроен</string>
+    <string name="translation_model_note">Модель: %1$s</string>
+    <string name="translation_model_note_none">Модель не установлена</string>
     <string name="translation_lang_ru">Русский</string>
     <string name="translation_lang_en">Английский</string>
     <string name="translation_lang_crs">Сейшельский креольский</string>

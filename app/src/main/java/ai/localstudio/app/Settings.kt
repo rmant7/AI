@@ -86,6 +86,18 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putString(KEY_VOSK_MODEL, value).apply()
 
     /**
+     * Which downloaded local model [ai.localstudio.app.TranslationActivity]
+     * uses — independent of [chatModel], picked on the Models screen's
+     * Translation tab. Empty means "whichever local model chat is currently
+     * using" (see [AppContainer.translationOrchestrator]), not "none": a
+     * fresh install still translates with whatever's already installed for
+     * chat, without a second download being required first.
+     */
+    var translationModel: String
+        get() = prefs.getString(KEY_TRANSLATION_MODEL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_TRANSLATION_MODEL, value).apply()
+
+    /**
      * Which engine both live-mic and file transcription in
      * [ai.localstudio.app.TranscribeActivity] actually use — set by
      * whichever of [whisperModelId]/[voskModelId] was picked last on the
@@ -263,6 +275,7 @@ class Settings(context: Context) {
         const val KEY_ASR_MODEL = "asrModel"
         const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_VOSK_MODEL = "voskModelId"
+        const val KEY_TRANSLATION_MODEL = "translationModel"
         const val KEY_ACTIVE_STT_ENGINE = "activeSttEngine"
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_SEMANTIC_MEMORY = "semanticMemoryEnabled"
