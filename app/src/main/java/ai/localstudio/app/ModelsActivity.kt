@@ -411,17 +411,20 @@ class ModelsActivity : AppCompatActivity() {
     private fun translationRows(device: DeviceProfile): List<Row> = buildList {
         if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
 
-        add(Row.Header(getString(R.string.models_translation_aicore_header)))
-        add(Row.Note(getString(R.string.models_translation_aicore_note)))
-        add(aicoreTranslationRow())
-
-        // Specialized next: an actual translation model, not a chat model
-        // prompted for the task — see TranslationModels' own doc comment on
-        // why this is a separate catalog rather than folded into the list
-        // below.
+        // MADLAD-400 first: the flagship pick — an actual translation model
+        // covering hundreds of languages, not a chat model prompted for the
+        // task (see TranslationModels' own doc comment on why this is a
+        // separate catalog) — and the one TranslationActivity offers to
+        // download itself when nothing is installed yet, so it belongs
+        // where that offer points: the top of this list, not buried under
+        // AICore and the general chat models.
         add(Row.Header(getString(R.string.models_translation_specialized_header)))
         add(Row.Note(getString(R.string.models_translation_specialized_note)))
         TranslationModels.SEEDS.forEach { seed -> add(translationModelRow(seed, device)) }
+
+        add(Row.Header(getString(R.string.models_translation_aicore_header)))
+        add(Row.Note(getString(R.string.models_translation_aicore_note)))
+        add(aicoreTranslationRow())
 
         add(Row.Note(getString(R.string.models_translation_note)))
         add(Row.Header(getString(R.string.models_local_header)))

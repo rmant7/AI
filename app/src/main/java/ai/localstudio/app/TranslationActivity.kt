@@ -6,11 +6,16 @@ import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
+import android.widget.Filter
+import android.widget.FilterResults
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivityTranslationBinding
+import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.MadladLanguage
 import ai.localstudio.app.models.MadladLanguages
 import ai.localstudio.app.models.TranslationModels
@@ -65,6 +70,16 @@ class TranslationActivity : AppCompatActivity() {
     private lateinit var binding: ActivityTranslationBinding
     private lateinit var container: AppContainer
     private lateinit var languages: List<MadladLanguage>
+    /**
+     * What each language shows as — one word where that's unambiguous
+     * (stripping a parenthetical qualifier, e.g. "Myanmar (Burmese)" ->
+     * "Myanmar"), the full name where stripping it would make two different
+     * languages look identical (e.g. "Kurdish (Kurmanji)" and "Kurdish
+     * (Sorani)" both stripping to plain "Kurdish" — that pair keeps its
+     * qualifier instead). Never includes the raw code; [LanguageDisplayAdapter]
+     * still matches on it, just not shown.
+     */
+    private lateinit var displayNames: Map<String, String>
     private var translateJob: kotlinx.coroutines.Job? = null
 
     private var selectedSource: MadladLanguage? = null
@@ -80,19 +95,17 @@ class TranslationActivity : AppCompatActivity() {
 
         container = AppContainer.get(this)
         languages = MadladLanguages.load(this)
+        displayNames = buildDisplayNames(languages)
 
-        // "Name — code" rather than just the name: ArrayAdapter's default
-        // filter matches on whole whitespace-separated words within each
-        // item (see its own ArrayFilter), so with the code its own token
-        // here, typing "crs" finds Seychellois Creole even though the name
-        // itself doesn't contain those letters — no custom Filter needed.
+        // A plain ArrayAdapter<String> filters on whole words within the
+        // shown text (see its own ArrayFilter) — no help here, since the
+        // code that needs to stay searchable ("crs" -> Seychellois Creole)
+        // is deliberately not part of what's shown. languageFilter searches
+        // the full underlying language list (name and code both) and
+        // republishes matches as their display strings instead.
         val displayOf = HashMap<String, MadladLanguage>(languages.size * 2)
-        val items = languages.map { language ->
-            val display = "${language.name} — ${language.code}"
-            displayOf[display] = language
-            display
-        }
-        val languageAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, items)
+        languages.forEach { displayOf[displayNames.getValue(it.code)] = it }
+        val languageAdapter = LanguageDisplayAdapter(displayOf.keys.toList())
 
         binding.sourceLanguageInput.setAdapter(languageAdapter)
         binding.targetLanguageInput.setAdapter(languageAdapter)
@@ -118,7 +131,10 @@ class TranslationActivity : AppCompatActivity() {
             selectLanguage(binding.targetLanguageInput, source) { selectedTarget = it }
         }
 
-        binding.translateButton.setOnClickListener { translate() }
+        binding.translateButton.setOnClickListener {
+            hideKeyboard()
+            translate()
+        }
         binding.copyOutputButton.setOnClickListener { copyOutput() }
         binding.translationModelRow.setOnClickListener {
             startActivity(ModelsActivity.intent(this, ModelsActivity.Category.TRANSLATION))
@@ -152,7 +168,59 @@ class TranslationActivity : AppCompatActivity() {
     /** Sets both the field's displayed text and the backing selection in one place, so they never drift apart. */
     private fun selectLanguage(field: android.widget.AutoCompleteTextView, language: MadladLanguage?, assign: (MadladLanguage?) -> Unit) {
         assign(language)
-        field.setText(language?.let { "${it.name} — ${it.code}" }.orEmpty(), false)
+        field.setText(language?.let { displayNames.getValue(it.code) }.orEmpty(), false)
+    }
+
+    /**
+     * One word where that's unambiguous, the full name (still no raw code)
+     * where two languages would otherwise show identically — see this
+     * property's own field-level doc comment on [displayNames].
+     */
+    private fun buildDisplayNames(languages: List<MadladLanguage>): Map<String, String> {
+        fun stripped(name: String) = name.substringBefore(" (").trim()
+        val counts = languages.groupingBy { stripped(it.name) }.eachCount()
+        return languages.associate { language ->
+            val short = stripped(language.name)
+            language.code to if (counts.getValue(short) > 1) language.name else short
+        }
+    }
+
+    /**
+     * A plain ArrayAdapter<String> only searches its own displayed items —
+     * [languages]' codes are deliberately not part of what's displayed, so
+     * this instead searches the underlying [MadladLanguage] list (name and
+     * code both) and republishes matches as their [displayNames] strings.
+     */
+    private inner class LanguageDisplayAdapter(all: List<String>) :
+        ArrayAdapter<String>(this@TranslationActivity, android.R.layout.simple_dropdown_item_1line, all.toMutableList()) {
+
+        private val allDisplayNames = all
+
+        override fun getFilter(): Filter = object : Filter() {
+            override fun performFiltering(constraint: CharSequence?): FilterResults {
+                val query = constraint?.toString()?.trim()?.lowercase().orEmpty()
+                val matches = if (query.isEmpty()) {
+                    allDisplayNames
+                } else {
+                    languages.filter { language ->
+                        language.name.lowercase().contains(query) || language.code.lowercase().startsWith(query)
+                    }.map { displayNames.getValue(it.code) }
+                }
+                return FilterResults().apply { values = matches; count = matches.size }
+            }
+
+            @Suppress("UNCHECKED_CAST")
+            override fun publishResults(constraint: CharSequence?, results: FilterResults?) {
+                clear()
+                (results?.values as? List<String>)?.let { addAll(it) }
+                notifyDataSetChanged()
+            }
+        }
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(InputMethodManager::class.java)
+        currentFocus?.let { imm?.hideSoftInputFromWindow(it.windowToken, 0) }
     }
 
     private fun updateCaveat() {
@@ -167,6 +235,39 @@ class TranslationActivity : AppCompatActivity() {
             else -> null
         }
         binding.translationModelNote.text = getString(R.string.translation_model_note, label ?: getString(R.string.translation_model_note_none))
+    }
+
+    /**
+     * [container.translationOrchestrator] returns null only when
+     * [Settings.translationModel] names nothing installed and nothing else
+     * is configured to fall back to — the common case for that being a
+     * fresh install, before any translation model has ever been downloaded.
+     * Rather than just saying so and leaving the user to find Models ->
+     * Translation on their own, offers the flagship pick
+     * ([TranslationModels.SEEDS]'s first entry, MADLAD-400) right here.
+     */
+    private fun offerMadladDownload() {
+        val seed = TranslationModels.SEEDS.first()
+        if (container.downloads.stateOf(seed) is DownloadState.Installed) {
+            // Installed but still not what translationOrchestrator resolved
+            // to — settings.translationModel names something else entirely
+            // that isn't installed either. Nothing to offer downloading;
+            // point at the picker instead.
+            Toast.makeText(this, R.string.translation_no_model, Toast.LENGTH_LONG).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(seed.title)
+            .setMessage(getString(R.string.translation_offer_download, seed.title))
+            .setPositiveButton(R.string.model_download) { _, _ ->
+                NetworkPolicy.confirmIfNeeded(this, container.settings) {
+                    container.settings.translationModel = seed.id
+                    container.downloads.start(seed)
+                    startActivity(ModelsActivity.intent(this, ModelsActivity.Category.TRANSLATION))
+                }
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
     }
 
     private fun translate() {
@@ -186,7 +287,7 @@ class TranslationActivity : AppCompatActivity() {
 
         val orchestrator = container.translationOrchestrator()
         if (orchestrator == null) {
-            Toast.makeText(this, R.string.translation_no_model, Toast.LENGTH_LONG).show()
+            offerMadladDownload()
             return
         }
 

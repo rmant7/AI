@@ -428,6 +428,7 @@
     <string name="translation_change_model">Change</string>
     <string name="translation_crs_caveat">Seychellois Creole is low-resource — treat this as a rough draft. For pre-checked phrases, see Phrasebook.</string>
     <string name="translation_no_model">No local model installed. Open Models → Translation to download one.</string>
+    <string name="translation_offer_download">%1$s isn\'t downloaded yet. Download it now (~1.65GB) and use it for this translation once it\'s ready?</string>
     <string name="translation_input_hint">Text to translate</string>
     <string name="translation_translate">Translate</string>
     <string name="translation_copy">Copy translation</string>
