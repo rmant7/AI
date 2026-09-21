@@ -435,9 +435,9 @@
     <string name="translation_failed">Не удалось перевести: %1$s</string>
     <string name="translation_model_note">Модель: %1$s</string>
     <string name="translation_model_note_none">Модель не установлена</string>
-    <string name="translation_lang_ru">Русский</string>
-    <string name="translation_lang_en">Английский</string>
-    <string name="translation_lang_crs">Сейшельский креольский</string>
+    <string name="translation_source_hint">Перевести с</string>
+    <string name="translation_target_hint">Перевести на</string>
+    <string name="translation_no_language">Сначала выберите оба языка</string>
 
     <string name="phrasebook_situation_basics">Базовые фразы</string>
     <string name="phrasebook_situation_taxi">Такси</string>

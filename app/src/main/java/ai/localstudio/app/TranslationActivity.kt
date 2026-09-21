@@ -11,6 +11,8 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivityTranslationBinding
+import ai.localstudio.app.models.MadladLanguage
+import ai.localstudio.app.models.MadladLanguages
 import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.core.engine.UserRequest
 import kotlinx.coroutines.Dispatchers
@@ -38,14 +40,19 @@ import kotlinx.coroutines.withTimeout
  * attribution footer is never appended to the text in the first place, and
  * copying the result copies only the translation.
  *
- * The selected model can be either kind, and they need different prompts:
- * a [TranslationModels] seed (MADLAD-400, a T5 encoder-decoder model — see
- * [ai.localstudio.app.llama.LlamaBridge.nativeGenerateT5]) expects only its
- * own `<2xx> source text` format with no chat framing at all, while an
- * ordinary chat GGUF from [ai.localstudio.app.models.LocalModels] needs the
- * instruction-style prompt [buildChatPrompt] builds. [translate] picks
- * between them by checking whether [Settings.translationModel] names a
- * [TranslationModels] seed — see [buildPrompt].
+ * Languages come from [MadladLanguages] — MADLAD-400's own 417-language
+ * table — for both kinds of model this screen can be pointed at: a
+ * [TranslationModels] seed (MADLAD-400 itself, a T5 encoder-decoder model —
+ * see [ai.localstudio.app.llama.LlamaBridge.nativeGenerateT5]) uses a
+ * language's `code` directly in its own `<2xx> source text` format with no
+ * chat framing at all, while an ordinary chat GGUF from
+ * [ai.localstudio.app.models.LocalModels] gets the instruction-style prompt
+ * [buildChatPrompt] builds from a language's English `name`. [translate]
+ * picks between the two prompt shapes by checking whether
+ * [Settings.translationModel] names a [TranslationModels] seed — see
+ * [buildPrompt]. A non-MADLAD model was never trained on most of these 417
+ * languages, same caveat as always for a general model asked to translate
+ * something it barely saw in training.
  *
  * Even with MADLAD-400, Seychellois Creole output is a best-effort draft,
  * not a verified translation the way [PhrasebookActivity]'s pre-checked
@@ -55,15 +62,13 @@ import kotlinx.coroutines.withTimeout
  */
 class TranslationActivity : AppCompatActivity() {
 
-    private enum class Language(val englishName: String, val madladCode: String, val labelRes: Int) {
-        RUSSIAN("Russian", "ru", R.string.translation_lang_ru),
-        ENGLISH("English", "en", R.string.translation_lang_en),
-        CREOLE("Seychellois Creole", "crs", R.string.translation_lang_crs),
-    }
-
     private lateinit var binding: ActivityTranslationBinding
     private lateinit var container: AppContainer
+    private lateinit var languages: List<MadladLanguage>
     private var translateJob: kotlinx.coroutines.Job? = null
+
+    private var selectedSource: MadladLanguage? = null
+    private var selectedTarget: MadladLanguage? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,27 +79,43 @@ class TranslationActivity : AppCompatActivity() {
         setTitle(R.string.menu_translation)
 
         container = AppContainer.get(this)
+        languages = MadladLanguages.load(this)
 
-        val languageAdapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            Language.entries.map { getString(it.labelRes) },
-        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-        binding.sourceLanguageSpinner.adapter = languageAdapter
-        binding.targetLanguageSpinner.adapter = languageAdapter
+        // "Name — code" rather than just the name: ArrayAdapter's default
+        // filter matches on whole whitespace-separated words within each
+        // item (see its own ArrayFilter), so with the code its own token
+        // here, typing "crs" finds Seychellois Creole even though the name
+        // itself doesn't contain those letters — no custom Filter needed.
+        val displayOf = HashMap<String, MadladLanguage>(languages.size * 2)
+        val items = languages.map { language ->
+            val display = "${language.name} — ${language.code}"
+            displayOf[display] = language
+            display
+        }
+        val languageAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, items)
+
+        binding.sourceLanguageInput.setAdapter(languageAdapter)
+        binding.targetLanguageInput.setAdapter(languageAdapter)
+        binding.sourceLanguageInput.setOnItemClickListener { parent, _, position, _ ->
+            selectedSource = displayOf[parent.getItemAtPosition(position) as String]
+            updateCaveat()
+        }
+        binding.targetLanguageInput.setOnItemClickListener { parent, _, position, _ ->
+            selectedTarget = displayOf[parent.getItemAtPosition(position) as String]
+            updateCaveat()
+        }
+
         // Russian -> Seychellois Creole is this app's actual use case
         // (Seychelles travel, per docs) — the default the screen opens on,
         // not an arbitrary first entry.
-        binding.sourceLanguageSpinner.setSelection(Language.RUSSIAN.ordinal)
-        binding.targetLanguageSpinner.setSelection(Language.CREOLE.ordinal)
-        binding.sourceLanguageSpinner.onItemSelectedListener = onLanguageChanged
-        binding.targetLanguageSpinner.onItemSelectedListener = onLanguageChanged
+        selectLanguage(binding.sourceLanguageInput, languages.firstOrNull { it.code == "ru" }) { selectedSource = it }
+        selectLanguage(binding.targetLanguageInput, languages.firstOrNull { it.code == "crs" }) { selectedTarget = it }
 
         binding.swapLanguagesButton.setOnClickListener {
-            val source = binding.sourceLanguageSpinner.selectedItemPosition
-            val target = binding.targetLanguageSpinner.selectedItemPosition
-            binding.sourceLanguageSpinner.setSelection(target)
-            binding.targetLanguageSpinner.setSelection(source)
+            val source = selectedSource
+            val target = selectedTarget
+            selectLanguage(binding.sourceLanguageInput, target) { selectedSource = it }
+            selectLanguage(binding.targetLanguageInput, source) { selectedTarget = it }
         }
 
         binding.translateButton.setOnClickListener { translate() }
@@ -128,15 +149,14 @@ class TranslationActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean =
         UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
 
-    private val onLanguageChanged = object : android.widget.AdapterView.OnItemSelectedListener {
-        override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) =
-            updateCaveat()
-        override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+    /** Sets both the field's displayed text and the backing selection in one place, so they never drift apart. */
+    private fun selectLanguage(field: android.widget.AutoCompleteTextView, language: MadladLanguage?, assign: (MadladLanguage?) -> Unit) {
+        assign(language)
+        field.setText(language?.let { "${it.name} — ${it.code}" }.orEmpty(), false)
     }
 
     private fun updateCaveat() {
-        binding.translationCaveat.visibility =
-            if (selectedLanguage(binding.targetLanguageSpinner) == Language.CREOLE) View.VISIBLE else View.GONE
+        binding.translationCaveat.visibility = if (selectedTarget?.code == "crs") View.VISIBLE else View.GONE
     }
 
     private fun updateModelNote() {
@@ -149,16 +169,17 @@ class TranslationActivity : AppCompatActivity() {
         binding.translationModelNote.text = getString(R.string.translation_model_note, label ?: getString(R.string.translation_model_note_none))
     }
 
-    private fun selectedLanguage(spinner: android.widget.Spinner): Language =
-        Language.entries[spinner.selectedItemPosition]
-
     private fun translate() {
         val text = binding.translationInput.text?.toString()?.trim().orEmpty()
         if (text.isEmpty()) return
 
-        val source = selectedLanguage(binding.sourceLanguageSpinner)
-        val target = selectedLanguage(binding.targetLanguageSpinner)
-        if (source == target) {
+        val source = selectedSource
+        val target = selectedTarget
+        if (source == null || target == null) {
+            Toast.makeText(this, R.string.translation_no_language, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (source.code == target.code) {
             Toast.makeText(this, R.string.translation_same_language, Toast.LENGTH_SHORT).show()
             return
         }
@@ -175,7 +196,7 @@ class TranslationActivity : AppCompatActivity() {
         // copyable and shareable from LogActivity (see AppLog's own doc
         // comment), and a translation request is exactly the kind of
         // content a user would not expect to see in a bug report.
-        container.appLog.record("TRANSLATE", "${source.englishName} -> ${target.englishName}, ${text.length} chars")
+        container.appLog.record("TRANSLATE", "${source.code} -> ${target.code}, ${text.length} chars")
 
         translateJob = lifecycleScope.launch {
             val prompt = buildPrompt(source, target, text)
@@ -220,16 +241,16 @@ class TranslationActivity : AppCompatActivity() {
      * instruction it understands. Otherwise the chat-instruction prompt, for
      * an ordinary GGUF prompted to translate.
      */
-    private fun buildPrompt(source: Language, target: Language, text: String): String =
+    private fun buildPrompt(source: MadladLanguage, target: MadladLanguage, text: String): String =
         if (TranslationModels.SEEDS.any { it.id == container.settings.translationModel }) {
-            "<2${target.madladCode}> $text"
+            "<2${target.code}> $text"
         } else {
             buildChatPrompt(source, target, text)
         }
 
-    private fun buildChatPrompt(source: Language, target: Language, text: String): String =
+    private fun buildChatPrompt(source: MadladLanguage, target: MadladLanguage, text: String): String =
         "You are a translation engine. Translate the text between triple backticks " +
-            "from ${source.englishName} to ${target.englishName}. " +
+            "from ${source.name} to ${target.name}. " +
             "Reply with only the translation itself, nothing else — no quotes, no notes, no explanation.\n\n" +
             "```\n$text\n```"
 

@@ -18,11 +18,26 @@
             android:paddingHorizontal="12dp"
             android:paddingTop="16dp">
 
-            <Spinner
-                android:id="@+id/sourceLanguageSpinner"
+            <!-- Editable exposed-dropdown, not a plain Spinner: 417 MADLAD-400
+                 languages plus every other model's own name is too many to
+                 scan by eye — typing filters the list live (see
+                 TranslationActivity's LanguageAdapter), searching both the
+                 language name and its code (so "crs" finds Seychellois
+                 Creole even though its name doesn't contain those letters). -->
+            <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1" />
+                android:layout_weight="1"
+                android:hint="@string/translation_source_hint"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
+
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                    android:id="@+id/sourceLanguageInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="text" />
+
+            </com.google.android.material.textfield.TextInputLayout>
 
             <ImageButton
                 android:id="@+id/swapLanguagesButton"
@@ -35,11 +50,20 @@
                 android:src="@drawable/ic_swap_horiz"
                 app:tint="?attr/colorPrimary" />
 
-            <Spinner
-                android:id="@+id/targetLanguageSpinner"
+            <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1" />
+                android:layout_weight="1"
+                android:hint="@string/translation_target_hint"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
+
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                    android:id="@+id/targetLanguageInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="text" />
+
+            </com.google.android.material.textfield.TextInputLayout>
 
         </LinearLayout>
 

@@ -436,9 +436,9 @@
     <string name="translation_failed">Translation failed: %1$s</string>
     <string name="translation_model_note">Model: %1$s</string>
     <string name="translation_model_note_none">No model installed</string>
-    <string name="translation_lang_ru">Russian</string>
-    <string name="translation_lang_en">English</string>
-    <string name="translation_lang_crs">Seychellois Creole</string>
+    <string name="translation_source_hint">Translate from</string>
+    <string name="translation_target_hint">Translate to</string>
+    <string name="translation_no_language">Pick both languages first</string>
 
     <!-- Phrasebook screen: a fixed, pre-checked set of situational phrases —
          see PhrasebookActivity's own doc comment and the pilot data at
