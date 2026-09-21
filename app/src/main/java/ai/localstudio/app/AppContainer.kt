@@ -1548,7 +1548,17 @@ class AppContainer private constructor(private val context: Context) {
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
             defaultRepeatPenalty = settings.repeatPenalty,
-            defaultMaxTokens = if (isLocalOnly) minOf(settings.maxResponseTokens, LOCAL_MAX_OUTPUT_TOKENS) else settings.maxResponseTokens,
+            // A real device report: a general chat model (qwen3.5-4b)
+            // ignored the prompt's "reply with only the translation" and
+            // rambled for 457 tokens before the 120s wall-clock timeout cut
+            // it off — a single translated phrase never legitimately needs
+            // anywhere near LOCAL_MAX_OUTPUT_TOKENS (512, sized for a chat
+            // reply). Capped much lower and unconditionally (not gated on
+            // isLocalOnly — a cloud/AICore model rambling wastes the same
+            // wall-clock time): a model that ignores the instruction now
+            // gets cut off quickly with a wrong-but-fast answer instead of
+            // hanging for two minutes and failing outright.
+            defaultMaxTokens = minOf(settings.maxResponseTokens, TRANSLATION_MAX_OUTPUT_TOKENS),
         )
         return Orchestrator(CapabilityRouter(), executors).also {
             cachedTranslationOrchestrator = it
@@ -1997,6 +2007,11 @@ class AppContainer private constructor(private val context: Context) {
         // A local model's own output length, capped independently of
         // settings.maxResponseTokens — see its call site in buildOrchestrator().
         private const val LOCAL_MAX_OUTPUT_TOKENS = 512
+
+        // A translated phrase's own output length — see its call site in
+        // translationOrchestrator(). Deliberately far below LOCAL_MAX_OUTPUT_TOKENS:
+        // that ceiling is sized for a chat reply, not a single translation.
+        private const val TRANSLATION_MAX_OUTPUT_TOKENS = 200
 
         // Not a real ceiling, just "large enough that a single conversation's
         // worth of memory items is never left behind" — see

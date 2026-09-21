@@ -32,7 +32,17 @@ object TranslationModels {
             paramsLabel = "3B · Q4 · T5 encoder-decoder",
             noteRes = R.string.note_madlad400_3b,
             approxSizeBytes = 1_650_000_000,
-            capabilities = setOf(Capability.TRANSLATION),
+            // TEXT_GENERATION, not just TRANSLATION: a plain-text turn (which
+            // is all TranslationActivity ever sends) routes through
+            // CapabilityRouter to Capability.TEXT_GENERATION regardless of
+            // what the request is actually for — there is no separate
+            // "translation intent" routing anywhere in that router. Without
+            // this, ModelSelector.select(TEXT_GENERATION) finds nothing in
+            // a registry built from just this one candidate and throws
+            // NoModelForCapabilityException — confirmed on a real device:
+            // selecting MADLAD-400 made every translation fail outright,
+            // before nativeGenerateT5 ever got a chance to run.
+            capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
         ),
     )
 }
