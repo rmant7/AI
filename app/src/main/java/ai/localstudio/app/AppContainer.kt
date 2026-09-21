@@ -66,6 +66,7 @@ import ai.localstudio.app.models.LocalModels
 import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
+import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.vosk.VoskDownloads
 import ai.localstudio.app.vosk.VoskFileTranscriber
@@ -1097,8 +1098,15 @@ class AppContainer private constructor(private val context: Context) {
     @Volatile
     var routerSessionActive: Boolean = false
 
-    /** Seeds that are on disk right now, newest state each time it is asked. */
-    fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
+    /**
+     * Seeds that are on disk right now, newest state each time it is asked —
+     * [LocalModels.SEEDS] (chat GGUFs) and [TranslationModels.SEEDS]
+     * (specialized encoder-decoder translation GGUFs) alike, since both are
+     * fetched and stored the same way and [localRegistry] needs to resolve
+     * either kind by id.
+     */
+    fun installedSeeds(): List<LocalModelSeed> =
+        (LocalModels.SEEDS + TranslationModels.SEEDS).filter { modelStore.isInstalled(it) }
 
     val experimentalEmbeddingDownloads = ExperimentalEmbeddingDownloads(
         experimentalEmbeddingStore,

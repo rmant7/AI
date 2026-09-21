@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivityTranslationBinding
+import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.core.engine.UserRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,23 +38,27 @@ import kotlinx.coroutines.withTimeout
  * attribution footer is never appended to the text in the first place, and
  * copying the result copies only the translation.
  *
- * This is still prompting a general-purpose chat model, not a dedicated
- * translation model — this app's llama.cpp bridge
- * ([ai.localstudio.app.llama.LlamaCppRuntime]) only drives decoder-only chat
- * GGUFs, and a real bilingual engine (MarianMT/OPUS-MT, or a T5 model like
- * MADLAD-400) would need a new native runtime this app doesn't have yet. For
- * en/ru that limitation barely shows; for Seychellois Creole it matters — a
- * low-resource language most general models have seen very little of (see
- * [R.string.translation_crs_caveat]) — so CRS output here is a best-effort
- * draft, not a verified translation the way [PhrasebookActivity]'s
- * pre-checked phrases are.
+ * The selected model can be either kind, and they need different prompts:
+ * a [TranslationModels] seed (MADLAD-400, a T5 encoder-decoder model — see
+ * [ai.localstudio.app.llama.LlamaBridge.nativeGenerateT5]) expects only its
+ * own `<2xx> source text` format with no chat framing at all, while an
+ * ordinary chat GGUF from [ai.localstudio.app.models.LocalModels] needs the
+ * instruction-style prompt [buildChatPrompt] builds. [translate] picks
+ * between them by checking whether [Settings.translationModel] names a
+ * [TranslationModels] seed — see [buildPrompt].
+ *
+ * Even with MADLAD-400, Seychellois Creole output is a best-effort draft,
+ * not a verified translation the way [PhrasebookActivity]'s pre-checked
+ * phrases are — and MADLAD-400 support is new, unverified-on-device native
+ * code (see [R.string.models_translation_specialized_note]).
+ * [R.string.translation_crs_caveat] says so plainly, for either kind of model.
  */
 class TranslationActivity : AppCompatActivity() {
 
-    private enum class Language(val englishName: String, val labelRes: Int) {
-        RUSSIAN("Russian", R.string.translation_lang_ru),
-        ENGLISH("English", R.string.translation_lang_en),
-        CREOLE("Seychellois Creole", R.string.translation_lang_crs),
+    private enum class Language(val englishName: String, val madladCode: String, val labelRes: Int) {
+        RUSSIAN("Russian", "ru", R.string.translation_lang_ru),
+        ENGLISH("English", "en", R.string.translation_lang_en),
+        CREOLE("Seychellois Creole", "crs", R.string.translation_lang_crs),
     }
 
     private lateinit var binding: ActivityTranslationBinding
@@ -203,7 +208,22 @@ class TranslationActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * [TranslationModels]' own expected format when that's what's selected —
+     * MADLAD-400 was fine-tuned on `<2xx> source text` and nothing else; an
+     * instruction wrapped around it the way [buildChatPrompt] does would
+     * just be more text for the encoder to (mis)translate, not an
+     * instruction it understands. Otherwise the chat-instruction prompt, for
+     * an ordinary GGUF prompted to translate.
+     */
     private fun buildPrompt(source: Language, target: Language, text: String): String =
+        if (TranslationModels.SEEDS.any { it.id == container.settings.translationModel }) {
+            "<2${target.madladCode}> $text"
+        } else {
+            buildChatPrompt(source, target, text)
+        }
+
+    private fun buildChatPrompt(source: Language, target: Language, text: String): String =
         "You are a translation engine. Translate the text between triple backticks " +
             "from ${source.englishName} to ${target.englishName}. " +
             "Reply with only the translation itself, nothing else — no quotes, no notes, no explanation.\n\n" +

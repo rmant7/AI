@@ -105,6 +105,38 @@ class LlamaBridge {
     ): Int
 
     /**
+     * True for an encoder-decoder (T5-family) GGUF — MADLAD-400 is the one
+     * this app knows about (see `TranslationModels.kt`) — false for every
+     * ordinary decoder-only chat GGUF. Read once, right after [nativeLoad],
+     * to decide whether a turn goes through [nativeGenerate]'s chat-template
+     * path or [nativeGenerateT5]'s.
+     */
+    external fun nativeHasEncoder(handle: Long): Boolean
+
+    /**
+     * Generation for an encoder-decoder model loaded via [nativeLoad] when
+     * [nativeHasEncoder] is true — [sourceText] is fed to the encoder whole
+     * (MADLAD-400's own expected format, `<2xx> source text`, built by the
+     * caller — see [ai.localstudio.app.TranslationActivity]), then the
+     * decoder is sampled token by token the same way [nativeGenerate]'s chat
+     * turns are. Not a variant of [nativeGenerate]: there is no chat
+     * template for a T5 model and no cross-call prefix cache worth keeping
+     * for a one-shot translation, so this is its own, shorter native path.
+     * Same return contract as [nativeGenerate]: tokens produced, or a
+     * negative code on failure.
+     */
+    external fun nativeGenerateT5(
+        handle: Long,
+        sourceText: String,
+        maxTokens: Int,
+        temperature: Float,
+        topP: Float,
+        topK: Int,
+        repeatPenalty: Float,
+        callback: TokenSink,
+    ): Int
+
+    /**
      * Loads the vision encoder a multimodal model ships as a separate file
      * (mmproj) alongside its main GGUF — llama.cpp keeps the two apart, so
      * this is a second call after [nativeLoad], not part of it. Returns

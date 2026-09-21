@@ -28,6 +28,7 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
+import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.app.vosk.VoskDownloadState
 import ai.localstudio.app.vosk.VoskModelSeed
 import ai.localstudio.app.vosk.VoskModelStore
@@ -381,7 +382,7 @@ class ModelsActivity : AppCompatActivity() {
         // or versions never touches app-private storage on its own, so
         // without this such a file just sits there, invisible and
         // undeletable through the app, for as long as it stays installed.
-        val orphans = container.modelStore.orphanedFiles(LocalModels.SEEDS + customSeeds)
+        val orphans = container.modelStore.orphanedFiles(LocalModels.SEEDS + TranslationModels.SEEDS + customSeeds)
         if (orphans.isNotEmpty()) {
             val totalBytes = orphans.sumOf { it.length() }
             add(
@@ -406,49 +407,56 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun translationRows(device: DeviceProfile): List<Row> = buildList {
         if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
+
+        // Specialized first: an actual translation model, not a chat model
+        // prompted for the task — see TranslationModels' own doc comment on
+        // why this is a separate catalog rather than folded into the list
+        // below.
+        add(Row.Header(getString(R.string.models_translation_specialized_header)))
+        add(Row.Note(getString(R.string.models_translation_specialized_note)))
+        TranslationModels.SEEDS.forEach { seed -> add(translationModelRow(seed, device)) }
+
         add(Row.Note(getString(R.string.models_translation_note)))
         add(Row.Header(getString(R.string.models_local_header)))
-
-        val translationModel = container.settings.translationModel
-
-        (LocalModels.SEEDS + customSeeds).forEach { seed ->
-            val state = container.downloads.stateOf(seed)
-            val selected = translationModel == seed.id
-            val fitsBudget = fitsRamBudget(seed, device)
-
-            add(
-                Row.Model(
-                    title = seed.title,
-                    subtitle = buildString {
-                        append(seed.paramsLabel)
-                        if (seed.approxSizeBytes > 0) append(" · ~${size(seed.approxSizeBytes)}")
-                        append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
-                        if (!fitsBudget) append(" · ").append(getString(R.string.model_exceeds_ram_budget))
-                    },
-                    selected = selected,
-                    status = textStatus(state, container.modelStore.installedSize(seed)),
-                    progress = (state as? DownloadState.Running)?.progress?.fraction,
-                    indeterminate = state is DownloadState.Resolving,
-                    primaryLabel = when (state) {
-                        is DownloadState.Installed ->
-                            getString(if (selected) R.string.model_installed else R.string.model_use)
-                        is DownloadState.Running, is DownloadState.Resolving -> getString(R.string.model_cancel)
-                        is DownloadState.Failed -> getString(R.string.model_retry)
-                        DownloadState.Idle -> getString(R.string.model_download)
-                    },
-                    primaryEnabled = !(state is DownloadState.Installed && selected),
-                    secondaryLabel = when (state) {
-                        is DownloadState.Failed -> getString(R.string.model_details)
-                        is DownloadState.Installed -> getString(R.string.model_delete)
-                        else -> null
-                    },
-                    onPrimary = { onTranslationPrimary(seed) },
-                    onSecondary = { onTranslationSecondary(seed) },
-                ),
-            )
-        }
+        (LocalModels.SEEDS + customSeeds).forEach { seed -> add(translationModelRow(seed, device)) }
 
         add(Row.Custom)
+    }
+
+    private fun translationModelRow(seed: LocalModelSeed, device: DeviceProfile): Row.Model {
+        val state = container.downloads.stateOf(seed)
+        val selected = container.settings.translationModel == seed.id
+        val fitsBudget = fitsRamBudget(seed, device)
+
+        return Row.Model(
+            title = seed.title,
+            subtitle = buildString {
+                append(seed.paramsLabel)
+                if (seed.approxSizeBytes > 0) append(" · ~${size(seed.approxSizeBytes)}")
+                append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
+                if (!fitsBudget) append(" · ").append(getString(R.string.model_exceeds_ram_budget))
+                append("\n").append(seed.resolvedNote(this@ModelsActivity))
+            },
+            selected = selected,
+            status = textStatus(state, container.modelStore.installedSize(seed)),
+            progress = (state as? DownloadState.Running)?.progress?.fraction,
+            indeterminate = state is DownloadState.Resolving,
+            primaryLabel = when (state) {
+                is DownloadState.Installed ->
+                    getString(if (selected) R.string.model_installed else R.string.model_use)
+                is DownloadState.Running, is DownloadState.Resolving -> getString(R.string.model_cancel)
+                is DownloadState.Failed -> getString(R.string.model_retry)
+                DownloadState.Idle -> getString(R.string.model_download)
+            },
+            primaryEnabled = !(state is DownloadState.Installed && selected),
+            secondaryLabel = when (state) {
+                is DownloadState.Failed -> getString(R.string.model_details)
+                is DownloadState.Installed -> getString(R.string.model_delete)
+                else -> null
+            },
+            onPrimary = { onTranslationPrimary(seed) },
+            onSecondary = { onTranslationSecondary(seed) },
+        )
     }
 
     // ── Embedding model ────────────────────────────────────────────────────

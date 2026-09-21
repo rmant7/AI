@@ -171,7 +171,15 @@ class LlamaCppRuntime(
             }
         } ?: false
 
-        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, log)
+        // Read once here rather than on every generate() call — it's a read
+        // of static model metadata (llama_model_has_encoder), unchanging for
+        // the life of this handle, same reasoning as caching hasVision above.
+        val hasEncoder = LlamaBridge.nativeOpMutex.withLock {
+            runCatching { bridge.nativeHasEncoder(handle) }.getOrDefault(false)
+        }
+        if (hasEncoder) log("LOCAL_LOAD", "${file.name}: encoder-decoder model — routing generate() through nativeGenerateT5")
+
+        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, hasEncoder, log)
     }
 }
 
@@ -182,6 +190,8 @@ private class LlamaTextModel(
     private val handle: Long,
     /** Whether [LlamaBridge.nativeLoadMmproj] succeeded for this handle — see [generate]. */
     private val hasVision: Boolean,
+    /** Whether this handle is an encoder-decoder (T5-family) model — see [generate]. */
+    private val hasEncoder: Boolean,
     private val log: (tag: String, message: String) -> Unit,
 ) : TextModelHandle {
 
@@ -235,7 +245,23 @@ private class LlamaTextModel(
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
             }
             val produced = LlamaBridge.nativeOpMutex.withLock {
-                if (image != null) {
+                if (hasEncoder) {
+                    // T5-family (MADLAD-400): request.prompt is already the
+                    // model's own expected input (`<2xx> source text`, built
+                    // by TranslationActivity) — there is no chat template, no
+                    // system prompt, and no vision support for this
+                    // architecture, so none of that applies here.
+                    bridge.nativeGenerateT5(
+                        handle = handle,
+                        sourceText = request.prompt,
+                        maxTokens = request.maxTokens,
+                        temperature = request.temperature.toFloat(),
+                        topP = request.topP.toFloat(),
+                        topK = request.topK,
+                        repeatPenalty = request.repeatPenalty.toFloat(),
+                        callback = sink,
+                    )
+                } else if (image != null) {
                     // ImageRef.uri is always a "data:<mime>;base64,<payload>" string
                     // here, never a content:// or file path — ChatActivity.attachImage()
                     // builds it that way specifically because core/openai are plain JVM

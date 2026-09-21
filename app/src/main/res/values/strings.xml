@@ -260,7 +260,10 @@
     <string name="models_vosk_note">Vosk models work fully offline once downloaded. \"Use\" makes Vosk the active engine for both the live-mic section and file transcription on the Transcribe screen — see docs/14-vosk-spike.md. Switching back to a Whisper model does the same for Whisper; each engine still remembers its own last pick.</string>
     <string name="models_switched_chat">Chat switched to %1$s</string>
     <string name="models_switched_translation">Translation now uses %1$s</string>
-    <string name="models_translation_note">Prompts this model to translate — there is no dedicated translation engine installed. Independent of the chat model above: pick a smaller, faster one here if you want, without changing what chat answers with.</string>
+    <string name="models_translation_specialized_header">Specialized translation models</string>
+    <string name="models_translation_specialized_note">Trained for translation specifically, not prompted like a chat model — supports many languages including low-resource ones. New native code in this app (encoder-decoder inference); flag anything that looks wrong via Error log.</string>
+    <string name="models_translation_note">A general chat model, prompted to translate instead — works for common languages but has seen little of a low-resource one like Seychellois Creole. Independent of the chat model above: pick a smaller, faster one here if you want, without changing what chat answers with.</string>
+    <string name="note_madlad400_3b">Google MADLAD-400: 450+ languages including Seychellois Creole. ~1.65GB.</string>
     <string name="models_switched_voice">Voice input switched to %1$s</string>
     <string name="model_state_installed">Installed</string>
     <string name="model_state_resolving">Looking for file: %1$s…</string>

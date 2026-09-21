@@ -904,6 +904,125 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
 }
 
 /**
+ * True for an encoder-decoder GGUF (T5-family — MADLAD-400 is the one this
+ * app knows about, see TranslationModels.kt) loaded through [nativeLoad],
+ * false for every ordinary decoder-only chat GGUF. [LlamaCppRuntime] reads
+ * this once after loading to decide whether a turn goes through
+ * [nativeGenerate]'s chat-template path or [nativeGenerateT5]'s — feeding a
+ * decoder-only model's prompt straight to [nativeGenerateT5] would call
+ * llama_encode() on a model that has no encoder at all (undefined behaviour
+ * upstream); the reverse would run T5 through a chat template it was never
+ * trained on and produce nonsense, not an error. Cheap: reads a field
+ * already resolved at load time, no extra work over what nativeLoad did.
+ */
+JNIEXPORT jboolean JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeHasEncoder(JNIEnv *, jobject, jlong handle) {
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr || session->model == nullptr) return JNI_FALSE;
+    return llama_model_has_encoder(session->model) ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * Generation for an encoder-decoder (T5-family) model — MADLAD-400's own
+ * expected input, `<2xx> source text` with `xx` the target language code
+ * (built in Kotlin; see TranslationActivity), fed to the encoder whole, then
+ * the decoder sampled token by token the same way [nativeGenerate]'s chat
+ * path already does.
+ *
+ * Deliberately not folded into [nativeGenerate]: that function's prompt
+ * comes from [applyChatTemplate] (a chat turn) and reuses a cross-call KV
+ * prefix cache ([Session::cachedTokens]) tuned for a resent multi-turn
+ * conversation. Neither applies here — there is no chat template for T5, and
+ * a one-shot translation call has no meaningful prefix to reuse — so this is
+ * its own function with its own, much shorter, one-shot path: tokenize,
+ * [llama_encode] once, prime the decoder with its start token, then hand off
+ * to the exact same [runDecodeLoop] the chat path uses for everything after
+ * that first token. `llama_memory_seq_rm(..., -1, -1)` up front clears
+ * whatever a *previous* call on this same session left behind — encoder
+ * output and decoder KV state both — since unlike chat turns, one
+ * translation request has nothing worth carrying into the next.
+ */
+JNIEXPORT jint JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateT5(
+    JNIEnv *env, jobject, jlong handle, jstring sourceText,
+    jint maxTokens, jfloat temperature, jfloat topP, jint topK, jfloat repeatPenalty,
+    jobject callback) {
+
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr) return -1;
+    session->cancelled.store(false);
+    raiseThreadPriority();
+  try {
+    jclass callbackClass = env->GetObjectClass(callback);
+    jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
+    if (onToken == nullptr) return -2;
+
+    const std::string source = toStdString(env, sourceText);
+
+    std::vector<llama_token> tokens(source.size() + 64);
+    int32_t count = llama_tokenize(
+        session->vocab, source.c_str(), (int32_t) source.size(),
+        tokens.data(), (int32_t) tokens.size(), true, true);
+    if (count < 0) {
+        tokens.resize(-count);
+        count = llama_tokenize(
+            session->vocab, source.c_str(), (int32_t) source.size(),
+            tokens.data(), (int32_t) tokens.size(), true, true);
+    }
+    if (count <= 0) return -3;
+    tokens.resize(count);
+
+    const uint32_t contextSize = llama_n_ctx(session->ctx);
+    const uint32_t reserved = std::min<uint32_t>((uint32_t) std::max(maxTokens, 0) + 4, contextSize / 2);
+    if ((uint32_t) count + reserved >= contextSize) {
+        count = (int32_t) contextSize - (int32_t) reserved - 1;
+        if (count <= 0) return -4; // context too small to hold any source text at all
+    }
+
+    // No prefix to reuse across calls — see this function's own doc comment.
+    llama_memory_seq_rm(llama_get_memory(session->ctx), 0, -1, -1);
+
+    llama_batch encoderBatch = llama_batch_init(count, 0, 1);
+    for (int32_t i = 0; i < count; i++) {
+        encoderBatch.token[i] = tokens[i];
+        encoderBatch.pos[i] = i;
+        encoderBatch.n_seq_id[i] = 1;
+        encoderBatch.seq_id[i][0] = 0;
+        encoderBatch.logits[i] = false; // the encoder's own output isn't sampled
+    }
+    encoderBatch.n_tokens = count;
+    const int32_t encodeResult = llama_encode(session->ctx, encoderBatch);
+    llama_batch_free(encoderBatch);
+    if (encodeResult != 0) {
+        LOGE("nativeGenerateT5: encode failed (%d)", encodeResult);
+        return -5;
+    }
+
+    llama_token decoderStart = llama_model_decoder_start_token(session->model);
+    if (decoderStart < 0) decoderStart = llama_vocab_bos(session->vocab);
+    if (llama_decode(session->ctx, llama_batch_get_one(&decoderStart, 1)) != 0) {
+        LOGE("nativeGenerateT5: decoder priming failed");
+        return -6;
+    }
+
+    DecodeLoopResult result = runDecodeLoop(
+        env, session, callback, onToken, maxTokens, temperature, topP, topK, repeatPenalty,
+        /*used=*/1, contextSize);
+    // Not tracked in Session::cachedTokens/promptTokens — those belong to
+    // nativeGenerate's chat-turn cache, which this one-shot path doesn't
+    // participate in.
+    session->decodedTokens = result.produced;
+    return result.produced;
+  } catch (const std::exception &e) {
+    LOGE("nativeGenerateT5: exception: %s", e.what());
+    return -10;
+  } catch (...) {
+    LOGE("nativeGenerateT5: unknown exception");
+    return -10;
+  }
+}
+
+/**
  * Loads the projector companion file a vision-capable model ships alongside
  * its main GGUF — llama.cpp keeps the vision encoder in a separate file
  * (mmproj), not baked into the model weights, so this is a second call after
