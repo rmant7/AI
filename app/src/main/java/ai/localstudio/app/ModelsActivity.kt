@@ -209,18 +209,21 @@ class ModelsActivity : AppCompatActivity() {
 
     // ── Translation model ─────────────────────────────────────────────────
     //
-    // Shares [LocalModels.SEEDS]/[AppContainer.downloads] with the Text tab —
-    // there is no separate catalog of translation-only models to download
-    // (see TranslationActivity's own doc comment on why: this app's
-    // llama.cpp bridge only runs decoder-only chat GGUFs, so "the translation
-    // model" is really just whichever chat model has been prompted for the
-    // task). What this tab adds on top is letting that choice be independent
-    // of [Settings.chatModel] — e.g. a small, fast model for translation
-    // while chat keeps using a larger one.
+    // Three kinds of candidate, all picked the same way (tap "Use", stored in
+    // [Settings.translationModel]) but fetched/run differently: [TranslationModels]
+    // (a specialized T5 GGUF), [LocalModels] (an ordinary chat GGUF prompted
+    // for the task), and AICore/Gemini Nano — the last one shares
+    // [AppContainer.downloads] with nothing, since there is no file to fetch;
+    // it is either available on this device or it isn't, discovered only
+    // when actually asked (see [AppContainer.translationOrchestrator]'s own
+    // doc comment). What this tab adds over just using the chat model as-is:
+    // the choice is independent of [Settings.chatModel] — pick a different
+    // model (or Gemini Nano) for translation without changing what chat
+    // answers with.
 
     private fun onTranslationPrimary(seed: LocalModelSeed) {
         when (container.downloads.stateOf(seed)) {
-            is DownloadState.Installed -> useForTranslation(seed)
+            is DownloadState.Installed -> useForTranslation(seed.id, seed.title)
             is DownloadState.Running, is DownloadState.Resolving -> container.downloads.cancel(seed)
             else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
         }
@@ -236,9 +239,9 @@ class ModelsActivity : AppCompatActivity() {
         }
     }
 
-    private fun useForTranslation(seed: LocalModelSeed) {
-        container.settings.translationModel = seed.id
-        Toast.makeText(this, getString(R.string.models_switched_translation, seed.title), Toast.LENGTH_SHORT).show()
+    private fun useForTranslation(modelId: String, title: String) {
+        container.settings.translationModel = modelId
+        Toast.makeText(this, getString(R.string.models_switched_translation, title), Toast.LENGTH_SHORT).show()
         render()
     }
 
@@ -408,7 +411,11 @@ class ModelsActivity : AppCompatActivity() {
     private fun translationRows(device: DeviceProfile): List<Row> = buildList {
         if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
 
-        // Specialized first: an actual translation model, not a chat model
+        add(Row.Header(getString(R.string.models_translation_aicore_header)))
+        add(Row.Note(getString(R.string.models_translation_aicore_note)))
+        add(aicoreTranslationRow())
+
+        // Specialized next: an actual translation model, not a chat model
         // prompted for the task — see TranslationModels' own doc comment on
         // why this is a separate catalog rather than folded into the list
         // below.
@@ -421,6 +428,33 @@ class ModelsActivity : AppCompatActivity() {
         (LocalModels.SEEDS + customSeeds).forEach { seed -> add(translationModelRow(seed, device)) }
 
         add(Row.Custom)
+    }
+
+    /**
+     * Not a [Row.Model] built from a [LocalModelSeed] like every other row
+     * here — Gemini Nano is nothing this app downloads or stores itself (see
+     * [AppContainer.translationOrchestrator]'s own doc comment), so there is
+     * no file, no [DownloadState], nothing to delete. Selecting it just
+     * writes [CloudProviders.AICORE]'s id to [Settings.translationModel];
+     * whether it is actually usable on this device is discovered the first
+     * time a translation is actually attempted, same as it already is for
+     * AICore as a chat candidate.
+     */
+    private fun aicoreTranslationRow(): Row.Model {
+        val selected = container.settings.translationModel == CloudProviders.AICORE.id
+        return Row.Model(
+            title = getString(CloudProviders.AICORE.titleRes),
+            subtitle = getString(R.string.models_translation_aicore_subtitle),
+            selected = selected,
+            status = null,
+            progress = null,
+            indeterminate = false,
+            primaryLabel = getString(if (selected) R.string.model_installed else R.string.model_use),
+            primaryEnabled = !selected,
+            secondaryLabel = null,
+            onPrimary = { useForTranslation(CloudProviders.AICORE.id, getString(CloudProviders.AICORE.titleRes)) },
+            onSecondary = {},
+        )
     }
 
     private fun translationModelRow(seed: LocalModelSeed, device: DeviceProfile): Row.Model {

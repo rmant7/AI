@@ -1441,7 +1441,22 @@ class AppContainer private constructor(private val context: Context) {
     private var cachedTranslationSignature: String? = null
 
     /**
-     * A dedicated single-local-candidate orchestrator for [TranslationActivity] —
+     * The one [RuntimeManager] behind [translationOrchestrator] — tracked
+     * separately from [runtimeManagers] and deliberately never added to it.
+     * [buildOrchestrator] sweeps every manager in that shared list with
+     * `evictIdle()` each time *any* of them is rebuilt (chat's own, a
+     * Compare-mode candidate's, ...) — sharing it here meant switching
+     * screens between Chat and Translation evicted whichever one hadn't
+     * been touched most recently even though nothing about it had changed,
+     * observed on a real device as a ~7s reload on the very next translation
+     * after a successful, instant, cache-reusing one moments before. Kept
+     * out of that list, this manager is only ever evicted by
+     * [translationOrchestrator] itself, right before it replaces it.
+     */
+    private var cachedTranslationManager: RuntimeManager? = null
+
+    /**
+     * A dedicated single-candidate orchestrator for [TranslationActivity] —
      * deliberately not [orchestrator], which wires whatever chat is currently
      * configured for (AICore, a cloud provider, or a multi-candidate fallback
      * chain). Two reasons to keep this separate rather than reuse it:
@@ -1457,19 +1472,41 @@ class AppContainer private constructor(private val context: Context) {
      *    "Answer from: X · Ns" footer is never appended to the answer text in
      *    the first place — no stripping needed on the way back out.
      *
-     * Null when no local model is installed at all — [TranslationActivity]
-     * shows that as "download a model first" rather than silently falling
-     * back to AICore or a cloud provider behind the user's back.
+     * [Settings.translationModel] names either a [LocalModels]/[TranslationModels]
+     * seed (routed through [LlamaCppRuntime], same as chat) or
+     * [CloudProviders.AICORE]'s id (routed through [AiCoreRuntime], same
+     * on-device candidate [aicoreCandidate] builds for chat) — Gemini Nano is
+     * "on-device" in the same sense a downloaded GGUF is, just with nothing
+     * this app fetches or stores itself, so it belongs in the same picker
+     * rather than being chat-only. Null only when [chosenId] names neither
+     * and no local model is installed at all — [TranslationActivity] shows
+     * that as "pick a model first" rather than silently falling back to
+     * whatever chat happens to be configured for.
      */
     fun translationOrchestrator(): Orchestrator? {
-        val registry = localRegistry()
         val chosenId = settings.translationModel
-        val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
-            ?: effectiveLocalSelection(registry)
-            ?: return null
+        val candidate = if (chosenId == CloudProviders.AICORE.id) {
+            aicoreCandidate()
+        } else {
+            val registry = localRegistry()
+            val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
+                ?: effectiveLocalSelection(registry)
+                ?: return null
+            FallbackCandidate(
+                label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
+                runtime = LlamaCppRuntime(
+                    contextTokens = effectiveContextTokens(),
+                    log = appLog::record,
+                    availableRamBytes = { currentAvailableRamBytes(context) },
+                ),
+                model = selected.model,
+                binding = selected.binding,
+            )
+        }
 
         val signature = listOf(
-            selected.model.id,
+            candidate.model.id,
+            candidate.binding.runtime.id,
             effectiveContextTokens(),
             settings.temperature,
             settings.topP,
@@ -1479,19 +1516,44 @@ class AppContainer private constructor(private val context: Context) {
         ).joinToString("|")
         cachedTranslationOrchestrator?.takeIf { cachedTranslationSignature == signature }?.let { return it }
 
-        val candidate = FallbackCandidate(
-            label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
-            runtime = LlamaCppRuntime(
-                contextTokens = effectiveContextTokens(),
-                log = appLog::record,
-                availableRamBytes = { currentAvailableRamBytes(context) },
-            ),
-            model = selected.model,
-            binding = selected.binding,
+        // Frees whatever the *previous* signature's manager was holding —
+        // see cachedTranslationManager's own doc comment for why this is a
+        // manually-scoped equivalent of buildOrchestrator's shared-list
+        // sweep rather than that sweep itself.
+        cachedTranslationManager?.let { existing -> kotlinx.coroutines.runBlocking { existing.evictIdle() } }
+
+        val isLocalOnly = candidate.binding.runtime == RuntimeKind.LLAMA_CPP
+        val manager = RuntimeManager(
+            budgetBytes = device.usableRamBytes,
+            runtimes = buildMap {
+                put(candidate.runtime.kind, candidate.runtime)
+                put(whisperCppRuntime.kind, whisperCppRuntime)
+            },
         )
-        return buildOrchestrator(candidate.runtime, true, listOf(candidate)).also {
+        val executors = NodeExecutors(
+            selector = ModelSelector(registry(candidate.runtime, listOf(candidate)), device),
+            runtimeManager = manager,
+            contextEngine = ContextEngine(),
+            memory = memory,
+            memoryExperiment = memoryExperimentRunner,
+            memoryExperimentMode = ExperimentMode.COMMERCIAL_MEMORY,
+            // Never the user's chat persona/house-rules — a translation
+            // prompt is already fully self-contained (see TranslationActivity.buildPrompt),
+            // and a system prompt telling the model to, say, "always answer
+            // as a pirate" is exactly the kind of thing that corrupts a
+            // translation without it being obvious why.
+            systemPrompt = null,
+            contextWindowTokens = if (isLocalOnly) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
+            defaultTemperature = settings.temperature,
+            defaultTopP = settings.topP,
+            defaultTopK = settings.topK,
+            defaultRepeatPenalty = settings.repeatPenalty,
+            defaultMaxTokens = if (isLocalOnly) minOf(settings.maxResponseTokens, LOCAL_MAX_OUTPUT_TOKENS) else settings.maxResponseTokens,
+        )
+        return Orchestrator(CapabilityRouter(), executors).also {
             cachedTranslationOrchestrator = it
             cachedTranslationSignature = signature
+            cachedTranslationManager = manager
         }
     }
 

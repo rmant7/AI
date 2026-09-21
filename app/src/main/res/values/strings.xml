@@ -260,6 +260,9 @@
     <string name="models_vosk_note">Vosk models work fully offline once downloaded. \"Use\" makes Vosk the active engine for both the live-mic section and file transcription on the Transcribe screen — see docs/14-vosk-spike.md. Switching back to a Whisper model does the same for Whisper; each engine still remembers its own last pick.</string>
     <string name="models_switched_chat">Chat switched to %1$s</string>
     <string name="models_switched_translation">Translation now uses %1$s</string>
+    <string name="models_translation_aicore_header">On-device, no download</string>
+    <string name="models_translation_aicore_note">Google Gemini Nano, if this device has it — nothing to fetch or store, availability is discovered the first time it\'s actually asked to translate.</string>
+    <string name="models_translation_aicore_subtitle">Gemini Nano via AICore · availability varies by device</string>
     <string name="models_translation_specialized_header">Specialized translation models</string>
     <string name="models_translation_specialized_note">Trained for translation specifically, not prompted like a chat model — supports many languages including low-resource ones. New native code in this app (encoder-decoder inference); flag anything that looks wrong via Error log.</string>
     <string name="models_translation_note">A general chat model, prompted to translate instead — works for common languages but has seen little of a low-resource one like Seychellois Creole. Independent of the chat model above: pick a smaller, faster one here if you want, without changing what chat answers with.</string>

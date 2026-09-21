@@ -262,6 +262,9 @@
     <string name="models_vosk_note">Модели Vosk работают полностью офлайн после загрузки. «Использовать» делает Vosk активным движком и для секции живого микрофона, и для транскрипции файлов на экране «Транскрипция» — см. docs/14-vosk-spike.md. Переключение обратно на модель Whisper делает активным его; каждый движок помнит свой последний выбор отдельно.</string>
     <string name="models_switched_chat">Чат переключён на %1$s</string>
     <string name="models_switched_translation">Перевод теперь использует %1$s</string>
+    <string name="models_translation_aicore_header">На устройстве, без скачивания</string>
+    <string name="models_translation_aicore_note">Google Gemini Nano, если она есть на устройстве — скачивать и хранить нечего, доступность выясняется только при реальной попытке перевода.</string>
+    <string name="models_translation_aicore_subtitle">Gemini Nano через AICore · доступность зависит от устройства</string>
     <string name="models_translation_specialized_header">Специализированные модели перевода</string>
     <string name="models_translation_specialized_note">Обучена именно для перевода, а не через промпт как чат-модель — поддерживает много языков, включая малоресурсные. Новый нативный код в этом приложении (encoder-decoder инференс); если перевод выглядит странно — отметь это через журнал ошибок.</string>
     <string name="models_translation_note">Обычная чат-модель, переводит через промпт — нормально работает с распространёнными языками, но почти не видела малоресурсный сейшельский креольский. Выбор независим от модели чата выше: можно взять модель поменьше и побыстрее только для перевода, не трогая чат.</string>

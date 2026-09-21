@@ -140,8 +140,12 @@ class TranslationActivity : AppCompatActivity() {
     }
 
     private fun updateModelNote() {
-        val label = container.settings.translationModel.ifBlank { container.settings.chatModelFor(CloudProviders.LOCAL.id) }
-            .ifBlank { null }
+        val modelId = container.settings.translationModel.ifBlank { container.settings.chatModelFor(CloudProviders.LOCAL.id) }
+        val label = when {
+            modelId == CloudProviders.AICORE.id -> getString(CloudProviders.AICORE.titleRes)
+            modelId.isNotBlank() -> modelId
+            else -> null
+        }
         binding.translationModelNote.text = getString(R.string.translation_model_note, label ?: getString(R.string.translation_model_note_none))
     }
 
