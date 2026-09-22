@@ -120,6 +120,16 @@ class ModelsActivity : AppCompatActivity() {
                 else -> Category.TEXT
             }
             render()
+            // Real device report: switching to Translation landed scrolled
+            // to wherever the previously-shown category (Text, with its own
+            // much longer general chat-model list) happened to leave the
+            // RecyclerView, well past the specialized MADLAD-400 section
+            // this tab actually leads with — a plain notifyDataSetChanged()
+            // (inside render(), via DiffUtil) never resets scroll position
+            // on its own. Every render() from here on (a download's own
+            // progress ticking, for one) should still leave scroll alone;
+            // this only fires on an actual tab switch.
+            binding.models.scrollToPosition(0)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
