@@ -499,6 +499,23 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     contextParams.n_batch = BATCH_SIZE;
     contextParams.n_threads = threads;
     contextParams.n_threads_batch = threads;
+    // llama_context_default_params() leaves this false — fine for every
+    // decoder-only chat model this function loads, but an encoder-decoder
+    // (T5-family, MADLAD-400) needs its own encoder pass's output actually
+    // extracted: llama_encode()'s T5 branch only populates the
+    // cross-attention state (cross.v_embd / cross.n_enc / cross.seq_ids_enc)
+    // the decoder later reads from when its embd output tensor is non-null,
+    // which requires this flag. Left false, that branch is silently skipped
+    // — the decoder then cross-attends against empty/stale state, which is
+    // exactly the kind of invariant a ggml assertion trips on (observed on a
+    // real device as SIGILL/ILL_ILLOPC, not a plain segfault). Checked on
+    // the model rather than nativeHasEncoder(handle) because the context —
+    // and therefore a handle — doesn't exist yet at this point; scoped to
+    // T5 models only since every other caller of nativeLoad doesn't need
+    // the extra extraction cost.
+    if (llama_model_has_encoder(model)) {
+        contextParams.embeddings = true;
+    }
 
     llama_context *ctx = llama_init_from_model(model, contextParams);
     if (ctx == nullptr) {
