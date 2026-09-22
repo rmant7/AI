@@ -443,12 +443,13 @@ class ModelsActivity : AppCompatActivity() {
                     },
                     selected = selected,
                     status = textStatus(state, container.modelStore.installedSize(seed)),
-                    progress = (state as? DownloadState.Running)?.progress?.fraction,
+                    progress = downloadProgress(state, seed),
                     indeterminate = state is DownloadState.Resolving,
                     primaryLabel = when (state) {
                         is DownloadState.Installed ->
                             getString(if (selected) R.string.model_installed else R.string.model_use)
                         is DownloadState.Running -> getString(R.string.model_pause)
+                        is DownloadState.Paused -> getString(R.string.model_resume)
                         is DownloadState.Resolving -> getString(R.string.model_cancel)
                         is DownloadState.Failed -> getString(R.string.model_retry)
                         DownloadState.Idle -> getString(R.string.model_download)
@@ -457,6 +458,7 @@ class ModelsActivity : AppCompatActivity() {
                     secondaryLabel = when (state) {
                         is DownloadState.Failed -> getString(R.string.model_details)
                         is DownloadState.Installed -> getString(R.string.model_delete)
+                        is DownloadState.Paused -> getString(R.string.model_delete)
                         else -> null
                     },
                     onPrimary = { onTextPrimary(seed) },
@@ -577,12 +579,13 @@ class ModelsActivity : AppCompatActivity() {
             },
             selected = selected,
             status = textStatus(state, container.modelStore.installedSize(seed)),
-            progress = (state as? DownloadState.Running)?.progress?.fraction,
+            progress = downloadProgress(state, seed),
             indeterminate = state is DownloadState.Resolving,
             primaryLabel = when (state) {
                 is DownloadState.Installed ->
                     getString(if (selected) R.string.model_installed else R.string.model_use)
                 is DownloadState.Running -> getString(R.string.model_pause)
+                is DownloadState.Paused -> getString(R.string.model_resume)
                 is DownloadState.Resolving -> getString(R.string.model_cancel)
                 is DownloadState.Failed -> getString(R.string.model_retry)
                 DownloadState.Idle -> getString(R.string.model_download)
@@ -591,6 +594,7 @@ class ModelsActivity : AppCompatActivity() {
             secondaryLabel = when (state) {
                 is DownloadState.Failed -> getString(R.string.model_details)
                 is DownloadState.Installed -> getString(R.string.model_delete)
+                is DownloadState.Paused -> getString(R.string.model_delete)
                 else -> null
             },
             onPrimary = { onTranslationPrimary(seed) },
@@ -829,6 +833,7 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun textStatus(state: DownloadState, installedBytes: Long): String? = when (state) {
         is DownloadState.Installed -> getString(R.string.model_state_installed) + " · ${size(installedBytes)}"
+        is DownloadState.Paused -> getString(R.string.model_state_paused, size(state.partialBytes))
         is DownloadState.Resolving -> getString(R.string.model_state_resolving, state.repoId)
         is DownloadState.Running ->
             getString(
@@ -839,6 +844,20 @@ class ModelsActivity : AppCompatActivity() {
             )
         is DownloadState.Failed -> getString(R.string.model_state_error, state.message.lineSequence().first())
         DownloadState.Idle -> null
+    }
+
+    /**
+     * [DownloadState.Running]'s own progress, or — for [DownloadState.Paused]
+     * — [LocalModelSeed.approxSizeBytes] standing in for the real total
+     * (not re-resolved until the download actually restarts), same
+     * approximation [fitLabel]/[fitsBudget] already use for this seed
+     * elsewhere on this screen.
+     */
+    private fun downloadProgress(state: DownloadState, seed: LocalModelSeed): Float? = when (state) {
+        is DownloadState.Running -> state.progress.fraction
+        is DownloadState.Paused ->
+            seed.approxSizeBytes.takeIf { it > 0 }?.let { (state.partialBytes.toFloat() / it).coerceIn(0f, 1f) }
+        else -> null
     }
 
     private fun addCustomRepo() {

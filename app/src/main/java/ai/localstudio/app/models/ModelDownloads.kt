@@ -11,6 +11,16 @@ import kotlinx.coroutines.launch
 
 sealed interface DownloadState {
     data object Idle : DownloadState
+
+    /**
+     * Not currently downloading, but a `.part` file with [partialBytes]
+     * already in it sits on disk — [ModelDownloads.start] resumes it via
+     * HTTP Range rather than starting over. Real device report: after a
+     * process kill (or a deliberate pause) mid-download, the Models screen
+     * showed a plain "Download" button with no sign that ~5GB was already
+     * on disk, indistinguishable from a model never touched at all.
+     */
+    data class Paused(val partialBytes: Long) : DownloadState
     data class Resolving(val repoId: String) : DownloadState
     data class Running(val progress: DownloadProgress, val source: String) : DownloadState
     data class Failed(val message: String) : DownloadState
@@ -58,8 +68,11 @@ class ModelDownloads(
      */
     private val mmprojBackfillCooldownUntil = mutableMapOf<String, Long>()
 
-    fun stateOf(seed: LocalModelSeed): DownloadState =
-        states.value[seed.id] ?: if (store.isInstalled(seed)) DownloadState.Installed else DownloadState.Idle
+    fun stateOf(seed: LocalModelSeed): DownloadState = states.value[seed.id] ?: when {
+        store.isInstalled(seed) -> DownloadState.Installed
+        store.partialSize(seed) > 0 -> DownloadState.Paused(store.partialSize(seed))
+        else -> DownloadState.Idle
+    }
 
     fun start(seed: LocalModelSeed) {
         if (jobs[seed.id]?.isActive == true) return
@@ -184,8 +197,12 @@ class ModelDownloads(
     fun cancel(seed: LocalModelSeed) {
         downloaders[seed.id]?.cancel()
         jobs[seed.id]?.cancel()
-        // The partial file is kept on purpose: the next attempt resumes from it.
-        publish(seed, DownloadState.Idle)
+        // The partial file is kept on purpose: the next attempt resumes from
+        // it — published as DownloadState.Paused, not a blanket Idle, so the
+        // Models screen can say so immediately rather than only after a
+        // restart (see stateOf's own fallback for the same file).
+        val partial = store.partialSize(seed)
+        publish(seed, if (partial > 0) DownloadState.Paused(partial) else DownloadState.Idle)
     }
 
     fun delete(seed: LocalModelSeed) {

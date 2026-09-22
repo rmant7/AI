@@ -213,6 +213,7 @@
     <string name="model_delete">Удалить</string>
     <string name="model_cancel">Отменить</string>
     <string name="model_pause">Пауза</string>
+    <string name="model_resume">Возобновить</string>
     <string name="model_use">Использовать</string>
     <string name="model_installed">Установлена</string>
     <string name="model_native_missing">Локальный runtime недоступен для этого устройства</string>
@@ -275,6 +276,7 @@
     <string name="note_madlad400_10b">Google MADLAD-400: 10B, 417+ языков. Нужно устройство с большим объёмом ОЗУ.</string>
     <string name="models_switched_voice">Голосовой ввод переключён на %1$s</string>
     <string name="model_state_installed">Установлена</string>
+    <string name="model_state_paused">Пауза: загружено %1$s</string>
     <string name="model_state_resolving">Ищу файл: %1$s…</string>
     <string name="model_state_error">Ошибка: %1$s</string>
     <string name="model_state_wait_other">Дождитесь окончания текущей загрузки</string>
