@@ -437,6 +437,7 @@
     <string name="translation_copied">Copied</string>
     <string name="translation_same_language">Source and target language are the same</string>
     <string name="translation_failed">Translation failed: %1$s</string>
+    <string name="translation_model_too_large">The selected model needs more RAM than this device has — pick a smaller one in Models → Translation.</string>
     <string name="translation_model_note">Model: %1$s</string>
     <string name="translation_model_note_none">No model installed</string>
     <string name="translation_source_hint">Translate from</string>

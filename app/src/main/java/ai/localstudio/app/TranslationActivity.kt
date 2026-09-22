@@ -325,11 +325,20 @@ class TranslationActivity : AppCompatActivity() {
                 showOutput(cleanTranslation(answer.text))
             }.onFailure { error ->
                 container.appLog.record("TRANSLATE", "FAILED: ${error.javaClass.simpleName}: ${error.message}")
-                Toast.makeText(
-                    this@TranslationActivity,
-                    getString(R.string.translation_failed, error.message ?: error.javaClass.simpleName),
-                    Toast.LENGTH_LONG,
-                ).show()
+                // The generic "no model provides text_generation" message is
+                // technically accurate but misleading for this specific
+                // case: it also fires when the selected model IS installed
+                // but SuitabilityScorer rejected it for this device's RAM
+                // budget (real device report — a 7B model downloaded fine,
+                // was selected, and still failed with this exact exception,
+                // reading as "no model" when the real reason was "too big
+                // for this phone").
+                val message = if (error is ai.localstudio.core.engine.NoModelForCapabilityException) {
+                    getString(R.string.translation_model_too_large)
+                } else {
+                    getString(R.string.translation_failed, error.message ?: error.javaClass.simpleName)
+                }
+                Toast.makeText(this@TranslationActivity, message, Toast.LENGTH_LONG).show()
             }
         }
     }

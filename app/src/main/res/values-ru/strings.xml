@@ -436,6 +436,7 @@
     <string name="translation_copied">Скопировано</string>
     <string name="translation_same_language">Исходный и целевой язык совпадают</string>
     <string name="translation_failed">Не удалось перевести: %1$s</string>
+    <string name="translation_model_too_large">Выбранной модели нужно больше памяти, чем есть на этом устройстве — выбери модель поменьше в Модели → Перевод.</string>
     <string name="translation_model_note">Модель: %1$s</string>
     <string name="translation_model_note_none">Модель не установлена</string>
     <string name="translation_source_hint">Перевести с</string>
