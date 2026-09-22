@@ -86,7 +86,19 @@ object LocalModels {
             ),
             paramsLabel = "E4B · Q4",
             noteRes = R.string.note_gemma_4_e4b,
-            approxSizeBytes = 2_600_000_000,
+            // Real device report: this catalog said 2.6GB, but every
+            // LOCAL_LOAD REFUSED line's own "want ~6470MB" (file.length() *
+            // 1.3, computed from the actual installed file, not this field)
+            // reverse-engineers to a real file size of ~4.98GB — nearly
+            // double. "E4B" is Gemma's MatFormer/elastic naming (the same
+            // family as Gemma 3n's E2B/E4B): the checkpoint a GGUF export
+            // actually bundles for that effective size is not the same as
+            // a plain dense 4B model's weights, which is what this number
+            // was estimated from originally. Wrong in a way that mattered:
+            // every fitsBudget/classifyFit call for this model — the "no
+            // warning before switching" gap, the fit label, the sort order
+            // — was computing against a size barely half the real one.
+            approxSizeBytes = 4_980_000_000,
             // Confirmed present in this exact repo (unsloth/gemma-4-E4B-it-GGUF/
             // blob/main/mmproj-F16.gguf) rather than assumed from a naming
             // convention — the same mistake that cost real debugging time
