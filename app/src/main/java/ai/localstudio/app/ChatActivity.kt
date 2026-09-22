@@ -25,6 +25,7 @@ import ai.localstudio.app.history.ChatHistoryStore
 import ai.localstudio.app.history.Conversation
 import ai.localstudio.app.history.toMessage
 import ai.localstudio.app.history.toStored
+import ai.localstudio.app.llama.GenerationKeepAliveService
 import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.engine.UserRequest
@@ -487,26 +488,39 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    // A hang anywhere below this — native, network, wherever
-                    // — must not be silent forever. Cancelling here at least
-                    // frees the UI to try again instead of the send button
-                    // staying disabled with nothing to explain why.
-                    kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
-                        container.orchestrator().handle(
-                            UserRequest(
-                                conversationId = conversationId,
-                                text = text,
-                                attachment = attachment,
-                                memoryEnabled = container.settings.memoryEnabled,
-                                history = history,
-                                attachedDocuments = attachedDocuments,
-                            ),
-                            onPartialText = { partial.value = it },
-                        )
+            val orchestrator = container.orchestrator()
+            // Real device report: generation collapsed to 1.8 tok/s and
+            // translation never finished at all right after the app fell out
+            // of the foreground LRU bucket (screen off or backgrounded) —
+            // Android throttles CPU hard for a process in that state, which
+            // no in-process thread priority can undo. Only for a local route:
+            // a cloud call is network-bound, not CPU-bound, and unaffected.
+            val keepAlive = container.isLocalOnlyRoute
+            if (keepAlive) GenerationKeepAliveService.begin(this@ChatActivity)
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        // A hang anywhere below this — native, network, wherever
+                        // — must not be silent forever. Cancelling here at least
+                        // frees the UI to try again instead of the send button
+                        // staying disabled with nothing to explain why.
+                        kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
+                            orchestrator.handle(
+                                UserRequest(
+                                    conversationId = conversationId,
+                                    text = text,
+                                    attachment = attachment,
+                                    memoryEnabled = container.settings.memoryEnabled,
+                                    history = history,
+                                    attachedDocuments = attachedDocuments,
+                                ),
+                                onPartialText = { partial.value = it },
+                            )
+                        }
                     }
                 }
+            } finally {
+                if (keepAlive) GenerationKeepAliveService.end(this@ChatActivity)
             }
             renderJob?.cancel()
             isGenerating = false
@@ -604,6 +618,11 @@ class ChatActivity : AppCompatActivity() {
         sources: List<AppContainer.CompareSource>,
     ) {
         generationJob = lifecycleScope.launch {
+            // Same reasoning as send()'s own keepAlive — one shared flag for
+            // the whole batch, since a local source and a cloud one can run
+            // side by side here and only the local one needs it.
+            val keepAlive = sources.any { it.isLocal }
+            if (keepAlive) GenerationKeepAliveService.begin(this@ChatActivity)
             try {
                 // A placeholder per source, all added up front on Main before
                 // any async work starts (so no two sources ever race to
@@ -744,6 +763,7 @@ class ChatActivity : AppCompatActivity() {
                 setBusy(false)
                 stoppedByUser = false
                 persist()
+                if (keepAlive) GenerationKeepAliveService.end(this@ChatActivity)
             }
         }
         isGenerating = true

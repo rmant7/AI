@@ -366,6 +366,9 @@
     <string name="transcribe_notification_channel">Транскрипция файлов</string>
     <string name="transcribe_notification_title">Транскрипция</string>
     <string name="transcribe_notification_running">Транскрипция выполняется…</string>
+    <string name="generation_notification_channel">Генерация</string>
+    <string name="generation_notification_title">Генерация ответа</string>
+    <string name="generation_notification_running">Модель продолжает работать при выключенном экране или свёрнутом приложении…</string>
     <string name="benchmark_notification_channel">STT Benchmark</string>
     <string name="benchmark_notification_title">Бенчмарк выполняется</string>
     <string name="benchmark_notification_running">Сравнение STT-движков…</string>

@@ -15,6 +15,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivityTranslationBinding
+import ai.localstudio.app.llama.GenerationKeepAliveService
 import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.LocalModels
 import ai.localstudio.app.models.MadladLanguage
@@ -300,24 +301,37 @@ class TranslationActivity : AppCompatActivity() {
         // content a user would not expect to see in a bug report.
         container.appLog.record("TRANSLATE", "${source.code} -> ${target.code}, ${text.length} chars")
 
+        // translationOrchestrator() only ever resolves to a local GGUF or
+        // AICore (see its own doc comment) — never a cloud provider — so
+        // only Gemini Nano skips this: it runs as a system service, not
+        // CPU-bound inference in this process. Same reasoning as
+        // ChatActivity's own keepAlive: a device report showed this exact
+        // translate() call never finishing after the app fell out of the
+        // foreground LRU bucket.
+        val keepAlive = container.settings.translationModel != CloudProviders.AICORE.id
         translateJob = lifecycleScope.launch {
+            if (keepAlive) GenerationKeepAliveService.begin(this@TranslationActivity)
             val prompt = buildPrompt(source, target, text)
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    withTimeout(GENERATION_TIMEOUT_MS) {
-                        orchestrator.handle(
-                            UserRequest(
-                                // Unique per request and never saved to
-                                // ChatHistoryStore — this is one-shot, not a
-                                // conversation, so there is no earlier turn
-                                // for a shared id to collide with anyway.
-                                conversationId = "translate-" + System.currentTimeMillis(),
-                                text = prompt,
-                                memoryEnabled = false,
-                            ),
-                        )
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        withTimeout(GENERATION_TIMEOUT_MS) {
+                            orchestrator.handle(
+                                UserRequest(
+                                    // Unique per request and never saved to
+                                    // ChatHistoryStore — this is one-shot, not a
+                                    // conversation, so there is no earlier turn
+                                    // for a shared id to collide with anyway.
+                                    conversationId = "translate-" + System.currentTimeMillis(),
+                                    text = prompt,
+                                    memoryEnabled = false,
+                                ),
+                            )
+                        }
                     }
                 }
+            } finally {
+                if (keepAlive) GenerationKeepAliveService.end(this@TranslationActivity)
             }
 
             setBusy(false)
