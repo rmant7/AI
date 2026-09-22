@@ -96,6 +96,10 @@ struct Session {
     llama_context *ctx = nullptr;
     const llama_vocab *vocab = nullptr;
     std::atomic<bool> cancelled{false};
+    // What nativeLoad configured the context with — nativeGenerateT5 needs
+    // this to restore n_threads_batch after temporarily forcing it to 1 for
+    // the encoder pass (see that function's own comment for why).
+    int32_t threads = 1;
 
     // Set by nativeLoadMmproj, once, after nativeLoad — null for every model
     // without a downloaded projector file, which is every model until a
@@ -528,6 +532,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     session->model = model;
     session->ctx = ctx;
     session->vocab = llama_model_get_vocab(model);
+    session->threads = threads;
     LOGI("loaded %s, n_ctx=%u, threads=%d", path.c_str(), llama_n_ctx(ctx), threads);
     return reinterpret_cast<jlong>(session);
   } catch (const std::exception &e) {
@@ -1029,7 +1034,26 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateT5(
         encoderBatch.logits[i] = false; // the encoder's own output isn't sampled
     }
     encoderBatch.n_tokens = paddedCount;
+    // Padding the *total* token count to a multiple of 4 (above) was not
+    // enough on its own — a real device crash trace showed the identical
+    // SIGILL in ggml_gemm_q4_K_8x8_q8_K again after that fix, in what were
+    // two different worker threads at once. ggml's CPU backend splits a
+    // multi-token batch's matmul work across session->threads worker
+    // threads (see forward_mul_mat_one_chunk — one chunk per thread), so
+    // that kernel's row-count assert is checked against each thread's own
+    // *chunk*, not the padded total; four threads dividing even a
+    // conveniently-sized batch can still each land on a chunk that isn't
+    // itself a multiple of 4. A handful of tokens gains nothing from
+    // parallelizing across threads anyway, so sidestepping the chunking
+    // entirely — one thread, one chunk, always exactly this function's own
+    // already-padded total — is more reliable than trying to predict
+    // ggml's own chunk-size arithmetic from outside it. n_threads_batch is
+    // what controls this (per llama.h: "used for prompt and batch
+    // processing"); restored right after, since this only needs to hold for
+    // the encoder call itself.
+    llama_set_n_threads(session->ctx, session->threads, 1);
     const int32_t encodeResult = llama_encode(session->ctx, encoderBatch);
+    llama_set_n_threads(session->ctx, session->threads, session->threads);
     llama_batch_free(encoderBatch);
     if (encodeResult != 0) {
         LOGE("nativeGenerateT5: encode failed (%d)", encodeResult);
