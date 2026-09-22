@@ -996,18 +996,39 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateT5(
         if (count <= 0) return -4; // context too small to hold any source text at all
     }
 
+    // ggml's ARM-optimized Q4_K repack GEMM kernel (ggml_gemm_q4_K_8x8_q8_K,
+    // used for MADLAD-400's quantization on a REPACK-capable CPU — see the
+    // feature line this app logs at startup) asserts its row count is a
+    // multiple of 4; a real device crash trace pointed straight at that
+    // assert failing (SIGILL/ILL_ILLOPC, not a plain segfault) for exactly
+    // the short inputs this function is normally called with — MADLAD-400's
+    // own `<2xx> text` format tokenizes a short phrase down to a handful of
+    // tokens, essentially never a multiple of 4. Padding the encoder batch
+    // up to one is a call-site fix for a kernel assumption this app has no
+    // way to change from outside ggml itself. EOS is what padding already
+    // means at the *end* of this exact input — llama_tokenize above was
+    // called with add_special=true, so the real content already ends on one;
+    // extending that boundary marker perturbs self-attention far less than
+    // any other filler token would.
+    const int32_t paddedCount = ((count + 3) / 4) * 4;
+    if (paddedCount > count) {
+        const llama_token padToken = llama_vocab_eos(session->vocab);
+        if ((size_t) paddedCount > tokens.size()) tokens.resize(paddedCount);
+        for (int32_t i = count; i < paddedCount; i++) tokens[i] = padToken;
+    }
+
     // No prefix to reuse across calls — see this function's own doc comment.
     llama_memory_seq_rm(llama_get_memory(session->ctx), 0, -1, -1);
 
-    llama_batch encoderBatch = llama_batch_init(count, 0, 1);
-    for (int32_t i = 0; i < count; i++) {
+    llama_batch encoderBatch = llama_batch_init(paddedCount, 0, 1);
+    for (int32_t i = 0; i < paddedCount; i++) {
         encoderBatch.token[i] = tokens[i];
         encoderBatch.pos[i] = i;
         encoderBatch.n_seq_id[i] = 1;
         encoderBatch.seq_id[i][0] = 0;
         encoderBatch.logits[i] = false; // the encoder's own output isn't sampled
     }
-    encoderBatch.n_tokens = count;
+    encoderBatch.n_tokens = paddedCount;
     const int32_t encodeResult = llama_encode(session->ctx, encoderBatch);
     llama_batch_free(encoderBatch);
     if (encodeResult != 0) {
