@@ -59,25 +59,36 @@ private const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 private const val MAIN_MODEL_RAM_SAFETY_FACTOR = 1.3
 
 /**
- * The kernel's own "genuinely available" figure, straight from the same
- * source Android's Settings app reads for its Running services screen —
- * unlike [android.app.ActivityManager.MemoryInfo.availMem], not (as far as
- * this app can tell) subject to the reduced precision a non-privileged
- * app's [android.app.ActivityManager.getMemoryInfo] call is known to get.
+ * The kernel's own memory accounting, straight from the same source
+ * Android's Settings app reads for its Running services screen — unlike
+ * [android.app.ActivityManager.MemoryInfo.availMem], not (as far as this
+ * app can tell) subject to the reduced precision a non-privileged app's
+ * [android.app.ActivityManager.getMemoryInfo] call is known to get.
  * Best-effort: some devices' SELinux policy denies a regular app read
  * access to `/proc/meminfo` outright, in which case this returns null and
  * callers fall back to whatever [android.app.ActivityManager] already gave
- * them — this exists to compare the two when it *is* readable, not to
- * replace the other value everywhere yet.
+ * them.
+ *
+ * Every field a real device report asked for, not just MemAvailable: a
+ * single number rules ActivityManager's own precision in or out, but
+ * Cached/SReclaimable/Buffers (what the kernel considers reclaimable, vs
+ * what Settings' own more liberal estimate might count) and SwapTotal/
+ * SwapFree are what actually explains *why* two "available" figures
+ * disagree, once they do.
  */
-private fun readProcMemAvailableBytes(): Long? = runCatching {
-    File("/proc/meminfo").useLines { lines ->
-        lines.firstOrNull { it.startsWith("MemAvailable:") }
-            ?.trim()?.removePrefix("MemAvailable:")?.trim()
-            ?.removeSuffix("kB")?.trim()
-            ?.toLongOrNull()
-            ?.let { it * 1024 }
+private fun readProcMeminfo(): String? = runCatching {
+    val wanted = listOf(
+        "MemTotal", "MemFree", "MemAvailable", "Cached", "SReclaimable", "Buffers", "SwapTotal", "SwapFree",
+    )
+    val values = File("/proc/meminfo").useLines { lines ->
+        lines.mapNotNull { line ->
+            val name = wanted.firstOrNull { line.startsWith("$it:") } ?: return@mapNotNull null
+            val kb = line.removePrefix("$name:").trim().removeSuffix("kB").trim().toLongOrNull()
+                ?: return@mapNotNull null
+            name to kb / 1024
+        }.toMap()
     }
+    if (values.isEmpty()) null else wanted.mapNotNull { name -> values[name]?.let { "$name=${it}MB" } }.joinToString(" ")
 }.getOrNull()
 
 /**
@@ -143,18 +154,19 @@ class LlamaCppRuntime(
                 // precise value for a non-privileged app (a privacy
                 // protection against using memory pressure as a cross-app
                 // side channel), while Settings itself, as a privileged
-                // system app, sees the real kernel numbers. /proc/meminfo's
-                // MemAvailable is the same kernel-computed figure Settings
-                // reads from — logged here (best-effort; some devices'
-                // SELinux policy blocks an app from reading it at all) so
-                // the next report shows directly whether availableRamBytes()
-                // is the one lying, rather than guessing again.
-                val procMemAvailable = readProcMemAvailableBytes()
+                // system app, sees the real kernel numbers. /proc/meminfo is
+                // the same source Settings itself reads — logged here in
+                // full (best-effort; some devices' SELinux policy blocks an
+                // app from reading it at all) so the next report shows
+                // directly whether availableRamBytes() is the one lying,
+                // and Cached/SReclaimable/Buffers/Swap explain why if so,
+                // rather than guessing a second time.
+                val procMeminfo = readProcMeminfo()
                 log(
                     "LOCAL_LOAD",
                     "${file.name}: REFUSED — only ${headroom / 1_000_000}MB free " +
-                        "(ActivityManager), want ~${wantBytes / 1_000_000}MB" +
-                        (procMemAvailable?.let { " — /proc/meminfo MemAvailable: ${it / 1_000_000}MB" } ?: ""),
+                        "(ActivityManager.availMem), want ~${wantBytes / 1_000_000}MB" +
+                        (procMeminfo?.let { " — /proc/meminfo: $it" } ?: " — /proc/meminfo unreadable"),
                 )
                 throw ModelLoadException(
                     "Not enough free RAM for ${file.name}: ${headroom / 1_000_000}MB free, " +
