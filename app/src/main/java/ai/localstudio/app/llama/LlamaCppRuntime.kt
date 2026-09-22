@@ -78,9 +78,32 @@ private const val MAIN_MODEL_RAM_SAFETY_FACTOR = 1.3
  */
 private fun readProcMeminfo(): String? = runCatching {
     val wanted = listOf(
-        "MemTotal", "MemFree", "MemAvailable", "Cached", "SReclaimable", "Buffers", "SwapTotal", "SwapFree",
+        "MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached", "SwapCached", "SReclaimable", "SUnreclaim",
+        "Shmem", "AnonPages", "Mapped", "Slab", "SwapTotal", "SwapFree",
     )
     val values = File("/proc/meminfo").useLines { lines ->
+        lines.mapNotNull { line ->
+            val name = wanted.firstOrNull { line.startsWith("$it:") } ?: return@mapNotNull null
+            val kb = line.removePrefix("$name:").trim().removeSuffix("kB").trim().toLongOrNull()
+                ?: return@mapNotNull null
+            name to kb / 1024
+        }.toMap()
+    }
+    if (values.isEmpty()) null else wanted.mapNotNull { name -> values[name]?.let { "$name=${it}MB" } }.joinToString(" ")
+}.getOrNull()
+
+/**
+ * This process's own memory footprint at the moment of a refusal — a real
+ * device report asked for this specifically: whether the app's *own*
+ * resident set (semantic memory not actually freed, a previous model's
+ * allocation lingering, ...) already accounts for some of the gap between
+ * what [readProcMeminfo] and [android.app.ActivityManager] each report,
+ * rather than something external. Same best-effort shape as
+ * [readProcMeminfo].
+ */
+private fun readProcSelfStatus(): String? = runCatching {
+    val wanted = listOf("VmRSS", "VmSize", "RssAnon", "RssFile", "RssShmem")
+    val values = File("/proc/self/status").useLines { lines ->
         lines.mapNotNull { line ->
             val name = wanted.firstOrNull { line.startsWith("$it:") } ?: return@mapNotNull null
             val kb = line.removePrefix("$name:").trim().removeSuffix("kB").trim().toLongOrNull()
@@ -123,6 +146,14 @@ class LlamaCppRuntime(
      * so tests and any other caller don't need a real device.
      */
     private val availableRamBytes: () -> Long = { Long.MAX_VALUE },
+    /**
+     * Everything else [android.app.ActivityManager.MemoryInfo] carries
+     * beyond the single number [availableRamBytes] reads — totalMem,
+     * threshold, lowMemory — read fresh alongside [availableRamBytes]
+     * whenever the pre-flight RAM refusal below actually fires. Defaults to
+     * empty so tests and any other caller don't need a real device.
+     */
+    private val memoryDiagnostics: () -> String = { "" },
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
@@ -160,13 +191,22 @@ class LlamaCppRuntime(
                 // app from reading it at all) so the next report shows
                 // directly whether availableRamBytes() is the one lying,
                 // and Cached/SReclaimable/Buffers/Swap explain why if so,
-                // rather than guessing a second time.
-                val procMeminfo = readProcMeminfo()
+                // rather than guessing a second time. memoryDiagnostics()
+                // adds ActivityManager's own totalMem/threshold/lowMemory —
+                // lowMemory=false despite a low availMem reading would mean
+                // Android itself doesn't consider this low-memory right now,
+                // which points squarely at availMem's own precision rather
+                // than a real shortage. readProcSelfStatus() checks this
+                // process's own resident set isn't quietly holding onto
+                // some of the gap by itself (semantic memory not actually
+                // freed, a previous model's allocation lingering, ...).
                 log(
                     "LOCAL_LOAD",
                     "${file.name}: REFUSED — only ${headroom / 1_000_000}MB free " +
                         "(ActivityManager.availMem), want ~${wantBytes / 1_000_000}MB" +
-                        (procMeminfo?.let { " — /proc/meminfo: $it" } ?: " — /proc/meminfo unreadable"),
+                        " — ${memoryDiagnostics()}" +
+                        (readProcMeminfo()?.let { " — /proc/meminfo: $it" } ?: " — /proc/meminfo unreadable") +
+                        (readProcSelfStatus()?.let { " — /proc/self/status: $it" } ?: " — /proc/self/status unreadable"),
                 )
                 throw ModelLoadException(
                     "Not enough free RAM for ${file.name}: ${headroom / 1_000_000}MB free, " +

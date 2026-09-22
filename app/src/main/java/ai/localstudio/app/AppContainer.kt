@@ -1498,6 +1498,7 @@ class AppContainer private constructor(private val context: Context) {
                     contextTokens = effectiveContextTokens(),
                     log = appLog::record,
                     availableRamBytes = { currentAvailableRamBytes(context) },
+                    memoryDiagnostics = { currentMemoryDiagnostics(context) },
                 ),
                 model = selected.model,
                 binding = selected.binding,
@@ -1626,6 +1627,7 @@ class AppContainer private constructor(private val context: Context) {
                 contextTokens = effectiveContextTokens(),
                 log = appLog::record,
                 availableRamBytes = { currentAvailableRamBytes(context) },
+                memoryDiagnostics = { currentMemoryDiagnostics(context) },
             ),
             model = selected.model,
             binding = selected.binding,
@@ -2116,6 +2118,25 @@ class AppContainer private constructor(private val context: Context) {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
             return info.availMem
+        }
+
+        /**
+         * Everything else [ActivityManager.MemoryInfo] carries beyond
+         * [currentAvailableRamBytes]'s single number — real device report:
+         * Settings' own Running services screen showed far more free RAM
+         * than [currentAvailableRamBytes] did on the same device moments
+         * later, and the only way to tell "this API is genuinely less
+         * precise for a non-privileged app on this OS version" apart from
+         * "the two screens define 'available' differently" is [lowMemory]:
+         * if Android itself doesn't consider the device low on memory right
+         * now despite a low [ActivityManager.MemoryInfo.availMem] reading,
+         * that reading is the one not to be trusted.
+         */
+        fun currentMemoryDiagnostics(context: Context): String {
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
+            return "ActivityManager: availMem=${info.availMem / 1_000_000}MB totalMem=${info.totalMem / 1_000_000}MB " +
+                "threshold=${info.threshold / 1_000_000}MB lowMemory=${info.lowMemory}"
         }
 
         fun profileOf(context: Context, ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION): DeviceProfile {
