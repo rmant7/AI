@@ -1,5 +1,6 @@
 package ai.localstudio.app.models
 
+import ai.localstudio.core.registry.ArtifactResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -96,7 +97,11 @@ class ModelDownloads(
         jobs[seed.id] = scope.launch {
             publish(seed, DownloadState.Resolving(seed.repoIds.first()))
             try {
-                val (source, resolved) = HuggingFaceResolver.resolveAny(seed.repoIds, tokenProvider())
+                val (source, resolved) = HuggingFaceResolver.resolveAny(
+                    seed.repoIds,
+                    tokenProvider(),
+                    seed.quantPriority ?: ArtifactResolver.DEFAULT_QUANT_PRIORITY,
+                )
                 val free = store.freeSpaceBytes()
                 if (resolved.sizeBytes > 0 && resolved.sizeBytes + SLACK_BYTES > free) {
                     publish(seed, DownloadState.Failed("Not enough space: need ${gb(resolved.sizeBytes)}, ${gb(free)} free"))

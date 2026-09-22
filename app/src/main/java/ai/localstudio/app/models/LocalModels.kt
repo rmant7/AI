@@ -53,6 +53,16 @@ data class LocalModelSeed(
      * upfront estimate optimistic, never wrong in the dangerous direction.
      */
     val mmprojApproxSizeBytes: Long = 0,
+    /**
+     * Overrides [ArtifactResolver.DEFAULT_QUANT_PRIORITY] for this seed —
+     * needed for a repo that hosts several quantisations of the same model
+     * as separate files (unlike the common case of one repo per quant): with
+     * no override every such seed would resolve to whichever quant happens
+     * to rank first in the shared default list, so two seeds pointed at the
+     * same multi-quant repo would silently download the identical file.
+     * Null (every other seed) keeps the previous behaviour exactly.
+     */
+    val quantPriority: List<String>? = null,
 ) {
     fun resolvedNote(context: android.content.Context): String = noteRes?.let { context.getString(it) } ?: note
 }
