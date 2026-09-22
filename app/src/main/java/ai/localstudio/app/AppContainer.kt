@@ -136,14 +136,21 @@ class AppContainer private constructor(private val context: Context) {
      * shared by whole orchestrators — every Compare-mode bubble answering
      * with the same chain, because all chains share one registry id.
      *
-     * Non-strict: the user picked the model and was already warned in Models
-     * if its estimate looked too big, so an over-budget estimate is logged
-     * and attempted rather than refused.
+     * Strict: [DeviceProfile.usableRamBytes] is itself live-RAM-aware now
+     * (see [profileOf]), so a load this still refuses is a confirmed
+     * shortage, not a stale estimate — real device report: with nothing else
+     * resident to evict, attempting one anyway (the earlier, explicitly
+     * requested trade-off, back when the estimate really could be wrong)
+     * OOM-killed the whole process twice in a row, taking a concurrent
+     * download down with it for no new information the first kill hadn't
+     * already given. [LlamaCppRuntime]'s own separate, narrower pre-flight
+     * check (a live headroom reading a few tens of milliseconds later, never
+     * throwing) is untouched — this is only the outer gate deciding whether
+     * to attempt the load at all.
      */
     private val sharedRuntimeManager = RuntimeManager(
         budgetBytes = { device.usableRamBytes },
         runtimes = emptyMap(),
-        strictBudget = false,
         exclusive = true,
         log = { appLog.record("RAM_MANAGER", it) },
     )
@@ -1301,7 +1308,6 @@ class AppContainer private constructor(private val context: Context) {
         val runtimeManager = RuntimeManager(
             budgetBytes = { device.usableRamBytes },
             runtimes = mapOf(runtime.kind to runtime, whisperCppRuntime.kind to whisperCppRuntime),
-            strictBudget = false,
         )
         val executors = NodeExecutors(
             selector = ModelSelector(registry(runtime, registryCandidates), selectionDevice()),
@@ -1528,7 +1534,6 @@ class AppContainer private constructor(private val context: Context) {
         val runtimeManager = RuntimeManager(
             budgetBytes = { device.usableRamBytes },
             runtimes = mapOf(candidate.runtime.kind to candidate.runtime, whisperCppRuntime.kind to whisperCppRuntime),
-            strictBudget = false,
         )
         val executors = NodeExecutors(
             selector = ModelSelector(registry(candidate.runtime, listOf(candidate)), selectionDevice()),
