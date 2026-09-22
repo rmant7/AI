@@ -41,6 +41,24 @@ import java.util.concurrent.atomic.AtomicReference
 private const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 
 /**
+ * Same reasoning as [MMPROJ_RAM_SAFETY_FACTOR], for the main GGUF itself —
+ * a real device report: a 5.2GB model's load started with only 3.3GB free,
+ * ran the whole process out of memory, and got killed by Android's OOM
+ * killer partway through [LlamaBridge.nativeLoad] — not a catchable
+ * exception, since the process was gone before any Kotlin code downstream
+ * could run. [SuitabilityScorer]'s own admission check runs against a
+ * *static*, total-RAM-derived budget upstream of this call and had already
+ * let this candidate through; it has no way to see momentary pressure from
+ * whatever else happens to be resident right now. Lower than the mmproj
+ * factor (1.3 vs 1.4) since the main model's KV cache and compute buffers
+ * are proportionally smaller relative to its own weights than an image
+ * projector's activation buffers are relative to its — a real device's
+ * post-load free-RAM logs bore this out (an ~1.86GB model settling around
+ * ~2.3-2.4GB actually held).
+ */
+private const val MAIN_MODEL_RAM_SAFETY_FACTOR = 1.3
+
+/**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
  * which is what lets the router, pipelines, context engine and memory stay
  * untouched: only the registration changes.
@@ -88,6 +106,22 @@ class LlamaCppRuntime(
         val file = File(binding.artifact)
         if (!file.isFile) {
             throw ModelLoadException("Model file is missing: ${binding.artifact}")
+        }
+        run {
+            val fileBytes = file.length()
+            val headroom = availableRamBytes()
+            val wantBytes = (fileBytes * MAIN_MODEL_RAM_SAFETY_FACTOR).toLong()
+            if (fileBytes > 0 && headroom < wantBytes) {
+                log(
+                    "LOCAL_LOAD",
+                    "${file.name}: REFUSED — only ${headroom / 1_000_000}MB free, " +
+                        "want ~${wantBytes / 1_000_000}MB",
+                )
+                throw ModelLoadException(
+                    "Not enough free RAM for ${file.name}: ${headroom / 1_000_000}MB free, " +
+                        "need ~${wantBytes / 1_000_000}MB",
+                )
+            }
         }
 
         val bridge = LlamaBridge()
