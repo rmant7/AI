@@ -59,6 +59,28 @@ private const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 private const val MAIN_MODEL_RAM_SAFETY_FACTOR = 1.3
 
 /**
+ * The kernel's own "genuinely available" figure, straight from the same
+ * source Android's Settings app reads for its Running services screen —
+ * unlike [android.app.ActivityManager.MemoryInfo.availMem], not (as far as
+ * this app can tell) subject to the reduced precision a non-privileged
+ * app's [android.app.ActivityManager.getMemoryInfo] call is known to get.
+ * Best-effort: some devices' SELinux policy denies a regular app read
+ * access to `/proc/meminfo` outright, in which case this returns null and
+ * callers fall back to whatever [android.app.ActivityManager] already gave
+ * them — this exists to compare the two when it *is* readable, not to
+ * replace the other value everywhere yet.
+ */
+private fun readProcMemAvailableBytes(): Long? = runCatching {
+    File("/proc/meminfo").useLines { lines ->
+        lines.firstOrNull { it.startsWith("MemAvailable:") }
+            ?.trim()?.removePrefix("MemAvailable:")?.trim()
+            ?.removeSuffix("kB")?.trim()
+            ?.toLongOrNull()
+            ?.let { it * 1024 }
+    }
+}.getOrNull()
+
+/**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
  * which is what lets the router, pipelines, context engine and memory stay
  * untouched: only the registration changes.
@@ -112,10 +134,27 @@ class LlamaCppRuntime(
             val headroom = availableRamBytes()
             val wantBytes = (fileBytes * MAIN_MODEL_RAM_SAFETY_FACTOR).toLong()
             if (fileBytes > 0 && headroom < wantBytes) {
+                // A real device report showed Android's own Settings ->
+                // Running services screen listing 10GB free while this same
+                // ActivityManager.MemoryInfo.availMem call (the only public
+                // API for this) reported ~4GB moments later — a gap far
+                // wider than normal fluctuation. ActivityManager's own
+                // memory-info APIs are known to return a deliberately less
+                // precise value for a non-privileged app (a privacy
+                // protection against using memory pressure as a cross-app
+                // side channel), while Settings itself, as a privileged
+                // system app, sees the real kernel numbers. /proc/meminfo's
+                // MemAvailable is the same kernel-computed figure Settings
+                // reads from — logged here (best-effort; some devices'
+                // SELinux policy blocks an app from reading it at all) so
+                // the next report shows directly whether availableRamBytes()
+                // is the one lying, rather than guessing again.
+                val procMemAvailable = readProcMemAvailableBytes()
                 log(
                     "LOCAL_LOAD",
-                    "${file.name}: REFUSED — only ${headroom / 1_000_000}MB free, " +
-                        "want ~${wantBytes / 1_000_000}MB",
+                    "${file.name}: REFUSED — only ${headroom / 1_000_000}MB free " +
+                        "(ActivityManager), want ~${wantBytes / 1_000_000}MB" +
+                        (procMemAvailable?.let { " — /proc/meminfo MemAvailable: ${it / 1_000_000}MB" } ?: ""),
                 )
                 throw ModelLoadException(
                     "Not enough free RAM for ${file.name}: ${headroom / 1_000_000}MB free, " +
