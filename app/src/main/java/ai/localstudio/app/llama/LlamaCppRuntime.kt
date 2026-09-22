@@ -59,6 +59,33 @@ private const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 private const val MAIN_MODEL_RAM_SAFETY_FACTOR = 1.3
 
 /**
+ * The kernel's own answer to "how much could a new allocation actually get
+ * without swapping heavily" — unlike a plain MemFree/Cached split, already
+ * accounts for how much of Cached/Slab is genuinely reclaimable right now.
+ * Exactly the right number for [LlamaBridge.nativeLoad]'s own memory model:
+ * `llama_jni.cpp` loads a GGUF with `LLAMA_LOAD_MODE_MMAP`, so the weights
+ * are file-backed pages the kernel can evict and re-page on demand, not
+ * anonymous heap that needs genuinely free RAM up front.
+ *
+ * Real device report: Settings -> Running services, split two ways —
+ * "cached processes" read ~4-5GB free (matching [android.app.ActivityManager]
+ * closely) while "running processes" read ~10GB free, with not one process
+ * in the cached list over ~200MB. The ~5-6GB gap between those two views is
+ * reclaimable page cache, not memory any process is actually holding — the
+ * same category MemAvailable is built to count and
+ * [android.app.ActivityManager.MemoryInfo.availMem] is not. See
+ * [MAIN_MODEL_RAM_SAFETY_FACTOR]'s own doc comment for how this changes the
+ * pre-flight refusal below.
+ */
+private fun readMemAvailableBytes(): Long? = runCatching {
+    File("/proc/meminfo").useLines { lines ->
+        lines.firstOrNull { it.startsWith("MemAvailable:") }
+            ?.removePrefix("MemAvailable:")?.trim()?.removeSuffix("kB")?.trim()?.toLongOrNull()
+            ?.let { it * 1024 }
+    }
+}.getOrNull()
+
+/**
  * The kernel's own memory accounting, straight from the same source
  * Android's Settings app reads for its Running services screen — unlike
  * [android.app.ActivityManager.MemoryInfo.availMem], not (as far as this
@@ -158,6 +185,20 @@ class LlamaCppRuntime(
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
 
+    /**
+     * The higher of [availableRamBytes] (ActivityManager) and
+     * [readMemAvailableBytes] (the kernel's own MemAvailable) — see
+     * [readMemAvailableBytes]'s own doc comment for why ActivityManager
+     * alone under-counts headroom this app's mmap-based load can actually
+     * use. `maxOf`, not a straight replacement: [readMemAvailableBytes] can
+     * read null (SELinux-restricted devices), and even where it reads a
+     * real number, trusting whichever source is more generous is strictly
+     * safer than trusting whichever happens to run first — this can only
+     * ever let through a load [availableRamBytes] alone would have refused,
+     * never the reverse.
+     */
+    private fun effectiveHeadroomBytes(): Long = maxOf(availableRamBytes(), readMemAvailableBytes() ?: 0L)
+
     override fun canRun(model: ModelDescriptor, binding: RuntimeBinding): Boolean =
         binding.runtime == RuntimeKind.LLAMA_CPP &&
             LlamaBridge.isAvailable &&
@@ -173,37 +214,37 @@ class LlamaCppRuntime(
         }
         run {
             val fileBytes = file.length()
-            val headroom = availableRamBytes()
+            val headroom = effectiveHeadroomBytes()
             val wantBytes = (fileBytes * MAIN_MODEL_RAM_SAFETY_FACTOR).toLong()
             if (fileBytes > 0 && headroom < wantBytes) {
                 // A real device report showed Android's own Settings ->
                 // Running services screen listing 10GB free while this same
                 // ActivityManager.MemoryInfo.availMem call (the only public
                 // API for this) reported ~4GB moments later — a gap far
-                // wider than normal fluctuation. ActivityManager's own
-                // memory-info APIs are known to return a deliberately less
-                // precise value for a non-privileged app (a privacy
-                // protection against using memory pressure as a cross-app
-                // side channel), while Settings itself, as a privileged
-                // system app, sees the real kernel numbers. /proc/meminfo is
-                // the same source Settings itself reads — logged here in
-                // full (best-effort; some devices' SELinux policy blocks an
-                // app from reading it at all) so the next report shows
-                // directly whether availableRamBytes() is the one lying,
-                // and Cached/SReclaimable/Buffers/Swap explain why if so,
-                // rather than guessing a second time. memoryDiagnostics()
-                // adds ActivityManager's own totalMem/threshold/lowMemory —
-                // lowMemory=false despite a low availMem reading would mean
-                // Android itself doesn't consider this low-memory right now,
-                // which points squarely at availMem's own precision rather
-                // than a real shortage. readProcSelfStatus() checks this
-                // process's own resident set isn't quietly holding onto
-                // some of the gap by itself (semantic memory not actually
-                // freed, a previous model's allocation lingering, ...).
+                // wider than normal fluctuation. Settled, with a second real
+                // device report: Settings' "cached processes" view (~4-5GB
+                // free, matching ActivityManager closely) against its
+                // "running processes" view (~10GB free), with not one
+                // process in the cached list over ~200MB — the gap is
+                // reclaimable page cache, not memory a process holds, which
+                // is exactly the category ActivityManager.availMem doesn't
+                // count and the kernel's own MemAvailable does (see
+                // effectiveHeadroomBytes' own doc comment; this refusal
+                // already uses the higher of the two). /proc/meminfo is
+                // still logged in full below (best-effort; some devices'
+                // SELinux policy blocks an app from reading it at all) so a
+                // refusal that fires *despite* MemAvailable shows the real
+                // breakdown rather than requiring a second report to ask
+                // for it. memoryDiagnostics() adds ActivityManager's own
+                // totalMem/threshold/lowMemory. readProcSelfStatus() checks
+                // this process's own resident set isn't quietly holding
+                // onto some of the gap by itself (semantic memory not
+                // actually freed, a previous model's allocation lingering).
                 log(
                     "LOCAL_LOAD",
                     "${file.name}: REFUSED — only ${headroom / 1_000_000}MB free " +
-                        "(ActivityManager.availMem), want ~${wantBytes / 1_000_000}MB" +
+                        "(max of ActivityManager.availMem and /proc/meminfo MemAvailable), " +
+                        "want ~${wantBytes / 1_000_000}MB" +
                         " — ${memoryDiagnostics()}" +
                         (readProcMeminfo()?.let { " — /proc/meminfo: $it" } ?: " — /proc/meminfo unreadable") +
                         (readProcSelfStatus()?.let { " — /proc/self/status: $it" } ?: " — /proc/self/status unreadable"),
@@ -223,7 +264,7 @@ class LlamaCppRuntime(
         // predicts is otherwise invisible here until someone asks "was
         // something else holding memory at the time" and has no log line to
         // check.
-        log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads, free RAM: ${availableRamBytes() / (1024 * 1024)} MB)")
+        log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads, free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)")
 
         // nativeLoad() is a single blocking JNI call — llama_model_load_from_file()
         // and llama_init_from_model() have no cancellation hook of their own,
@@ -264,7 +305,7 @@ class LlamaCppRuntime(
             log("LOCAL_LOAD", "${file.name}: FAILED after ${loadMs}ms")
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
-        log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${availableRamBytes() / (1024 * 1024)} MB)")
+        log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)")
 
         // Best-effort, and only if a projector was actually downloaded for
         // this model (see ModelStore.hasMmproj) — a model with none behaves
