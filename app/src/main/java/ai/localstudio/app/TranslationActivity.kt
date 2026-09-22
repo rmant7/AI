@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivityTranslationBinding
 import ai.localstudio.app.models.DownloadState
+import ai.localstudio.app.models.LocalModels
 import ai.localstudio.app.models.MadladLanguage
 import ai.localstudio.app.models.MadladLanguages
 import ai.localstudio.app.models.TranslationModels
@@ -324,7 +325,25 @@ class TranslationActivity : AppCompatActivity() {
                 container.appLog.record("TRANSLATE", "done, ${answer.text.length} chars back")
                 showOutput(cleanTranslation(answer.text))
             }.onFailure { error ->
-                container.appLog.record("TRANSLATE", "FAILED: ${error.javaClass.simpleName}: ${error.message}")
+                // Same "installed but rejected on RAM, not actually missing"
+                // case the message below already accounts for — logged with
+                // the actual numbers (this model's estimated footprint
+                // against the live budget) rather than just the exception's
+                // own generic "no installed model provides X", which says
+                // nothing about *why* a model that clearly is installed
+                // wasn't picked.
+                val detail = if (error is ai.localstudio.core.engine.NoModelForCapabilityException) {
+                    val seed = (LocalModels.SEEDS + TranslationModels.SEEDS)
+                        .firstOrNull { it.id == container.settings.translationModel }
+                    val device = container.device
+                    val sizeInfo = seed?.let { "size=${it.approxSizeBytes / 1_000_000}MB fitsBudget=${device.fitsBudget(it.approxSizeBytes)} " }.orEmpty()
+                    " — translationModel=${container.settings.translationModel} " + sizeInfo +
+                        "usableRamBudget=${device.usableRamBytes / 1_000_000}MB — " +
+                        AppContainer.currentMemoryDiagnostics(this@TranslationActivity)
+                } else {
+                    ""
+                }
+                container.appLog.record("TRANSLATE", "FAILED: ${error.javaClass.simpleName}: ${error.message}$detail")
                 // The generic "no model provides text_generation" message is
                 // technically accurate but misleading for this specific
                 // case: it also fires when the selected model IS installed

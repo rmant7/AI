@@ -208,10 +208,33 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun switchToLocal(seed: LocalModelSeed) {
+        logModelSwitch("chat", seed.title, seed.approxSizeBytes)
         container.settings.providerId = CloudProviders.LOCAL.id
         container.settings.chatModel = seed.id
         Toast.makeText(this, getString(R.string.models_switched_chat, seed.title), Toast.LENGTH_SHORT).show()
         render()
+    }
+
+    /**
+     * Real device report: a 9B chat model (~5.5 GB on disk) switched to for
+     * translation with no warning at all — unlike [useLocally] above, this
+     * used to write [Settings.translationModel] outright — then failed the
+     * first time it was actually asked to translate, deep inside
+     * [ai.localstudio.core.registry.SuitabilityScorer]'s own RAM rejection,
+     * reading as "no model" (see [TranslationActivity.translate]'s own
+     * comment on that exact exception). Same confirm-before-switching gate
+     * [useLocally] already has, so the warning lands at the moment a smaller
+     * model could still be picked instead, not after a confusing failure.
+     */
+    private fun logModelSwitch(purpose: String, title: String, approxSizeBytes: Long) {
+        val device = container.device
+        container.appLog.record(
+            "MODEL_SWITCH",
+            "$purpose: $title — size=" +
+                (if (approxSizeBytes > 0) size(approxSizeBytes) else "n/a") +
+                " fitsBudget=${device.fitsBudget(approxSizeBytes)} usableRamBudget=${size(device.usableRamBytes)} — " +
+                AppContainer.currentMemoryDiagnostics(this),
+        )
     }
 
     // ── Translation model ─────────────────────────────────────────────────
@@ -230,10 +253,26 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun onTranslationPrimary(seed: LocalModelSeed) {
         when (container.downloads.stateOf(seed)) {
-            is DownloadState.Installed -> useForTranslation(seed.id, seed.title)
+            is DownloadState.Installed -> useForTranslationLocal(seed)
             is DownloadState.Running, is DownloadState.Resolving -> container.downloads.cancel(seed)
             else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
         }
+    }
+
+    /** Same confirm-before-switching gate [useLocally] has — see [logModelSwitch]'s own comment. */
+    private fun useForTranslationLocal(seed: LocalModelSeed) {
+        if (!container.device.fitsBudget(seed.approxSizeBytes)) {
+            AlertDialog.Builder(this)
+                .setTitle(seed.title)
+                .setMessage(R.string.model_ram_warning)
+                .setPositiveButton(R.string.model_ram_warning_continue) { _, _ ->
+                    useForTranslation(seed.id, seed.title, seed.approxSizeBytes)
+                }
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .show()
+            return
+        }
+        useForTranslation(seed.id, seed.title, seed.approxSizeBytes)
     }
 
     private fun onTranslationSecondary(seed: LocalModelSeed) {
@@ -246,7 +285,8 @@ class ModelsActivity : AppCompatActivity() {
         }
     }
 
-    private fun useForTranslation(modelId: String, title: String) {
+    private fun useForTranslation(modelId: String, title: String, approxSizeBytes: Long = 0L) {
+        logModelSwitch("translation", title, approxSizeBytes)
         container.settings.translationModel = modelId
         Toast.makeText(this, getString(R.string.models_switched_translation, title), Toast.LENGTH_SHORT).show()
         render()
@@ -273,6 +313,7 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun useForVoice(seed: WhisperModelSeed) {
+        logModelSwitch("voice", seed.title, seed.approxSizeBytes)
         container.settings.whisperModelId = seed.id
         container.settings.activeSttEngine = AsrEngineType.WHISPER
         Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
@@ -300,6 +341,7 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun useForVosk(seed: VoskModelSeed) {
+        logModelSwitch("voice", seed.title, seed.approxSizeBytes)
         container.settings.voskModelId = seed.id
         container.settings.activeSttEngine = AsrEngineType.VOSK
         Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
