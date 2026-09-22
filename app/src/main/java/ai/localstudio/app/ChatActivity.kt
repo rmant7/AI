@@ -185,22 +185,21 @@ class ChatActivity : AppCompatActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        // Chat-specific first — these act on *this conversation's* content,
+        // unlike everything UtilityMenu adds below.
         menu.add(0, MENU_MEMORY, 0, memoryTitle()).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
-        menu.add(0, MENU_MODELS, 1, R.string.menu_models)
-        menu.add(0, MENU_FILES, 2, R.string.menu_files)
-        menu.add(0, MENU_SETTINGS, 3, R.string.menu_settings)
-        menu.add(0, MENU_HISTORY, 4, R.string.menu_history)
-        menu.add(0, MENU_SHARE_CHAT, 5, R.string.menu_share_chat)
-        menu.add(0, MENU_CLEAR, 6, R.string.menu_clear)
-        // Last on purpose, not grouped with History/Share/Clear above it —
-        // those are all about *this chat's* content, while the log and the
-        // whisper.cpp test screen are both diagnostic tools unrelated to any
-        // one conversation.
-        menu.add(0, MENU_LOG, 7, R.string.menu_log)
-        menu.add(0, MENU_TRANSCRIBE, 8, R.string.menu_transcribe)
-        menu.add(0, MENU_BENCHMARK, 9, R.string.menu_benchmark)
-        menu.add(0, MENU_TRANSLATION, 10, R.string.menu_translation)
-        menu.add(0, MENU_PHRASEBOOK, 11, R.string.menu_phrasebook)
+        menu.add(0, MENU_HISTORY, 0, R.string.menu_history)
+        menu.add(0, MENU_SHARE_CHAT, 0, R.string.menu_share_chat)
+        menu.add(0, MENU_CLEAR, 0, R.string.menu_clear)
+        // The same shared entries every other utility screen offers, in the
+        // same order, Log last — kept in exactly one place (UtilityMenu) so
+        // this menu can no longer drift out of sync with theirs. It used to:
+        // Log sat right after Share/Clear here, well before Transcribe/
+        // Benchmark/Translation/Phrasebook, because each of those got added
+        // by hand in this file independently of UtilityMenu's own list.
+        // History is skipped here specifically — see UtilityMenu.inflate's
+        // own doc comment on why this screen keeps its own.
+        UtilityMenu.inflate(this, menu, skip = setOf(HistoryActivity::class.java))
         return true
     }
 
@@ -210,21 +209,6 @@ class ChatActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        MENU_SETTINGS -> {
-            startActivity(Intent(this, SettingsActivity::class.java))
-            true
-        }
-
-        MENU_MODELS -> {
-            startActivity(Intent(this, ModelsActivity::class.java))
-            true
-        }
-
-        MENU_FILES -> {
-            startActivity(Intent(this, FilesActivity::class.java))
-            true
-        }
-
         MENU_MEMORY -> {
             startActivity(Intent(this, MemoryActivity::class.java))
             true
@@ -235,42 +219,23 @@ class ChatActivity : AppCompatActivity() {
             true
         }
 
-        MENU_HISTORY -> {
-            showHistory()
-            true
-        }
-
-        MENU_LOG -> {
-            startActivity(Intent(this, LogActivity::class.java))
-            true
-        }
-
-        MENU_TRANSCRIBE -> {
-            startActivity(Intent(this, TranscribeActivity::class.java))
-            true
-        }
-
-        MENU_BENCHMARK -> {
-            startActivity(Intent(this, BenchmarkActivity::class.java))
-            true
-        }
-
-        MENU_TRANSLATION -> {
-            startActivity(Intent(this, TranslationActivity::class.java))
-            true
-        }
-
-        MENU_PHRASEBOOK -> {
-            startActivity(Intent(this, PhrasebookActivity::class.java))
-            true
-        }
-
         MENU_SHARE_CHAT -> {
             shareChat()
             true
         }
 
-        else -> super.onOptionsItemSelected(item)
+        // Kept local rather than routed through UtilityMenu.handle(): that
+        // does a plain startActivity, and showHistory() needs the result
+        // HistoryActivity sends back (which conversation got picked, or
+        // deleted) to actually act on it — see openHistory's own doc
+        // comment. Skipped from UtilityMenu.inflate() above for exactly
+        // this reason.
+        MENU_HISTORY -> {
+            showHistory()
+            true
+        }
+
+        else -> UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
     }
 
     /** Shares the whole visible conversation as plain text — one message per paragraph, in order. */
@@ -1178,18 +1143,12 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private companion object {
+        // Chat-specific only — every navigation item shared with the rest of
+        // the app now comes from UtilityMenu, which owns its own ids.
         const val MENU_MEMORY = 1
-        const val MENU_MODELS = 2
-        const val MENU_FILES = 3
-        const val MENU_SETTINGS = 4
         const val MENU_HISTORY = 5
-        const val MENU_LOG = 6
         const val MENU_SHARE_CHAT = 7
         const val MENU_CLEAR = 8
-        const val MENU_TRANSCRIBE = 9
-        const val MENU_BENCHMARK = 10
-        const val MENU_TRANSLATION = 11
-        const val MENU_PHRASEBOOK = 12
 
         // Was temporarily raised to 30 minutes to measure real on-device
         // timing for heavier local models before picking a production value
