@@ -86,22 +86,29 @@ class AppLog(private val context: Context) {
         // library path, thread name, and (crucially) any assertion message a
         // library compiled in as a literal C string survives as a clean
         // readable line, just with the binary offsets/addresses between them
-        // dropped. That is exactly the trade worth making here: a person
-        // reading this log wants "which function, which message", not raw
-        // hex.
+        // dropped.
+        //
+        // A tombstone dumps *every* thread's state, not just the one that
+        // crashed — two real captures showed several KB each of idle ART/
+        // system daemon threads (GC, binder, hwui, thread-pool workers, all
+        // just parked waiting) ahead of whatever thread was actually running
+        // this app's own native code, past even a 150,000-char cutoff.
+        // [relevantTraceLines] keeps the signal header plus a window around
+        // any line that looks like it belongs to this app's own code path,
+        // instead of a blind head-truncation of a dump this large.
         runCatching {
             last.traceInputStream?.use { it.readBytes() }
                 ?.takeIf { it.isNotEmpty() }
-                ?.let { bytes -> record("PROCESS_EXIT_TRACE", extractPrintableStrings(bytes).take(MAX_TRACE_CHARS)) }
+                ?.let { bytes -> record("PROCESS_EXIT_TRACE", relevantTraceLines(extractPrintableStrings(bytes))) }
         }
     }
 
-    private fun extractPrintableStrings(bytes: ByteArray, minLength: Int = 4): String {
-        val out = StringBuilder()
+    private fun extractPrintableStrings(bytes: ByteArray, minLength: Int = 4): List<String> {
+        val out = mutableListOf<String>()
         var runStart = -1
         fun flush(end: Int) {
             if (runStart >= 0 && end - runStart >= minLength) {
-                out.append(String(bytes, runStart, end - runStart, Charsets.US_ASCII)).append('\n')
+                out.add(String(bytes, runStart, end - runStart, Charsets.US_ASCII))
             }
             runStart = -1
         }
@@ -114,7 +121,49 @@ class AppLog(private val context: Context) {
             }
         }
         flush(bytes.size)
-        return out.toString()
+        return out
+    }
+
+    /**
+     * Everything this app's own native code touches carries one of these
+     * markers somewhere nearby: its own JNI library/function names, the ggml/
+     * llama.cpp symbols it links against, an assertion or abort message any
+     * of those would emit on failure, or the name Kotlin coroutines gives an
+     * IO-dispatcher worker thread (the one [LlamaCppRuntime]'s generation
+     * worker actually runs on). A handful of false-positive matches (a path
+     * or symbol that merely contains one of these substrings) costs a little
+     * extra context around it; missing the one thread actually worth reading
+     * costs the whole diagnosis.
+     */
+    private fun relevantTraceLines(lines: List<String>): String {
+        if (lines.isEmpty()) return ""
+        val markers = listOf(
+            "llama", "ggml", "GGML_ASSERT", "assert", "abort",
+            "DefaultDispatcher", "nativeGenerate", "nativeLoad", "libllama_jni",
+        )
+        val keep = sortedSetOf<Int>()
+        for (i in 0 until minOf(HEADER_LINES, lines.size)) keep.add(i)
+        lines.forEachIndexed { i, line ->
+            if (markers.any { line.contains(it, ignoreCase = true) }) {
+                for (j in (i - CONTEXT_LINES)..(i + CONTEXT_LINES)) {
+                    if (j in lines.indices) keep.add(j)
+                }
+            }
+        }
+        // No markers anywhere — still better to hand back *something*
+        // readable than nothing, even knowing it likely won't reach the
+        // relevant thread.
+        if (keep.size <= HEADER_LINES) {
+            return lines.joinToString("\n").take(MAX_TRACE_CHARS)
+        }
+        val out = StringBuilder()
+        var prev = -2
+        for (i in keep) {
+            if (prev != -2 && i != prev + 1) out.append("...\n")
+            out.append(lines[i]).append('\n')
+            prev = i
+        }
+        return out.toString().take(MAX_TRACE_CHARS)
     }
 
     private fun describeExitReason(reason: Int): String? = when (reason) {
@@ -139,13 +188,18 @@ class AppLog(private val context: Context) {
         const val MAX_BYTES = 200_000L
         const val MAX_LINES = 1_000
 
-        // A native trace can run long — and a real capture showed the
-        // actually-crashing thread's own frames sitting past the previous
-        // 20,000-char cutoff, after several unrelated idle threads' dumps
-        // that come first in the tombstone. Raised well past MAX_BYTES on
-        // purpose: trimIfTooLarge() only fires on the *next* record() call,
-        // so this one trace is allowed to fill the whole log by itself —
-        // better than truncating the one entry actually worth reading.
-        const val MAX_TRACE_CHARS = 150_000
+        // [relevantTraceLines] already filters down to the signal header
+        // plus context around anything marker-matched, so this is now just
+        // a hard safety cap, not the thing doing the real trimming.
+        const val MAX_TRACE_CHARS = 40_000
+
+        // How many of the trace's own first lines (build fingerprint,
+        // timestamp, signal name) to always keep regardless of markers.
+        const val HEADER_LINES = 12
+
+        // Lines of surrounding context to keep on each side of a marker
+        // match — thread name, register dump, and a handful of backtrace
+        // frames on either side of wherever the match landed.
+        const val CONTEXT_LINES = 40
     }
 }
