@@ -23,7 +23,11 @@ class DeviceFitTest {
 
     @Test
     fun `tiers follow the documented fractions of total ram`() {
-        val phone = deviceWithRam(16) // recommended ceiling 5.6 GB, advanced 8.8 GB, lightweight 2.24 GB
+        // 16 GB total, 12.8 GB available, default 35% budget -> usableRamBytes
+        // = max(5.6 GB, 7.68 GB) = 7.68 GB, well above every size below —
+        // fitsBudget never kicks in here, so this is purely the total-RAM
+        // heuristic: recommended ceiling 5.6 GB, lightweight 2.24 GB.
+        val phone = deviceWithRam(16)
 
         assertEquals(ModelFit.LIGHTWEIGHT, phone.classifyFit(2 * GB))
         assertEquals(ModelFit.RECOMMENDED, phone.classifyFit(5_600_000_000))
@@ -36,8 +40,36 @@ class DeviceFitTest {
         val artifactSize = 4_800_000_000 // ~8B at Q4_K_M
 
         assertEquals(ModelFit.TOO_LARGE, deviceWithRam(8).classifyFit(artifactSize))
-        assertEquals(ModelFit.ADVANCED, deviceWithRam(12).classifyFit(artifactSize))
+        // 12 GB total, 9.6 GB available, default 35% budget -> usableRamBytes
+        // = max(4.2 GB, 5.76 GB) = 5.76 GB. This artifact's estimated
+        // footprint (4.8 GB * 1.3 = 6.24 GB) exceeds that, so it is TOO_LARGE
+        // here too, not ADVANCED — classifyFit must never call a size
+        // "Advanced" (probably runs) when fitsBudget would already refuse it.
+        assertEquals(ModelFit.TOO_LARGE, deviceWithRam(12).classifyFit(artifactSize))
         assertEquals(ModelFit.RECOMMENDED, deviceWithRam(16).classifyFit(artifactSize))
+    }
+
+    @Test
+    fun `classifyFit never recommends a size fitsBudget would refuse`() {
+        // Real device report: lowering the RAM budget percentage still
+        // showed several models as "Recommended" that immediately failed to
+        // load. Reproduced here with a low budget fraction *and* little free
+        // RAM, so usableRamBytes (1.92 GB) sits well under this artifact's
+        // 4 GB, even though 4 GB is comfortably under 35% of the 16 GB total
+        // (5.6 GB) — the old, budget-unaware threshold this used to classify
+        // against.
+        val device = DeviceProfile(
+            totalRamBytes = 16 * GB,
+            availableRamBytes = 2 * GB,
+            availableStorageBytes = 100 * GB,
+            cpuCores = 8,
+            androidApiLevel = 35,
+            supportedRuntimes = setOf(RuntimeKind.LLAMA_CPP),
+            ramBudgetFraction = 0.12,
+        )
+        val artifactSize = 4 * GB
+        assertEquals(false, device.fitsBudget(artifactSize))
+        assertEquals(ModelFit.TOO_LARGE, device.classifyFit(artifactSize))
     }
 
     @Test

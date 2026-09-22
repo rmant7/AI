@@ -195,7 +195,7 @@ class ModelsActivity : AppCompatActivity() {
      * would have picked a smaller model had they known.
      */
     private fun useLocally(seed: LocalModelSeed) {
-        if (!fitsRamBudget(seed, container.device)) {
+        if (!container.device.fitsBudget(seed.approxSizeBytes)) {
             AlertDialog.Builder(this)
                 .setTitle(seed.title)
                 .setMessage(R.string.model_ram_warning)
@@ -213,9 +213,6 @@ class ModelsActivity : AppCompatActivity() {
         Toast.makeText(this, getString(R.string.models_switched_chat, seed.title), Toast.LENGTH_SHORT).show()
         render()
     }
-
-    private fun fitsRamBudget(seed: LocalModelSeed, device: DeviceProfile): Boolean =
-        seed.approxSizeBytes == 0L || seed.approxSizeBytes * 13 / 10 <= device.usableRamBytes
 
     // ── Translation model ─────────────────────────────────────────────────
     //
@@ -338,11 +335,18 @@ class ModelsActivity : AppCompatActivity() {
 
         val freshness = container.catalogFreshness.cached()
 
-        (LocalModels.SEEDS + customSeeds).forEach { seed ->
+        // Fitting models first, in their catalog order, over-budget ones
+        // after in theirs — sortedByDescending is stable, so it only ever
+        // moves the over-budget group down rather than reshuffling within
+        // either group. Real device report: several models showing
+        // "Recommended" would still refuse to load once the RAM budget was
+        // turned down, scattered through the list with no way to tell which
+        // ones were actually pickable without opening each in turn.
+        (LocalModels.SEEDS + customSeeds).sortedByDescending { device.fitsBudget(it.approxSizeBytes) }.forEach { seed ->
             val state = container.downloads.stateOf(seed)
             val selected = container.settings.providerId == CloudProviders.LOCAL.id &&
                 container.settings.chatModel == seed.id
-            val fitsBudget = fitsRamBudget(seed, device)
+            val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
             // Checked at the last app launch, not at render time — this is
             // what "недоступен" means below: at least one source 404'd or
             // was gated the last time this catalogue was refreshed, before
@@ -384,6 +388,7 @@ class ModelsActivity : AppCompatActivity() {
                     },
                     onPrimary = { onTextPrimary(seed) },
                     onSecondary = { onTextSecondary(seed) },
+                    warnsOverBudget = !fitsBudget,
                 ),
             )
         }
@@ -438,7 +443,8 @@ class ModelsActivity : AppCompatActivity() {
 
         add(Row.Note(getString(R.string.models_translation_note)))
         add(Row.Header(getString(R.string.models_local_header)))
-        (LocalModels.SEEDS + customSeeds).forEach { seed -> add(translationModelRow(seed, device)) }
+        (LocalModels.SEEDS + customSeeds).sortedByDescending { device.fitsBudget(it.approxSizeBytes) }
+            .forEach { seed -> add(translationModelRow(seed, device)) }
 
         add(Row.Custom)
     }
@@ -473,7 +479,7 @@ class ModelsActivity : AppCompatActivity() {
     private fun translationModelRow(seed: LocalModelSeed, device: DeviceProfile): Row.Model {
         val state = container.downloads.stateOf(seed)
         val selected = container.settings.translationModel == seed.id
-        val fitsBudget = fitsRamBudget(seed, device)
+        val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
 
         return Row.Model(
             title = seed.title,
@@ -503,6 +509,7 @@ class ModelsActivity : AppCompatActivity() {
             },
             onPrimary = { onTranslationPrimary(seed) },
             onSecondary = { onTranslationSecondary(seed) },
+            warnsOverBudget = !fitsBudget,
         )
     }
 
@@ -815,6 +822,8 @@ class ModelsActivity : AppCompatActivity() {
             val secondaryLabel: String?,
             val onPrimary: () -> Unit,
             val onSecondary: () -> Unit,
+            /** Whether this size fails [DeviceProfile.fitsBudget] — see [ModelHolder.bind]. */
+            val warnsOverBudget: Boolean = false,
         ) : Row
     }
 
@@ -853,7 +862,7 @@ class ModelsActivity : AppCompatActivity() {
         private fun rowContent(row: Row): Any = when (row) {
             is Row.Model -> listOf(
                 row.title, row.subtitle, row.selected, row.status, row.progress,
-                row.indeterminate, row.primaryLabel, row.primaryEnabled, row.secondaryLabel,
+                row.indeterminate, row.primaryLabel, row.primaryEnabled, row.secondaryLabel, row.warnsOverBudget,
             )
             else -> row
         }
@@ -896,10 +905,17 @@ class ModelsActivity : AppCompatActivity() {
 
     private class ModelHolder(val binding: ItemLocalModelBinding) : RecyclerView.ViewHolder(binding.root) {
 
+        // Captured once, before any row ever recolors it — a recycled
+        // ViewHolder must fall back to exactly this color for every row that
+        // doesn't warn, or a red subtitle from whichever row last warned
+        // would keep bleeding into an unrelated row reusing the same holder.
+        private val defaultSubtitleColor = binding.localSubtitle.currentTextColor
+
         fun bindCustom(onClick: () -> Unit) {
             val context = binding.root.context
             binding.localTitle.text = context.getString(R.string.models_custom_title)
             binding.localSubtitle.text = context.getString(R.string.models_custom_hint)
+            binding.localSubtitle.setTextColor(defaultSubtitleColor)
             binding.localStatus.visibility = View.GONE
             binding.localProgress.visibility = View.GONE
             binding.localSecondaryButton.visibility = View.GONE
@@ -911,6 +927,22 @@ class ModelsActivity : AppCompatActivity() {
         fun bind(row: Row.Model) {
             binding.localTitle.text = if (row.selected) "${row.title}  ✓" else row.title
             binding.localSubtitle.text = row.subtitle
+            // A plain text suffix ("exceeds RAM budget") read as just another
+            // detail among several, easy to miss right next to a fit label
+            // that used to say "Recommended" for the same model (see
+            // DeviceProfile.classifyFit's own doc comment on that
+            // contradiction). Coloring the whole line makes a model that
+            // will refuse to load visually distinct at a glance, not just a
+            // few extra words in the middle of the same run of text.
+            binding.localSubtitle.setTextColor(
+                if (row.warnsOverBudget) {
+                    com.google.android.material.color.MaterialColors.getColor(
+                        binding.root, com.google.android.material.R.attr.colorError, defaultSubtitleColor,
+                    )
+                } else {
+                    defaultSubtitleColor
+                },
+            )
 
             binding.localStatus.text = row.status.orEmpty()
             binding.localStatus.visibility = if (row.status.isNullOrBlank()) View.GONE else View.VISIBLE
