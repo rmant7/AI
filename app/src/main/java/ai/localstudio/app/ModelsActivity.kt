@@ -377,14 +377,19 @@ class ModelsActivity : AppCompatActivity() {
 
         val freshness = container.catalogFreshness.cached()
 
-        // Fitting models first, in their catalog order, over-budget ones
-        // after in theirs — sortedByDescending is stable, so it only ever
-        // moves the over-budget group down rather than reshuffling within
-        // either group. Real device report: several models showing
-        // "Recommended" would still refuse to load once the RAM budget was
-        // turned down, scattered through the list with no way to tell which
-        // ones were actually pickable without opening each in turn.
-        (LocalModels.SEEDS + customSeeds).sortedByDescending { device.fitsBudget(it.approxSizeBytes) }.forEach { seed ->
+        // Already-resident models first (an actual answer, right now, with
+        // no load to wait through or risk failing), then models that merely
+        // fit the budget, over-budget ones last — sortedWith is stable, so
+        // within each of those three groups the catalog's own order still
+        // holds. Real device report: several models showing "Recommended"
+        // would still refuse to load once the RAM budget was turned down,
+        // scattered through the list with no way to tell which ones were
+        // actually pickable without opening each in turn.
+        val sortedSeeds = (LocalModels.SEEDS + customSeeds).sortedWith(
+            compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
+                .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
+        )
+        sortedSeeds.forEach { seed ->
             val state = container.downloads.stateOf(seed)
             val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
             // Real device report: settings.chatModel kept pointing at a model
@@ -487,7 +492,12 @@ class ModelsActivity : AppCompatActivity() {
         // AICore and the general chat models.
         add(Row.Header(getString(R.string.models_translation_specialized_header)))
         add(Row.Note(getString(R.string.models_translation_specialized_note)))
-        TranslationModels.SEEDS.forEach { seed -> add(translationModelRow(seed, device)) }
+        // MADLAD stays flagship-first among equals (sortedByDescending is
+        // stable) — this only ever promotes a specific quant that happens to
+        // already be resident right now, never reorders the curated
+        // size progression otherwise.
+        TranslationModels.SEEDS.sortedByDescending { container.isModelResident(it.id) }
+            .forEach { seed -> add(translationModelRow(seed, device)) }
 
         add(Row.Header(getString(R.string.models_translation_aicore_header)))
         add(Row.Note(getString(R.string.models_translation_aicore_note)))
@@ -495,8 +505,10 @@ class ModelsActivity : AppCompatActivity() {
 
         add(Row.Note(getString(R.string.models_translation_note)))
         add(Row.Header(getString(R.string.models_local_header)))
-        (LocalModels.SEEDS + customSeeds).sortedByDescending { device.fitsBudget(it.approxSizeBytes) }
-            .forEach { seed -> add(translationModelRow(seed, device)) }
+        (LocalModels.SEEDS + customSeeds).sortedWith(
+            compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
+                .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
+        ).forEach { seed -> add(translationModelRow(seed, device)) }
 
         add(Row.Custom)
     }

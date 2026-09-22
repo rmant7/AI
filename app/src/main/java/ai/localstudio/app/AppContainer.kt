@@ -1245,10 +1245,38 @@ class AppContainer private constructor(private val context: Context) {
      * blunter unloadAll: a model still actively mid-generation (refCount > 0)
      * is left alone rather than force-freed out from under whatever is
      * using it.
+     *
+     * [cachedTranslationManager] included, not just [runtimeManagers] — real
+     * device report: MADLAD-400 3B, loaded for a translation, stayed
+     * resident (idle, refCount 0) the whole time the user was back in Chat
+     * trying to load a completely unrelated model, which then failed on RAM
+     * it would otherwise have had ("Not enough free RAM for gemma-4-e4b-it-
+     * q4.gguf: 2660MB free, need ~6470MB" with MADLAD's own footprint
+     * plainly visible in the same log's RssAnon). [cachedTranslationManager]
+     * was deliberately left out of [runtimeManagers] so ordinary chat
+     * rebuilds wouldn't evict a translation model still worth keeping warm
+     * (see its own doc comment) — but "worth keeping warm" stops being true
+     * the moment something else actually needs the room, which is exactly
+     * what every caller of this function is responding to.
      */
     suspend fun releaseLocalModels() {
         runtimeManagers.forEach { it.evictIdle() }
+        cachedTranslationManager?.evictIdle()
     }
+
+    /**
+     * Whether [modelId] is resident in any RuntimeManager this container has
+     * ever built right now — used by the Models screen to put what's
+     * actually warm at the top of its list, ahead of what merely fits the
+     * budget but would still need a fresh load. Best-effort, not locked: a
+     * model can go resident/idle between this read and the next render, the
+     * same way [fitsBudget] is already a snapshot rather than a guarantee —
+     * both are advisory ordering, not something anything else depends on
+     * being exact.
+     */
+    fun isModelResident(modelId: String): Boolean =
+        runtimeManagers.any { manager -> manager.residentModels().any { it.modelId == modelId } } ||
+            cachedTranslationManager?.residentModels()?.any { it.modelId == modelId } == true
 
     private fun buildOrchestrator(
         runtime: ModelRuntime,
@@ -1273,6 +1301,23 @@ class AppContainer private constructor(private val context: Context) {
         // freeing an idle llama.cpp context is a bounded, fast native call —
         // unlike loading one.
         runtimeManagers.forEach { existing -> kotlinx.coroutines.runBlocking { existing.evictIdle() } }
+        // Translation's own model (and the semantic-memory embedder) stay
+        // resident across an ordinary chat rebuild on purpose — ping-ponging
+        // between Chat and Translation used to reload whichever one hadn't
+        // been touched most recently even though nothing about it had
+        // changed (see cachedTranslationManager's own doc comment). But real
+        // device report: that warm cache then starved a *genuinely* new
+        // chat load of RAM it needed — MADLAD-400 3B (translation) left
+        // resident, then Gemma 4 E4B (chat) refused to load right after,
+        // "2660MB free, need ~6470MB", MADLAD's own footprint plainly
+        // sitting in the same log's RssAnon. Freeing translation (and
+        // semantic memory) here, only when this rebuild is actually about to
+        // load a local model — not on every chat rebuild regardless — is
+        // what keeps the ping-pong case warm while still giving a real local
+        // load the RAM translation was quietly holding onto.
+        if (registryCandidates.any { it.binding.runtime == RuntimeKind.LLAMA_CPP }) {
+            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("chat model load") }
+        }
         val manager = RuntimeManager(
             // Remote and stub models hold no local weights; the budget starts
             // mattering the moment an on-device runtime is added. Note this
