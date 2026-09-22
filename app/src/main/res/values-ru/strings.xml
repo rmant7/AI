@@ -212,6 +212,7 @@
     <string name="download_confirm_message_ask">Загрузки настроены спрашивать каждый раз (Настройки → Загрузки). Начать эту сейчас?</string>
     <string name="model_delete">Удалить</string>
     <string name="model_cancel">Отменить</string>
+    <string name="model_pause">Пауза</string>
     <string name="model_use">Использовать</string>
     <string name="model_installed">Установлена</string>
     <string name="model_native_missing">Локальный runtime недоступен для этого устройства</string>

@@ -448,7 +448,8 @@ class ModelsActivity : AppCompatActivity() {
                     primaryLabel = when (state) {
                         is DownloadState.Installed ->
                             getString(if (selected) R.string.model_installed else R.string.model_use)
-                        is DownloadState.Running, is DownloadState.Resolving -> getString(R.string.model_cancel)
+                        is DownloadState.Running -> getString(R.string.model_pause)
+                        is DownloadState.Resolving -> getString(R.string.model_cancel)
                         is DownloadState.Failed -> getString(R.string.model_retry)
                         DownloadState.Idle -> getString(R.string.model_download)
                     },
@@ -581,7 +582,8 @@ class ModelsActivity : AppCompatActivity() {
             primaryLabel = when (state) {
                 is DownloadState.Installed ->
                     getString(if (selected) R.string.model_installed else R.string.model_use)
-                is DownloadState.Running, is DownloadState.Resolving -> getString(R.string.model_cancel)
+                is DownloadState.Running -> getString(R.string.model_pause)
+                is DownloadState.Resolving -> getString(R.string.model_cancel)
                 is DownloadState.Failed -> getString(R.string.model_retry)
                 DownloadState.Idle -> getString(R.string.model_download)
             },
@@ -629,7 +631,8 @@ class ModelsActivity : AppCompatActivity() {
                 indeterminate = state is ExperimentalDownloadState.Resolving,
                 primaryLabel = when (state) {
                     is ExperimentalDownloadState.Installed -> getString(R.string.model_state_installed)
-                    is ExperimentalDownloadState.Running, ExperimentalDownloadState.Resolving -> getString(R.string.model_cancel)
+                    is ExperimentalDownloadState.Running -> getString(R.string.model_pause)
+                    ExperimentalDownloadState.Resolving -> getString(R.string.model_cancel)
                     is ExperimentalDownloadState.Failed -> getString(R.string.model_retry)
                     ExperimentalDownloadState.Idle -> getString(R.string.model_download)
                 },
@@ -753,7 +756,7 @@ class ModelsActivity : AppCompatActivity() {
                     primaryLabel = when (state) {
                         is WhisperDownloadState.Installed ->
                             getString(if (selected) R.string.model_installed else R.string.model_use)
-                        is WhisperDownloadState.Running -> getString(R.string.model_cancel)
+                        is WhisperDownloadState.Running -> getString(R.string.model_pause)
                         is WhisperDownloadState.Failed -> getString(R.string.model_retry)
                         WhisperDownloadState.Idle -> getString(R.string.model_download)
                     },
@@ -806,7 +809,7 @@ class ModelsActivity : AppCompatActivity() {
                     primaryLabel = when (state) {
                         is VoskDownloadState.Installed ->
                             getString(if (selected) R.string.model_installed else R.string.model_use)
-                        is VoskDownloadState.Running -> getString(R.string.model_cancel)
+                        is VoskDownloadState.Running -> getString(R.string.model_pause)
                         is VoskDownloadState.Failed -> getString(R.string.model_retry)
                         VoskDownloadState.Idle -> getString(R.string.model_download)
                     },

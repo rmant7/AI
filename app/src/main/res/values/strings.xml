@@ -210,6 +210,7 @@
     <string name="download_confirm_message_ask">Downloads are set to ask every time (Settings → Downloads). Start this one now?</string>
     <string name="model_delete">Delete</string>
     <string name="model_cancel">Cancel</string>
+    <string name="model_pause">Pause</string>
     <string name="model_use">Use</string>
     <string name="model_installed">Installed</string>
     <string name="model_native_missing">Local runtime isn\'t available for this device</string>
