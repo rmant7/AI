@@ -1003,19 +1003,28 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateT5(
 
     // ggml's ARM-optimized Q4_K repack GEMM kernel (ggml_gemm_q4_K_8x8_q8_K,
     // used for MADLAD-400's quantization on a REPACK-capable CPU — see the
-    // feature line this app logs at startup) asserts its row count is a
-    // multiple of 4; a real device crash trace pointed straight at that
-    // assert failing (SIGILL/ILL_ILLOPC, not a plain segfault) for exactly
-    // the short inputs this function is normally called with — MADLAD-400's
-    // own `<2xx> text` format tokenizes a short phrase down to a handful of
-    // tokens, essentially never a multiple of 4. Padding the encoder batch
-    // up to one is a call-site fix for a kernel assumption this app has no
-    // way to change from outside ggml itself. EOS is what padding already
-    // means at the *end* of this exact input — llama_tokenize above was
-    // called with add_special=true, so the real content already ends on one;
-    // extending that boundary marker perturbs self-attention far less than
-    // any other filler token would.
-    const int32_t paddedCount = ((count + 3) / 4) * 4;
+    // feature line this app logs at startup) crashes (SIGILL/ILL_ILLOPC —
+    // not a plain segfault) on the tiny row counts this function is
+    // normally called with. MADLAD-400's own `<2xx> text` format tokenizes a
+    // short phrase down to a handful of tokens, and two earlier, narrower
+    // paddings (a plain multiple of 4 — the row-count assert in this
+    // kernel's portable *_generic fallback, ggml_gemm_q4_K_8x8_q8_K_generic,
+    // which is not the function actually crashing — and, separately, one
+    // thread doing the whole batch instead of several dividing it) each
+    // still crashed on a real device afterward. Neither repack.cpp nor
+    // repack.h in ggml's own source at this pinned tag even contains the
+    // optimized kernel's actual chunking logic (tensor_traits::
+    // forward_mul_mat_one_chunk isn't in either file), so its real alignment
+    // requirement is not something this app can pin down from outside it.
+    // 32 is a wide margin past the "8x8" tile size the type name itself
+    // advertises, at negligible extra cost — a T5 encoder pass this short is
+    // already the fast part of a translation. Padding the encoder batch is
+    // a call-site workaround either way, not a change to ggml itself. EOS is
+    // what padding already means at the *end* of this exact input —
+    // llama_tokenize above was called with add_special=true, so the real
+    // content already ends on one; extending that boundary marker perturbs
+    // self-attention far less than any other filler token would.
+    const int32_t paddedCount = ((count + 31) / 32) * 32;
     if (paddedCount > count) {
         const llama_token padToken = llama_vocab_eos(session->vocab);
         if ((size_t) paddedCount > tokens.size()) tokens.resize(paddedCount);
