@@ -392,6 +392,14 @@ class ModelsActivity : AppCompatActivity() {
         sortedSeeds.forEach { seed ->
             val state = container.downloads.stateOf(seed)
             val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
+            // Real device report: the ✓ (selected) mark reads as "this is
+            // using RAM right now" — it never meant that, only "this is what
+            // Settings points to". isModelResident actually answers "using
+            // RAM right now", separately from selected, since a model can be
+            // selected but evicted (translation freed for a chat load, or
+            // vice versa), or resident-and-idle without being the current
+            // selection at all.
+            val isLoadedNow = container.isModelResident(seed.id)
             // Real device report: settings.chatModel kept pointing at a model
             // that doesn't fit the budget (chosen anyway through the warning
             // dialog, or before the budget was turned down) — the row showed
@@ -423,6 +431,7 @@ class ModelsActivity : AppCompatActivity() {
                         if (totalApproxBytes > 0) append(" · ~${size(totalApproxBytes)}")
                         append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
                         if (!fitsBudget) append(" · ").append(getString(R.string.model_exceeds_ram_budget))
+                        if (isLoadedNow) append(" · ").append(getString(R.string.model_loaded_now))
                         if (knownStale) append(" · ").append(getString(R.string.model_catalog_stale))
                         append("\n").append(seed.resolvedNote(this@ModelsActivity))
                     },
@@ -446,6 +455,7 @@ class ModelsActivity : AppCompatActivity() {
                     onPrimary = { onTextPrimary(seed) },
                     onSecondary = { onTextSecondary(seed) },
                     warnsOverBudget = !fitsBudget,
+                    loadedNow = isLoadedNow,
                 ),
             )
         }
@@ -545,6 +555,8 @@ class ModelsActivity : AppCompatActivity() {
         val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
         // Same reasoning as textRows' own selected — see its comment.
         val selected = container.settings.translationModel == seed.id && fitsBudget
+        // Same reasoning as textRows' own isLoadedNow — see its comment.
+        val isLoadedNow = container.isModelResident(seed.id)
 
         return Row.Model(
             title = seed.title,
@@ -553,6 +565,7 @@ class ModelsActivity : AppCompatActivity() {
                 if (seed.approxSizeBytes > 0) append(" · ~${size(seed.approxSizeBytes)}")
                 append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
                 if (!fitsBudget) append(" · ").append(getString(R.string.model_exceeds_ram_budget))
+                if (isLoadedNow) append(" · ").append(getString(R.string.model_loaded_now))
                 append("\n").append(seed.resolvedNote(this@ModelsActivity))
             },
             selected = selected,
@@ -575,6 +588,7 @@ class ModelsActivity : AppCompatActivity() {
             onPrimary = { onTranslationPrimary(seed) },
             onSecondary = { onTranslationSecondary(seed) },
             warnsOverBudget = !fitsBudget,
+            loadedNow = isLoadedNow,
         )
     }
 
@@ -889,6 +903,8 @@ class ModelsActivity : AppCompatActivity() {
             val onSecondary: () -> Unit,
             /** Whether this size fails [DeviceProfile.fitsBudget] — see [ModelHolder.bind]. */
             val warnsOverBudget: Boolean = false,
+            /** Whether [AppContainer.isModelResident] says this model is actually in RAM right now — see [ModelHolder.bind]. */
+            val loadedNow: Boolean = false,
         ) : Row
     }
 
@@ -927,7 +943,8 @@ class ModelsActivity : AppCompatActivity() {
         private fun rowContent(row: Row): Any = when (row) {
             is Row.Model -> listOf(
                 row.title, row.subtitle, row.selected, row.status, row.progress,
-                row.indeterminate, row.primaryLabel, row.primaryEnabled, row.secondaryLabel, row.warnsOverBudget,
+                row.indeterminate, row.primaryLabel, row.primaryEnabled, row.secondaryLabel,
+                row.warnsOverBudget, row.loadedNow,
             )
             else -> row
         }
@@ -999,13 +1016,23 @@ class ModelsActivity : AppCompatActivity() {
             // contradiction). Coloring the whole line makes a model that
             // will refuse to load visually distinct at a glance, not just a
             // few extra words in the middle of the same run of text.
+            //
+            // Real device report: the ✓ mark was read as "this is using RAM
+            // right now" — it only ever meant "this is Settings' current
+            // pick" (see isLoadedNow's own comment at its call sites). This
+            // is the actual "using RAM right now" signal, colored distinctly
+            // from the ✓ so the two questions ("what's configured" vs
+            // "what's actually loaded, this instant") don't collapse back
+            // into looking like the same thing again.
             binding.localSubtitle.setTextColor(
-                if (row.warnsOverBudget) {
-                    com.google.android.material.color.MaterialColors.getColor(
+                when {
+                    row.loadedNow -> com.google.android.material.color.MaterialColors.getColor(
+                        binding.root, com.google.android.material.R.attr.colorPrimary, defaultSubtitleColor,
+                    )
+                    row.warnsOverBudget -> com.google.android.material.color.MaterialColors.getColor(
                         binding.root, com.google.android.material.R.attr.colorError, defaultSubtitleColor,
                     )
-                } else {
-                    defaultSubtitleColor
+                    else -> defaultSubtitleColor
                 },
             )
 

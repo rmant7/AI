@@ -396,6 +396,7 @@
     <string name="note_llama_3_1_8b">A classic; holds up well in long conversations.</string>
 
     <string name="model_exceeds_ram_budget">exceeds memory budget</string>
+    <string name="model_loaded_now">loaded in RAM now</string>
     <string name="download_progress_label">%1$s: %2$s of %3$s</string>
     <string name="device_ram_line">RAM: %1$s total, %2$s free</string>
     <string name="device_budget_line">Model budget: %1$s (%2$d%% RAM)</string>
