@@ -35,7 +35,17 @@ object UtilityMenu {
     // Menu.add "order" value below, so Android falls back to insertion
     // order) — Log goes last, same position it held before Transcribe and
     // Benchmark were added after History instead of after it.
+    //
+    // Chat itself is an entry here too, first in the list — real device
+    // report: every *other* screen could jump straight to any other, but
+    // none of them could jump back to the actual ongoing conversation
+    // without the system Back button, since [inflate] already excludes
+    // whichever screen is showing it, and Chat had never been in this list
+    // at all to be excluded from. [inflate]'s own `activity::class.java`
+    // check still keeps it out of [ChatActivity]'s own menu the same way
+    // every other entry stays out of its own screen's menu.
     private val ENTRIES = listOf(
+        Entry(9000, R.string.menu_chat, ChatActivity::class.java),
         Entry(9001, R.string.menu_models, ModelsActivity::class.java),
         Entry(9002, R.string.menu_files, FilesActivity::class.java),
         Entry(9003, R.string.menu_settings, SettingsActivity::class.java),

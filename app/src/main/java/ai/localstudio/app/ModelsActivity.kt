@@ -386,9 +386,19 @@ class ModelsActivity : AppCompatActivity() {
         // ones were actually pickable without opening each in turn.
         (LocalModels.SEEDS + customSeeds).sortedByDescending { device.fitsBudget(it.approxSizeBytes) }.forEach { seed ->
             val state = container.downloads.stateOf(seed)
-            val selected = container.settings.providerId == CloudProviders.LOCAL.id &&
-                container.settings.chatModel == seed.id
             val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
+            // Real device report: settings.chatModel kept pointing at a model
+            // that doesn't fit the budget (chosen anyway through the warning
+            // dialog, or before the budget was turned down) — the row showed
+            // its ✓ and "Installed" the same as a model that actually works,
+            // even though every real attempt to use it fails on load with
+            // "Not enough free RAM". requiring fitsBudget here is what makes
+            // the checkmark mean "this is what will actually answer", not
+            // just "this is what Settings happens to point to" — tapping Use
+            // again re-shows the warning and, once accepted, still ends up
+            // right back here, since nothing about the RAM budget changed.
+            val selected = container.settings.providerId == CloudProviders.LOCAL.id &&
+                container.settings.chatModel == seed.id && fitsBudget
             // Checked at the last app launch, not at render time — this is
             // what "недоступен" means below: at least one source 404'd or
             // was gated the last time this catalogue was refreshed, before
@@ -520,8 +530,9 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun translationModelRow(seed: LocalModelSeed, device: DeviceProfile): Row.Model {
         val state = container.downloads.stateOf(seed)
-        val selected = container.settings.translationModel == seed.id
         val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
+        // Same reasoning as textRows' own selected — see its comment.
+        val selected = container.settings.translationModel == seed.id && fitsBudget
 
         return Row.Model(
             title = seed.title,
