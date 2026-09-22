@@ -137,4 +137,43 @@ class RuntimeManagerTest {
         }
         Unit
     }
+
+    @Test
+    fun `rewire merges runtime kinds instead of replacing them`() = runBlocking {
+        // Two callers sharing one manager (e.g. chat's own path and a
+        // Compare-mode source), each rewiring only the kind it just
+        // rebuilt — as AppContainer.buildOrchestrator now does for every
+        // orchestrator it builds against one shared manager.
+        val manager = RuntimeManager(budgetBytes = 6 * GB, runtimes = emptyMap(), clock = { ++now })
+        val aicore = FakeRuntime(RuntimeKind.AICORE)
+
+        manager.rewire(6 * GB, mapOf(RuntimeKind.LLAMA_CPP to runtime))
+        manager.rewire(6 * GB, mapOf(RuntimeKind.AICORE to aicore))
+
+        // Both kinds still resolve — the second rewire must not have
+        // dropped the first's entry.
+        val llm = model("llm", bindings = listOf(binding(ramBytes = 1 * GB)))
+        manager.withModel(llm, llm.bindings.first()) { }
+        assertEquals(listOf("llm"), runtime.loads)
+    }
+
+    @Test
+    fun `a model stays resident across a rewire with a freshly-built runtime wrapper`() = runBlocking {
+        // Simulates a settings change rebuilding the ModelRuntime wrapper
+        // (new contextTokens/temperature baked in) for the same
+        // RuntimeKind — the already-loaded model must not reload just
+        // because the wrapper instance registered for its kind changed.
+        val manager = RuntimeManager(budgetBytes = 6 * GB, runtimes = emptyMap(), clock = { ++now })
+        val llm = model("llm", bindings = listOf(binding(ramBytes = 1 * GB)))
+
+        manager.rewire(6 * GB, mapOf(RuntimeKind.LLAMA_CPP to runtime))
+        manager.withModel(llm, llm.bindings.first()) { }
+
+        val rebuiltRuntime = FakeRuntime()
+        manager.rewire(6 * GB, mapOf(RuntimeKind.LLAMA_CPP to rebuiltRuntime))
+        manager.withModel(llm, llm.bindings.first()) { }
+
+        assertEquals(listOf("llm"), runtime.loads)
+        assertTrue(rebuiltRuntime.loads.isEmpty())
+    }
 }

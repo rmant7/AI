@@ -27,10 +27,42 @@ data class ResidentModel(
  * [InsufficientMemoryException] rather than thrashing.
  */
 class RuntimeManager(
-    private val budgetBytes: Long,
-    private val runtimes: Map<RuntimeKind, ModelRuntime>,
+    private var budgetBytes: Long,
+    private var runtimes: Map<RuntimeKind, ModelRuntime>,
     private val clock: () -> Long = System::nanoTime,
 ) {
+    /**
+     * Repoints this manager at freshly-built runtime wrappers (new
+     * contextTokens/temperature/etc. baked into them, a settings change or a
+     * different chat model) and refreshes the RAM budget the same way — for
+     * a caller sharing ONE manager across multiple call sites instead of
+     * building a new one per call. Real device report: chat's own
+     * single-candidate path and Compare mode each built their own
+     * independent [RuntimeManager], so the same local GGUF could end up
+     * resident in both at once — two full copies competing for RAM that
+     * neither one's own eviction sweep ever saw, because sweeping only ever
+     * ran on *that* manager's own [resident] map. A single shared instance
+     * makes that impossible by construction: [acquire] already returns the
+     * existing entry for a model that's already resident, and
+     * [evictUntilFits] already evicts by least-recent-use across everything
+     * this one manager holds — no separate cross-manager sweep needed once
+     * there is only one manager to sweep.
+     */
+    suspend fun rewire(budgetBytes: Long, runtimes: Map<RuntimeKind, ModelRuntime>) = mutex.withLock {
+        this.budgetBytes = budgetBytes
+        // Merged, not replaced: this same manager is shared across several
+        // orchestrators at once now (chat's own, every Compare-mode source,
+        // translation's) — each rewires only the runtime kind(s) *it* just
+        // rebuilt (LOCAL's LlamaCppRuntime, AICore's own wrapper, ...).
+        // Replacing the whole map on each call would drop every other
+        // orchestrator's entry the moment a different one rewires, so an
+        // acquire() reached through an *earlier*-built Orchestrator would
+        // fail with "no runtime registered" for a kind that plainly still
+        // has a live wrapper — just not the one this particular call knew
+        // about.
+        this.runtimes = this.runtimes + runtimes
+    }
+
     private class Entry(
         val loaded: LoadedModel,
         val runtime: RuntimeKind,

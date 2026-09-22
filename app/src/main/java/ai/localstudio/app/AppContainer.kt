@@ -1220,17 +1220,21 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * Every [RuntimeManager] this container has ever built, so
-     * [releaseLocalModels] has something to actually reach — buildOrchestrator
-     * otherwise hands its manager straight to [NodeExecutors] with no
-     * reference kept anywhere else. Never pruned: an old, already-empty
-     * manager left in this list costs nothing (no native resources, just a
-     * small object), and a manager whose cached [Orchestrator] slot was
-     * replaced after a signature change — see compareCandidates' own doc
-     * comment on that gap — still gets evicted through here instead of
-     * staying orphaned forever.
+     * The one [RuntimeManager] behind every orchestrator this container
+     * builds — chat's own single-candidate path, every Compare-mode source,
+     * and [translationOrchestrator]'s own. Real device report: those three
+     * used to each build (and cache) their own independent manager, so the
+     * same GGUF could end up resident in more than one at once — two full
+     * copies competing for RAM that neither manager's own eviction sweep
+     * ever saw, because each only ever swept its own resident map. Sharing
+     * one instance makes that impossible by construction: [RuntimeManager.acquire]
+     * already returns the existing entry for a model that's already
+     * resident, and its own least-recently-used eviction already runs
+     * across everything this one manager holds. [buildOrchestrator] rewires
+     * it (fresh runtime wrappers, current budget) on every rebuild rather
+     * than replacing it.
      */
-    private val runtimeManagers = mutableListOf<RuntimeManager>()
+    private val sharedRuntimeManager = RuntimeManager(budgetBytes = device.usableRamBytes, runtimes = emptyMap())
 
     /**
      * Frees every locally-loaded model (the LLM, its vision projector). Two
@@ -1245,103 +1249,80 @@ class AppContainer private constructor(private val context: Context) {
      * blunter unloadAll: a model still actively mid-generation (refCount > 0)
      * is left alone rather than force-freed out from under whatever is
      * using it.
-     *
-     * [cachedTranslationManager] included, not just [runtimeManagers] — real
-     * device report: MADLAD-400 3B, loaded for a translation, stayed
-     * resident (idle, refCount 0) the whole time the user was back in Chat
-     * trying to load a completely unrelated model, which then failed on RAM
-     * it would otherwise have had ("Not enough free RAM for gemma-4-e4b-it-
-     * q4.gguf: 2660MB free, need ~6470MB" with MADLAD's own footprint
-     * plainly visible in the same log's RssAnon). [cachedTranslationManager]
-     * was deliberately left out of [runtimeManagers] so ordinary chat
-     * rebuilds wouldn't evict a translation model still worth keeping warm
-     * (see its own doc comment) — but "worth keeping warm" stops being true
-     * the moment something else actually needs the room, which is exactly
-     * what every caller of this function is responding to.
      */
     suspend fun releaseLocalModels() {
-        runtimeManagers.forEach { it.evictIdle() }
-        cachedTranslationManager?.evictIdle()
+        sharedRuntimeManager.evictIdle()
     }
 
     /**
-     * Whether [modelId] is resident in any RuntimeManager this container has
-     * ever built right now — used by the Models screen to put what's
-     * actually warm at the top of its list, ahead of what merely fits the
-     * budget but would still need a fresh load. Best-effort, not locked: a
-     * model can go resident/idle between this read and the next render, the
-     * same way [fitsBudget] is already a snapshot rather than a guarantee —
-     * both are advisory ordering, not something anything else depends on
-     * being exact.
+     * Whether [modelId] is resident in [sharedRuntimeManager] right now —
+     * used by the Models screen to put what's actually warm at the top of
+     * its list, ahead of what merely fits the budget but would still need a
+     * fresh load. Best-effort, not locked: a model can go resident/idle
+     * between this read and the next render, the same way [fitsBudget] is
+     * already a snapshot rather than a guarantee — both are advisory
+     * ordering, not something anything else depends on being exact.
      */
     fun isModelResident(modelId: String): Boolean =
-        runtimeManagers.any { manager -> manager.residentModels().any { it.modelId == modelId } } ||
-            cachedTranslationManager?.residentModels()?.any { it.modelId == modelId } == true
+        sharedRuntimeManager.residentModels().any { it.modelId == modelId }
 
     private fun buildOrchestrator(
         runtime: ModelRuntime,
         isLocalOnly: Boolean,
         registryCandidates: List<FallbackCandidate>,
     ): Orchestrator {
-        // Every previously-built manager's idle models, freed before this one
-        // even exists — not just eventually, via releaseLocalModels(). That
-        // was written on the assumption something would call it soon after a
-        // manager got superseded (a settings change, a 503 cooldown
-        // invalidating the cached orchestrator, a Compare-mode signature
-        // change); in practice its only caller is the mic button, which this
-        // build hides — so nothing ever ran it, and a superseded manager's
-        // already-loaded local model just sat resident, uncounted, for the
-        // rest of the process's life. The next buildOrchestrator() call then
-        // loaded a second, fully separate copy of the same GGUF right
-        // alongside it: this is what an OOM kill shortly after a router
-        // rebuild looked like in the app log. runBlocking is deliberate, not
-        // a shortcut: this runs on the same thread about to build a new
-        // RuntimeManager regardless, evictIdle() only touches refCount==0
-        // entries (nothing this could contend with is still generating), and
-        // freeing an idle llama.cpp context is a bounded, fast native call —
-        // unlike loading one.
-        runtimeManagers.forEach { existing -> kotlinx.coroutines.runBlocking { existing.evictIdle() } }
-        // Translation's own model (and the semantic-memory embedder) stay
-        // resident across an ordinary chat rebuild on purpose — ping-ponging
-        // between Chat and Translation used to reload whichever one hadn't
-        // been touched most recently even though nothing about it had
-        // changed (see cachedTranslationManager's own doc comment). But real
-        // device report: that warm cache then starved a *genuinely* new
-        // chat load of RAM it needed — MADLAD-400 3B (translation) left
-        // resident, then Gemma 4 E4B (chat) refused to load right after,
-        // "2660MB free, need ~6470MB", MADLAD's own footprint plainly
-        // sitting in the same log's RssAnon. Freeing translation (and
-        // semantic memory) here, only when this rebuild is actually about to
-        // load a local model — not on every chat rebuild regardless — is
-        // what keeps the ping-pong case warm while still giving a real local
-        // load the RAM translation was quietly holding onto.
+        // Freed *before* this rebuild's own rewire, not just eventually via
+        // releaseLocalModels() — a real device report: translation's own
+        // model (and the semantic-memory embedder) staying resident starved
+        // a genuinely new chat load of RAM it needed. Only when this
+        // rebuild is actually about to load a local model, not on every
+        // chat rebuild regardless, so translation stays warm across
+        // ping-ponging between the two screens otherwise. Now that
+        // sharedRuntimeManager (rewired below) is the one manager every
+        // orchestrator this container builds actually uses,
+        // RuntimeManager.acquire's own least-recently-used eviction already
+        // does the rest of this job automatically the moment a new load
+        // genuinely needs the room — no separate sweep call needed here for
+        // that part, only this cross-subsystem (semantic memory) piece.
         if (registryCandidates.any { it.binding.runtime == RuntimeKind.LLAMA_CPP }) {
             kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("chat model load") }
         }
-        val manager = RuntimeManager(
-            // Remote and stub models hold no local weights; the budget starts
-            // mattering the moment an on-device runtime is added. Note this
-            // budget does not see inside a fallback chain: FallbackTextModel
-            // loads each wrapped candidate directly rather than through this
-            // manager, so a local model loaded as part of a chain is not
-            // tracked or evicted the way a standalone local model is.
-            budgetBytes = device.usableRamBytes,
-            // whisperCppRuntime is always registered alongside whichever text
-            // runtime this orchestrator is for — SPEECH_TO_TEXT is a
-            // capability every orchestrator can be asked for regardless of
-            // which text-generation runtime backs it, and previously wasn't
-            // registered at all (RuntimeManager.acquire threw "no runtime
-            // registered for whisper_cpp" the moment anything tried). See
-            // docs/13-asr-pipeline-migration.md.
-            runtimes = buildMap {
-                put(runtime.kind, runtime)
-                put(whisperCppRuntime.kind, whisperCppRuntime)
-            },
-        )
-        runtimeManagers += manager
+        // Rewired, not replaced: this is the same RuntimeManager instance
+        // every orchestrator this container builds shares (see
+        // sharedRuntimeManager's own doc comment on why) — merges in
+        // whichever runtime kind(s) *this* rebuild just constructed
+        // (LOCAL's LlamaCppRuntime, AICore's own wrapper, ...) without
+        // dropping another still-live Orchestrator's own kind the way
+        // replacing the whole map would (see RuntimeManager.rewire's own
+        // doc comment) — Compare mode builds one Orchestrator per enabled
+        // provider in the same pass, each rewiring this one manager in turn.
+        kotlinx.coroutines.runBlocking {
+            sharedRuntimeManager.rewire(
+                // Remote and stub models hold no local weights; the budget
+                // starts mattering the moment an on-device runtime is
+                // added. Note this budget does not see inside a fallback
+                // chain: FallbackTextModel loads each wrapped candidate
+                // directly rather than through this manager, so a local
+                // model loaded as part of a chain is not tracked or
+                // evicted the way a standalone local model is.
+                budgetBytes = device.usableRamBytes,
+                // whisperCppRuntime is always registered alongside
+                // whichever text runtime this orchestrator is for —
+                // SPEECH_TO_TEXT is a capability every orchestrator can be
+                // asked for regardless of which text-generation runtime
+                // backs it, and previously wasn't registered at all
+                // (RuntimeManager.acquire threw "no runtime registered for
+                // whisper_cpp" the moment anything tried). See
+                // docs/13-asr-pipeline-migration.md.
+                runtimes = buildMap {
+                    put(runtime.kind, runtime)
+                    put(whisperCppRuntime.kind, whisperCppRuntime)
+                },
+            )
+        }
         val executors = NodeExecutors(
             selector = ModelSelector(registry(runtime, registryCandidates), device),
-            runtimeManager = manager,
+            runtimeManager = sharedRuntimeManager,
             contextEngine = ContextEngine(),
             memory = memory,
             memoryExperiment = memoryExperimentRunner,
@@ -1430,6 +1411,16 @@ class AppContainer private constructor(private val context: Context) {
             // way orchestrator() already caches the single-provider path:
             // reused for this provider as long as nothing that would change
             // its wiring actually has.
+            //
+            // buildOrchestrator() below now also rewires the one
+            // sharedRuntimeManager every orchestrator this container builds
+            // uses, rather than constructing its own — real device report:
+            // this cache alone doesn't stop chat's own single-candidate path
+            // and this one from each holding an independent resident copy
+            // of the same local model, since they used to be entirely
+            // separate managers. A shared manager makes that impossible
+            // regardless of which of the two paths a given turn goes
+            // through.
             val signature = (
                 listOf(
                     settings.customEndpoint,
@@ -1484,21 +1475,6 @@ class AppContainer private constructor(private val context: Context) {
 
     private var cachedTranslationOrchestrator: Orchestrator? = null
     private var cachedTranslationSignature: String? = null
-
-    /**
-     * The one [RuntimeManager] behind [translationOrchestrator] — tracked
-     * separately from [runtimeManagers] and deliberately never added to it.
-     * [buildOrchestrator] sweeps every manager in that shared list with
-     * `evictIdle()` each time *any* of them is rebuilt (chat's own, a
-     * Compare-mode candidate's, ...) — sharing it here meant switching
-     * screens between Chat and Translation evicted whichever one hadn't
-     * been touched most recently even though nothing about it had changed,
-     * observed on a real device as a ~7s reload on the very next translation
-     * after a successful, instant, cache-reusing one moments before. Kept
-     * out of that list, this manager is only ever evicted by
-     * [translationOrchestrator] itself, right before it replaces it.
-     */
-    private var cachedTranslationManager: RuntimeManager? = null
 
     /**
      * A dedicated single-candidate orchestrator for [TranslationActivity] —
@@ -1562,12 +1538,6 @@ class AppContainer private constructor(private val context: Context) {
         ).joinToString("|")
         cachedTranslationOrchestrator?.takeIf { cachedTranslationSignature == signature }?.let { return it }
 
-        // Frees whatever the *previous* signature's manager was holding —
-        // see cachedTranslationManager's own doc comment for why this is a
-        // manually-scoped equivalent of buildOrchestrator's shared-list
-        // sweep rather than that sweep itself.
-        cachedTranslationManager?.let { existing -> kotlinx.coroutines.runBlocking { existing.evictIdle() } }
-
         val isLocalOnly = candidate.binding.runtime == RuntimeKind.LLAMA_CPP
         if (isLocalOnly) {
             // [releaseMemoryUnderPressure] otherwise only runs reactively,
@@ -1582,16 +1552,24 @@ class AppContainer private constructor(private val context: Context) {
             // cheaper than finding out after the fact.
             kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("translation model load") }
         }
-        val manager = RuntimeManager(
-            budgetBytes = device.usableRamBytes,
-            runtimes = buildMap {
-                put(candidate.runtime.kind, candidate.runtime)
-                put(whisperCppRuntime.kind, whisperCppRuntime)
-            },
-        )
+        // Rewires sharedRuntimeManager (see its own doc comment) rather
+        // than building a dedicated manager for translation — chat's own
+        // resident model, if this candidate names a different one, is
+        // freed by RuntimeManager.acquire's own least-recently-used
+        // eviction the moment this load actually needs the room, not by a
+        // separate manager translation used to keep to itself.
+        kotlinx.coroutines.runBlocking {
+            sharedRuntimeManager.rewire(
+                budgetBytes = device.usableRamBytes,
+                runtimes = buildMap {
+                    put(candidate.runtime.kind, candidate.runtime)
+                    put(whisperCppRuntime.kind, whisperCppRuntime)
+                },
+            )
+        }
         val executors = NodeExecutors(
             selector = ModelSelector(registry(candidate.runtime, listOf(candidate)), device),
-            runtimeManager = manager,
+            runtimeManager = sharedRuntimeManager,
             contextEngine = ContextEngine(),
             memory = memory,
             memoryExperiment = memoryExperimentRunner,
@@ -1622,7 +1600,6 @@ class AppContainer private constructor(private val context: Context) {
         return Orchestrator(CapabilityRouter(), executors).also {
             cachedTranslationOrchestrator = it
             cachedTranslationSignature = signature
-            cachedTranslationManager = manager
         }
     }
 
@@ -1883,8 +1860,8 @@ class AppContainer private constructor(private val context: Context) {
         // Independent of the branch above (which is about text generation):
         // whenever a whisper.cpp model is actually installed on disk, it's
         // registered too, so SPEECH_TO_TEXT resolves to it via WhisperCppRuntime
-        // — see runtimeManagers/buildOrchestrator for why that runtime is
-        // always in RuntimeManager's map regardless of which one this
+        // — see sharedRuntimeManager/buildOrchestrator for why that runtime
+        // is always in RuntimeManager's map regardless of which one this
         // orchestrator's own `runtime` argument is. Still not reachable from
         // any screen in this app yet (see whisperEngine's own comment above,
         // used directly by ChatActivity's mic button instead) — this is what
