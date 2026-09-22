@@ -40,6 +40,7 @@ import ai.localstudio.core.runtime.FallbackCandidate
 import ai.localstudio.core.runtime.FallbackTextRuntime
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
+import ai.localstudio.core.runtime.SharedRuntime
 import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.benchmark.BenchmarkOrchestrator
@@ -60,6 +61,7 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.llama.LlamaCppMemoryEmbedder
 import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.llama.LlamaCppRuntime
+import ai.localstudio.app.llama.readMemAvailableBytes
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
@@ -120,6 +122,31 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". Declared here, ahead of its usual place below, so memory/memoryExperimentLogger (right after) can already reference it. */
     val appLog = AppLog(context)
+
+    /**
+     * Where every on-device LLM actually lives, whichever path asked for it —
+     * chat, a fallback chain, a Compare-mode source, translation. Each of
+     * those wraps its [LlamaCppRuntime] in a [SharedRuntime] pointed here, so
+     * one GGUF can never be resident twice, and loading a different one
+     * evicts the previous one first ([RuntimeManager]'s `exclusive` mode —
+     * see its own doc comment on why budget arithmetic can't decide
+     * coexistence for memory-mapped weights). Real device reports behind
+     * this: Qwen 9B hanging for five minutes while Gemma stayed resident in a
+     * chain nobody's budget could see, and — when this manager was instead
+     * shared by whole orchestrators — every Compare-mode bubble answering
+     * with the same chain, because all chains share one registry id.
+     *
+     * Non-strict: the user picked the model and was already warned in Models
+     * if its estimate looked too big, so an over-budget estimate is logged
+     * and attempted rather than refused.
+     */
+    private val sharedRuntimeManager = RuntimeManager(
+        budgetBytes = { device.usableRamBytes },
+        runtimes = emptyMap(),
+        strictBudget = false,
+        exclusive = true,
+        log = { appLog.record("RAM_MANAGER", it) },
+    )
 
     /**
      * Fronts [memory]'s semantic half. Constructing this is cheap and
@@ -618,12 +645,16 @@ class AppContainer private constructor(private val context: Context) {
      * load independently and are each just as capable of sitting resident
      * and uncounted through a real OOM as the LLM was.
      */
-    private suspend fun releaseMemoryUnderPressure(reason: String, level: Int = Int.MAX_VALUE) {
+    private suspend fun releaseMemoryUnderPressure(
+        reason: String,
+        level: Int = Int.MAX_VALUE,
+        includeLocalModels: Boolean = true,
+    ) {
         if (semanticMemoryEmbedder.isReady) {
             semanticMemoryEmbedder.unload()
             appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
         }
-        releaseLocalModels()
+        if (includeLocalModels) releaseLocalModels()
         releaseWhisperEngines(reason, level)
     }
 
@@ -835,7 +866,7 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /** Recomputed on demand: free memory moves, and the budget is user-settable. */
-    val device: DeviceProfile get() = profileOf(context, settings.ramBudgetFraction)
+    val device: DeviceProfile get() = profileOf(context, settings.ramBudgetFraction, sharedRuntimeManager.residentBytes)
 
     val modelStore = ModelStore(context)
 
@@ -1220,23 +1251,6 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * The one [RuntimeManager] behind every orchestrator this container
-     * builds — chat's own single-candidate path, every Compare-mode source,
-     * and [translationOrchestrator]'s own. Real device report: those three
-     * used to each build (and cache) their own independent manager, so the
-     * same GGUF could end up resident in more than one at once — two full
-     * copies competing for RAM that neither manager's own eviction sweep
-     * ever saw, because each only ever swept its own resident map. Sharing
-     * one instance makes that impossible by construction: [RuntimeManager.acquire]
-     * already returns the existing entry for a model that's already
-     * resident, and its own least-recently-used eviction already runs
-     * across everything this one manager holds. [buildOrchestrator] rewires
-     * it (fresh runtime wrappers, current budget) on every rebuild rather
-     * than replacing it.
-     */
-    private val sharedRuntimeManager = RuntimeManager(budgetBytes = device.usableRamBytes, runtimes = emptyMap())
-
-    /**
      * Frees every locally-loaded model (the LLM, its vision projector). Two
      * callers: [releaseMemoryUnderPressure], under real system memory
      * pressure — a multi-GB resident model with nothing ever freeing it was
@@ -1271,58 +1285,27 @@ class AppContainer private constructor(private val context: Context) {
         isLocalOnly: Boolean,
         registryCandidates: List<FallbackCandidate>,
     ): Orchestrator {
-        // Freed *before* this rebuild's own rewire, not just eventually via
-        // releaseLocalModels() — a real device report: translation's own
-        // model (and the semantic-memory embedder) staying resident starved
-        // a genuinely new chat load of RAM it needed. Only when this
-        // rebuild is actually about to load a local model, not on every
-        // chat rebuild regardless, so translation stays warm across
-        // ping-ponging between the two screens otherwise. Now that
-        // sharedRuntimeManager (rewired below) is the one manager every
-        // orchestrator this container builds actually uses,
-        // RuntimeManager.acquire's own least-recently-used eviction already
-        // does the rest of this job automatically the moment a new load
-        // genuinely needs the room — no separate sweep call needed here for
-        // that part, only this cross-subsystem (semantic memory) piece.
+        // The semantic-memory embedder and whisper engines are freed before a
+        // local load (real device report: the embedder staying resident
+        // starved a new chat load). The previous LLM is not: that is
+        // sharedRuntimeManager's job at the moment the new one actually
+        // loads, so a rebuild for an unrelated setting (temperature, say)
+        // no longer throws away a warm multi-GB model for nothing.
         if (registryCandidates.any { it.binding.runtime == RuntimeKind.LLAMA_CPP }) {
-            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("chat model load") }
+            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("chat model load", includeLocalModels = false) }
         }
-        // Rewired, not replaced: this is the same RuntimeManager instance
-        // every orchestrator this container builds shares (see
-        // sharedRuntimeManager's own doc comment on why) — merges in
-        // whichever runtime kind(s) *this* rebuild just constructed
-        // (LOCAL's LlamaCppRuntime, AICore's own wrapper, ...) without
-        // dropping another still-live Orchestrator's own kind the way
-        // replacing the whole map would (see RuntimeManager.rewire's own
-        // doc comment) — Compare mode builds one Orchestrator per enabled
-        // provider in the same pass, each rewiring this one manager in turn.
-        kotlinx.coroutines.runBlocking {
-            sharedRuntimeManager.rewire(
-                // Remote and stub models hold no local weights; the budget
-                // starts mattering the moment an on-device runtime is
-                // added. Note this budget does not see inside a fallback
-                // chain: FallbackTextModel loads each wrapped candidate
-                // directly rather than through this manager, so a local
-                // model loaded as part of a chain is not tracked or
-                // evicted the way a standalone local model is.
-                budgetBytes = device.usableRamBytes,
-                // whisperCppRuntime is always registered alongside
-                // whichever text runtime this orchestrator is for —
-                // SPEECH_TO_TEXT is a capability every orchestrator can be
-                // asked for regardless of which text-generation runtime
-                // backs it, and previously wasn't registered at all
-                // (RuntimeManager.acquire threw "no runtime registered for
-                // whisper_cpp" the moment anything tried). See
-                // docs/13-asr-pipeline-migration.md.
-                runtimes = buildMap {
-                    put(runtime.kind, runtime)
-                    put(whisperCppRuntime.kind, whisperCppRuntime)
-                },
-            )
-        }
+        // Its own manager, holding only this orchestrator's handles — the
+        // weights of a local model inside them live in sharedRuntimeManager
+        // (see SharedRuntime). One manager shared by whole orchestrators
+        // cached every Compare-mode chain under the same "fallback-chain" id.
+        val runtimeManager = RuntimeManager(
+            budgetBytes = { device.usableRamBytes },
+            runtimes = mapOf(runtime.kind to runtime, whisperCppRuntime.kind to whisperCppRuntime),
+            strictBudget = false,
+        )
         val executors = NodeExecutors(
-            selector = ModelSelector(registry(runtime, registryCandidates), device),
-            runtimeManager = sharedRuntimeManager,
+            selector = ModelSelector(registry(runtime, registryCandidates), selectionDevice()),
+            runtimeManager = runtimeManager,
             contextEngine = ContextEngine(),
             memory = memory,
             memoryExperiment = memoryExperimentRunner,
@@ -1411,16 +1394,9 @@ class AppContainer private constructor(private val context: Context) {
             // way orchestrator() already caches the single-provider path:
             // reused for this provider as long as nothing that would change
             // its wiring actually has.
-            //
-            // buildOrchestrator() below now also rewires the one
-            // sharedRuntimeManager every orchestrator this container builds
-            // uses, rather than constructing its own — real device report:
-            // this cache alone doesn't stop chat's own single-candidate path
-            // and this one from each holding an independent resident copy
-            // of the same local model, since they used to be entirely
-            // separate managers. A shared manager makes that impossible
-            // regardless of which of the two paths a given turn goes
-            // through.
+            // The weights themselves are held by sharedRuntimeManager, not
+            // this cached orchestrator, so chat's own path and this one reuse
+            // one resident copy rather than each loading its own.
             val signature = (
                 listOf(
                     settings.customEndpoint,
@@ -1515,12 +1491,7 @@ class AppContainer private constructor(private val context: Context) {
                 ?: return null
             FallbackCandidate(
                 label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
-                runtime = LlamaCppRuntime(
-                    contextTokens = effectiveContextTokens(),
-                    log = appLog::record,
-                    availableRamBytes = { currentAvailableRamBytes(context) },
-                    memoryDiagnostics = { currentMemoryDiagnostics(context) },
-                ),
+                runtime = sharedLlamaRuntime(),
                 model = selected.model,
                 binding = selected.binding,
             )
@@ -1549,27 +1520,19 @@ class AppContainer private constructor(private val context: Context) {
             // down to ~1-2 GB free. A native encoder-decoder allocation
             // failing partway through has nothing graceful to do about
             // it — freeing everything else *before* this load starts is
-            // cheaper than finding out after the fact.
-            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("translation model load") }
+            // cheaper than finding out after the fact. A resident chat
+            // model is freed by sharedRuntimeManager itself when this load
+            // starts, and only if it is a different model.
+            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("translation model load", includeLocalModels = false) }
         }
-        // Rewires sharedRuntimeManager (see its own doc comment) rather
-        // than building a dedicated manager for translation — chat's own
-        // resident model, if this candidate names a different one, is
-        // freed by RuntimeManager.acquire's own least-recently-used
-        // eviction the moment this load actually needs the room, not by a
-        // separate manager translation used to keep to itself.
-        kotlinx.coroutines.runBlocking {
-            sharedRuntimeManager.rewire(
-                budgetBytes = device.usableRamBytes,
-                runtimes = buildMap {
-                    put(candidate.runtime.kind, candidate.runtime)
-                    put(whisperCppRuntime.kind, whisperCppRuntime)
-                },
-            )
-        }
+        val runtimeManager = RuntimeManager(
+            budgetBytes = { device.usableRamBytes },
+            runtimes = mapOf(candidate.runtime.kind to candidate.runtime, whisperCppRuntime.kind to whisperCppRuntime),
+            strictBudget = false,
+        )
         val executors = NodeExecutors(
-            selector = ModelSelector(registry(candidate.runtime, listOf(candidate)), device),
-            runtimeManager = sharedRuntimeManager,
+            selector = ModelSelector(registry(candidate.runtime, listOf(candidate)), selectionDevice()),
+            runtimeManager = runtimeManager,
             contextEngine = ContextEngine(),
             memory = memory,
             memoryExperiment = memoryExperimentRunner,
@@ -1621,6 +1584,37 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
+     * A [LlamaCppRuntime] whose loads go through [sharedRuntimeManager]. The
+     * context size is the residency variant: a copy loaded with a smaller
+     * window is reloaded, not reused, once a document needs the bigger one.
+     */
+    private fun sharedLlamaRuntime(): ModelRuntime {
+        val contextTokens = effectiveContextTokens()
+        return SharedRuntime(
+            inner = LlamaCppRuntime(
+                contextTokens = contextTokens,
+                log = appLog::record,
+                availableRamBytes = { currentAvailableRamBytes(context) },
+                memoryDiagnostics = { currentMemoryDiagnostics(context) },
+            ),
+            manager = sharedRuntimeManager,
+            variant = contextTokens,
+        )
+    }
+
+    /**
+     * The device as [ModelSelector] sees it when choosing among candidates
+     * the user already picked: RAM only rules out a model that could never
+     * fit on this phone at all. Whether it fits *right now* is decided at
+     * load time by [sharedRuntimeManager] — a live-RAM reading taken when an
+     * orchestrator happens to be built (and then cached) refused Qwen 9B for
+     * translation with 8.5 GB genuinely free.
+     */
+    private fun selectionDevice(): DeviceProfile = device.let {
+        it.copy(availableRamBytes = it.totalRamBytes, ramBudgetFraction = DeviceProfile.MAX_RAM_FRACTION)
+    }
+
+    /**
      * The model the user explicitly picked via "Использовать" in Models,
      * if it's actually installed right now — [ModelSelector] otherwise.
      *
@@ -1645,12 +1639,7 @@ class AppContainer private constructor(private val context: Context) {
             // a generic label in the log and in the answer's own attribution
             // line answered "was it local?" but not "which local model?".
             label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
-            runtime = LlamaCppRuntime(
-                contextTokens = effectiveContextTokens(),
-                log = appLog::record,
-                availableRamBytes = { currentAvailableRamBytes(context) },
-                memoryDiagnostics = { currentMemoryDiagnostics(context) },
-            ),
+            runtime = sharedLlamaRuntime(),
             model = selected.model,
             binding = selected.binding,
         )
@@ -2032,6 +2021,8 @@ class AppContainer private constructor(private val context: Context) {
         // actually assembled, not with this number.
         private const val CLOUD_CONTEXT_WINDOW_TOKENS = 32_000
 
+        private const val LIVE_FREE_RAM_SAFETY_FACTOR = 0.95
+
         // Ceiling for a local context when nothing in this conversation
         // needs the user's full configured window — see effectiveContextTokens().
         private const val SMALL_CONTEXT_TOKENS = 2048
@@ -2161,12 +2152,27 @@ class AppContainer private constructor(private val context: Context) {
                 "threshold=${info.threshold / 1_000_000}MB lowMemory=${info.lowMemory}"
         }
 
-        fun profileOf(context: Context, ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION): DeviceProfile {
+        /**
+         * [ownResidentBytes] is what this app's own local models hold right
+         * now — counted as available, since loading a different model evicts
+         * them first. Free RAM is the higher of ActivityManager's reading and
+         * the kernel's MemAvailable (see [readMemAvailableBytes]), and with
+         * that more precise reading most of it is trusted
+         * ([LIVE_FREE_RAM_SAFETY_FACTOR]) — real device report: Qwen 9B
+         * (~7.4 GB estimated) refused and warned about with 8.1-8.5 GB free,
+         * because only 60% of free RAM ever counted.
+         */
+        fun profileOf(
+            context: Context,
+            ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION,
+            ownResidentBytes: Long = 0L,
+        ): DeviceProfile {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
+            val free = maxOf(info.availMem, readMemAvailableBytes() ?: 0L)
             return DeviceProfile(
                 totalRamBytes = info.totalMem,
-                availableRamBytes = info.availMem,
+                availableRamBytes = (free + ownResidentBytes).coerceIn(0L, info.totalMem),
                 availableStorageBytes = context.filesDir.freeSpace,
                 cpuCores = Runtime.getRuntime().availableProcessors(),
                 androidApiLevel = Build.VERSION.SDK_INT,
@@ -2200,6 +2206,7 @@ class AppContainer private constructor(private val context: Context) {
                 hasGpuDelegate = false,
                 performanceIndex = 1.0,
                 ramBudgetFraction = ramBudgetFraction,
+                freeRamSafetyFactor = LIVE_FREE_RAM_SAFETY_FACTOR,
             )
         }
     }

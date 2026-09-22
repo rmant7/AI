@@ -77,7 +77,7 @@ private const val MAIN_MODEL_RAM_SAFETY_FACTOR = 1.3
  * [MAIN_MODEL_RAM_SAFETY_FACTOR]'s own doc comment for how this changes the
  * pre-flight refusal below.
  */
-private fun readMemAvailableBytes(): Long? = runCatching {
+internal fun readMemAvailableBytes(): Long? = runCatching {
     File("/proc/meminfo").useLines { lines ->
         lines.firstOrNull { it.startsWith("MemAvailable:") }
             ?.removePrefix("MemAvailable:")?.trim()?.removeSuffix("kB")?.trim()?.toLongOrNull()

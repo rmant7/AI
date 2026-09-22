@@ -199,7 +199,8 @@ object LocalModels {
             ),
             paramsLabel = "9B · Q4",
             noteRes = R.string.note_qwen3_5_9b,
-            approxSizeBytes = 5_500_000_000,
+            // From the installed file (LOCAL_LOAD's "want ~7384MB" / 1.3).
+            approxSizeBytes = 5_680_000_000,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
         ),
         LocalModelSeed(

@@ -281,6 +281,7 @@
     <string name="model_fit_too_large">very large</string>
     <string name="model_catalog_stale">⚠ source unavailable (checked at startup)</string>
     <string name="model_ram_warning">This model exceeds the memory budget for your device. The system will most likely force-close the app while generating a response — with no error message, it will just close. Continue anyway?</string>
+    <string name="model_ram_warning_numbers">Estimated need: ~%1$s. Memory budget right now (incl. free RAM): ~%2$s.</string>
     <string name="model_ram_warning_continue">Use it anyway</string>
     <string name="dialog_ok">Got it</string>
     <string name="dialog_cancel">Cancel</string>

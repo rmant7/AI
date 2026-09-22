@@ -283,6 +283,7 @@
     <string name="model_fit_too_large">очень большая</string>
     <string name="model_catalog_stale">⚠ источник недоступен (проверено при запуске)</string>
     <string name="model_ram_warning">Эта модель превышает бюджет памяти для вашего устройства. Скорее всего система принудительно закроет приложение во время генерации ответа — без сообщения об ошибке, просто закроется. Продолжить всё равно?</string>
+    <string name="model_ram_warning_numbers">Оценка потребности: ~%1$s. Бюджет памяти сейчас (с учётом свободной): ~%2$s.</string>
     <string name="model_ram_warning_continue">Всё равно использовать</string>
     <string name="dialog_ok">Понятно</string>
     <string name="dialog_cancel">Отмена</string>

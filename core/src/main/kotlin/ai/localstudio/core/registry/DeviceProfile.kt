@@ -28,8 +28,16 @@ data class DeviceProfile(
      * difference between a 4B model and a 27B one.
      */
     val ramBudgetFraction: Double = BASE_RAM_FRACTION,
+    /**
+     * Share of [availableRamBytes] a model may claim when that is the larger
+     * figure. The default is for a plain `availMem` snapshot; a caller that
+     * measures free RAM more precisely (the kernel's MemAvailable plus what
+     * its own evictable models hold) can trust more of it.
+     */
+    val freeRamSafetyFactor: Double = FREE_RAM_SAFETY_FACTOR,
 ) {
     init {
+        require(freeRamSafetyFactor > 0 && freeRamSafetyFactor <= 1.0) { "freeRamSafetyFactor must be in (0, 1]" }
         require(availableRamBytes in 0..totalRamBytes) { "availableRamBytes out of range" }
         require(performanceIndex > 0) { "performanceIndex must be positive" }
         require(ramBudgetFraction in 0.05..MAX_RAM_FRACTION) {
@@ -58,7 +66,7 @@ data class DeviceProfile(
     val usableRamBytes: Long
         get() = maxOf(
             (totalRamBytes * ramBudgetFraction).toLong(),
-            (availableRamBytes * FREE_RAM_SAFETY_FACTOR).toLong(),
+            (availableRamBytes * freeRamSafetyFactor).toLong(),
         ).coerceAtMost((totalRamBytes * MAX_RAM_FRACTION).toLong())
 
     /**

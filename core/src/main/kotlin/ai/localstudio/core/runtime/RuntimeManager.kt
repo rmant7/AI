@@ -25,47 +25,41 @@ data class ResidentModel(
  * Models in use ([ResidentModel.refCount] > 0) are never evicted; if the budget
  * cannot be met without touching them, the load fails loudly with
  * [InsufficientMemoryException] rather than thrashing.
+ *
+ * [budgetBytes] is read once per [acquire], so a caller can hand in a live
+ * figure (free RAM right now) instead of a number fixed at construction.
+ *
+ * With [strictBudget] off, a model whose estimate alone exceeds the budget is
+ * still attempted once every idle model has been evicted — the estimate is a
+ * heuristic, and for a model the user explicitly chose, a real load (and a
+ * real failure, if it comes to that) beats a refusal based on a guess. Models
+ * in use still block it: two multi-GB models generating at once is exactly
+ * the thrashing this class exists to prevent.
+ *
+ * With [exclusive] on, loading a model first evicts every idle one: for
+ * memory-mapped LLM weights the free-RAM reading already counts a resident
+ * model's pages as reclaimable cache, so no budget arithmetic can tell
+ * whether two of them really fit side by side — and when they don't, both
+ * thrash the page cache instead of failing.
  */
 class RuntimeManager(
-    private var budgetBytes: Long,
-    private var runtimes: Map<RuntimeKind, ModelRuntime>,
+    private val budgetBytes: () -> Long,
+    private val runtimes: Map<RuntimeKind, ModelRuntime>,
     private val clock: () -> Long = System::nanoTime,
+    private val strictBudget: Boolean = true,
+    private val exclusive: Boolean = false,
+    private val log: (String) -> Unit = {},
 ) {
-    /**
-     * Repoints this manager at freshly-built runtime wrappers (new
-     * contextTokens/temperature/etc. baked into them, a settings change or a
-     * different chat model) and refreshes the RAM budget the same way — for
-     * a caller sharing ONE manager across multiple call sites instead of
-     * building a new one per call. Real device report: chat's own
-     * single-candidate path and Compare mode each built their own
-     * independent [RuntimeManager], so the same local GGUF could end up
-     * resident in both at once — two full copies competing for RAM that
-     * neither one's own eviction sweep ever saw, because sweeping only ever
-     * ran on *that* manager's own [resident] map. A single shared instance
-     * makes that impossible by construction: [acquire] already returns the
-     * existing entry for a model that's already resident, and
-     * [evictUntilFits] already evicts by least-recent-use across everything
-     * this one manager holds — no separate cross-manager sweep needed once
-     * there is only one manager to sweep.
-     */
-    suspend fun rewire(budgetBytes: Long, runtimes: Map<RuntimeKind, ModelRuntime>) = mutex.withLock {
-        this.budgetBytes = budgetBytes
-        // Merged, not replaced: this same manager is shared across several
-        // orchestrators at once now (chat's own, every Compare-mode source,
-        // translation's) — each rewires only the runtime kind(s) *it* just
-        // rebuilt (LOCAL's LlamaCppRuntime, AICore's own wrapper, ...).
-        // Replacing the whole map on each call would drop every other
-        // orchestrator's entry the moment a different one rewires, so an
-        // acquire() reached through an *earlier*-built Orchestrator would
-        // fail with "no runtime registered" for a kind that plainly still
-        // has a live wrapper — just not the one this particular call knew
-        // about.
-        this.runtimes = this.runtimes + runtimes
-    }
+    constructor(
+        budgetBytes: Long,
+        runtimes: Map<RuntimeKind, ModelRuntime>,
+        clock: () -> Long = System::nanoTime,
+    ) : this({ budgetBytes }, runtimes, clock)
 
     private class Entry(
         val loaded: LoadedModel,
         val runtime: RuntimeKind,
+        val variant: Any?,
         var refCount: Int,
         var lastUsedAt: Long,
     )
@@ -88,9 +82,11 @@ class RuntimeManager(
     suspend fun <T> withModel(
         model: ModelDescriptor,
         binding: RuntimeBinding,
+        runtime: ModelRuntime? = null,
+        variant: Any? = null,
         block: suspend (LoadedModel) -> T,
     ): T {
-        val loaded = acquire(model, binding)
+        val loaded = acquire(model, binding, runtime, variant)
         try {
             return block(loaded)
         } finally {
@@ -98,27 +94,53 @@ class RuntimeManager(
         }
     }
 
-    suspend fun acquire(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel = mutex.withLock {
+    /**
+     * [runtime] overrides the one registered for [binding]'s kind — for a
+     * caller that owns its own runtime instance (settings baked into it) but
+     * still wants residency tracked here. [variant] distinguishes loads of the
+     * same model that are not interchangeable (a different context size): an
+     * idle resident copy of another variant is unloaded and reloaded rather
+     * than reused; one still in use is reused as-is.
+     */
+    suspend fun acquire(
+        model: ModelDescriptor,
+        binding: RuntimeBinding,
+        runtime: ModelRuntime? = null,
+        variant: Any? = null,
+    ): LoadedModel = mutex.withLock {
         resident[model.id]?.let { entry ->
-            entry.refCount++
-            entry.lastUsedAt = clock()
-            return entry.loaded
+            if (entry.variant == variant || entry.refCount > 0) {
+                entry.refCount++
+                entry.lastUsedAt = clock()
+                return entry.loaded
+            }
+            log("${model.id}: reloading — resident copy is ${entry.variant}, need $variant")
+            unload(model.id)
         }
 
-        val runtime = runtimes[binding.runtime]
+        val chosen = runtime
+            ?: runtimes[binding.runtime]
             ?: throw ModelLoadException("No runtime registered for ${binding.runtime.id}")
-        if (!runtime.canRun(model, binding)) {
+        if (!chosen.canRun(model, binding)) {
             throw ModelLoadException("Runtime ${binding.runtime.id} cannot run ${model.id}")
         }
         val requiredBytes = binding.effectiveRequiredRamBytes
-        if (requiredBytes > budgetBytes) {
-            throw InsufficientMemoryException(requiredBytes, budgetBytes, residentBytes)
+        val budget = budgetBytes()
+        if (exclusive) evictAllIdle()
+        if (requiredBytes > budget) {
+            if (strictBudget) throw InsufficientMemoryException(requiredBytes, budget, residentBytes)
+            log(
+                "${model.id}: estimate ${requiredBytes / MB}MB over budget ${budget / MB}MB — " +
+                    "evicting every idle model and attempting anyway",
+            )
+            evictAllIdle()
+            if (resident.isNotEmpty()) throw InsufficientMemoryException(requiredBytes, budget, residentBytes)
+        } else {
+            evictUntilFits(requiredBytes, budget)
         }
 
-        evictUntilFits(requiredBytes)
-
-        val loaded = runtime.load(model, binding)
-        resident[model.id] = Entry(loaded, binding.runtime, refCount = 1, lastUsedAt = clock())
+        val loaded = chosen.load(model, binding)
+        resident[model.id] = Entry(loaded, binding.runtime, variant, refCount = 1, lastUsedAt = clock())
         return loaded
     }
 
@@ -129,28 +151,37 @@ class RuntimeManager(
     }
 
     /** Frees memory on demand — e.g. on `onTrimMemory` from Android. */
-    suspend fun evictIdle() = mutex.withLock {
+    suspend fun evictIdle() = mutex.withLock { evictAllIdle() }
+
+    suspend fun unloadAll() = mutex.withLock {
+        resident.keys.toList().forEach { unload(it) }
+    }
+
+    private fun evictAllIdle() {
         resident.values
             .filter { it.refCount == 0 }
             .map { it.loaded.modelId }
             .forEach { unload(it) }
     }
 
-    suspend fun unloadAll() = mutex.withLock {
-        resident.keys.toList().forEach { unload(it) }
-    }
-
-    private fun evictUntilFits(requiredBytes: Long) {
-        while (residentBytes + requiredBytes > budgetBytes) {
+    private fun evictUntilFits(requiredBytes: Long, budget: Long) {
+        while (residentBytes + requiredBytes > budget) {
             val victim = resident.values
                 .filter { it.refCount == 0 }
                 .minByOrNull { it.lastUsedAt }
-                ?: throw InsufficientMemoryException(requiredBytes, budgetBytes, residentBytes)
+                ?: throw InsufficientMemoryException(requiredBytes, budget, residentBytes)
             unload(victim.loaded.modelId)
         }
     }
 
     private fun unload(modelId: String) {
-        resident.remove(modelId)?.loaded?.close()
+        resident.remove(modelId)?.let { entry ->
+            log("$modelId: evicted (${entry.loaded.ramBytes / MB}MB)")
+            entry.loaded.close()
+        }
+    }
+
+    private companion object {
+        const val MB = 1_000_000L
     }
 }

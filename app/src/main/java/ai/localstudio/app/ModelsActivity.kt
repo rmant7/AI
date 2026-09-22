@@ -198,13 +198,19 @@ class ModelsActivity : AppCompatActivity() {
         if (!container.device.fitsBudget(seed.approxSizeBytes)) {
             AlertDialog.Builder(this)
                 .setTitle(seed.title)
-                .setMessage(R.string.model_ram_warning)
+                .setMessage(ramWarningMessage(seed.approxSizeBytes))
                 .setPositiveButton(R.string.model_ram_warning_continue) { _, _ -> switchToLocal(seed) }
                 .setNegativeButton(R.string.dialog_cancel, null)
                 .show()
             return
         }
         switchToLocal(seed)
+    }
+
+    private fun ramWarningMessage(approxSizeBytes: Long): String {
+        val estimate = approxSizeBytes * DeviceProfile.ESTIMATE_NUMERATOR / DeviceProfile.ESTIMATE_DENOMINATOR
+        return getString(R.string.model_ram_warning) + "\n\n" +
+            getString(R.string.model_ram_warning_numbers, size(estimate), size(container.device.usableRamBytes))
     }
 
     private fun switchToLocal(seed: LocalModelSeed) {
@@ -264,7 +270,7 @@ class ModelsActivity : AppCompatActivity() {
         if (!container.device.fitsBudget(seed.approxSizeBytes)) {
             AlertDialog.Builder(this)
                 .setTitle(seed.title)
-                .setMessage(R.string.model_ram_warning)
+                .setMessage(ramWarningMessage(seed.approxSizeBytes))
                 .setPositiveButton(R.string.model_ram_warning_continue) { _, _ ->
                     useForTranslation(seed.id, seed.title, seed.approxSizeBytes)
                 }

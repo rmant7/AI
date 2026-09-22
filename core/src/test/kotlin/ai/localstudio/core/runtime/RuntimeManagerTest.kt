@@ -139,41 +139,93 @@ class RuntimeManagerTest {
     }
 
     @Test
-    fun `rewire merges runtime kinds instead of replacing them`() = runBlocking {
-        // Two callers sharing one manager (e.g. chat's own path and a
-        // Compare-mode source), each rewiring only the kind it just
-        // rebuilt — as AppContainer.buildOrchestrator now does for every
-        // orchestrator it builds against one shared manager.
+    fun `an explicit runtime is used instead of the registered one`() = runBlocking {
         val manager = RuntimeManager(budgetBytes = 6 * GB, runtimes = emptyMap(), clock = { ++now })
-        val aicore = FakeRuntime(RuntimeKind.AICORE)
-
-        manager.rewire(6 * GB, mapOf(RuntimeKind.LLAMA_CPP to runtime))
-        manager.rewire(6 * GB, mapOf(RuntimeKind.AICORE to aicore))
-
-        // Both kinds still resolve — the second rewire must not have
-        // dropped the first's entry.
         val llm = model("llm", bindings = listOf(binding(ramBytes = 1 * GB)))
-        manager.withModel(llm, llm.bindings.first()) { }
+
+        manager.withModel(llm, llm.bindings.first(), runtime) { }
+
         assertEquals(listOf("llm"), runtime.loads)
     }
 
     @Test
-    fun `a model stays resident across a rewire with a freshly-built runtime wrapper`() = runBlocking {
-        // Simulates a settings change rebuilding the ModelRuntime wrapper
-        // (new contextTokens/temperature baked in) for the same
-        // RuntimeKind — the already-loaded model must not reload just
-        // because the wrapper instance registered for its kind changed.
-        val manager = RuntimeManager(budgetBytes = 6 * GB, runtimes = emptyMap(), clock = { ++now })
-        val llm = model("llm", bindings = listOf(binding(ramBytes = 1 * GB)))
+    fun `the budget is read on every acquisition`() = runBlocking {
+        var budget = 2 * GB
+        val manager = RuntimeManager(budgetBytes = { budget }, runtimes = mapOf(RuntimeKind.LLAMA_CPP to runtime), clock = { ++now })
+        val llm = model("llm", bindings = listOf(binding(ramBytes = 3 * GB)))
 
-        manager.rewire(6 * GB, mapOf(RuntimeKind.LLAMA_CPP to runtime))
-        manager.withModel(llm, llm.bindings.first()) { }
-
-        val rebuiltRuntime = FakeRuntime()
-        manager.rewire(6 * GB, mapOf(RuntimeKind.LLAMA_CPP to rebuiltRuntime))
+        assertFailsWith<InsufficientMemoryException> { manager.withModel(llm, llm.bindings.first()) { } }
+        budget = 4 * GB
         manager.withModel(llm, llm.bindings.first()) { }
 
         assertEquals(listOf("llm"), runtime.loads)
-        assertTrue(rebuiltRuntime.loads.isEmpty())
+    }
+
+    @Test
+    fun `a lenient manager evicts everything idle and attempts an over-budget model`() = runBlocking {
+        val manager = RuntimeManager(
+            budgetBytes = { 4 * GB },
+            runtimes = mapOf(RuntimeKind.LLAMA_CPP to runtime),
+            clock = { ++now },
+            strictBudget = false,
+        )
+        val small = model("small", bindings = listOf(binding(ramBytes = 1 * GB)))
+        val huge = model("huge", bindings = listOf(binding(ramBytes = 6 * GB)))
+
+        manager.withModel(small, small.bindings.first()) { }
+        manager.withModel(huge, huge.bindings.first()) { }
+
+        assertEquals(listOf("small"), runtime.unloads)
+        assertEquals(listOf("huge"), manager.residentModels().map { it.modelId })
+    }
+
+    @Test
+    fun `a lenient manager still refuses while another model is in use`() = runBlocking {
+        val manager = RuntimeManager(
+            budgetBytes = { 4 * GB },
+            runtimes = mapOf(RuntimeKind.LLAMA_CPP to runtime),
+            clock = { ++now },
+            strictBudget = false,
+        )
+        val busy = model("busy", bindings = listOf(binding(ramBytes = 1 * GB)))
+        val huge = model("huge", bindings = listOf(binding(ramBytes = 6 * GB)))
+
+        assertFailsWith<InsufficientMemoryException> {
+            manager.withModel(busy, busy.bindings.first()) {
+                manager.withModel(huge, huge.bindings.first()) { }
+            }
+        }
+        assertEquals(listOf("busy"), runtime.loads)
+    }
+
+    @Test
+    fun `an idle copy of another variant is reloaded, not reused`() = runBlocking {
+        val manager = manager(6 * GB)
+        val llm = model("llm", bindings = listOf(binding(ramBytes = 1 * GB)))
+
+        manager.withModel(llm, llm.bindings.first(), variant = 2048) { }
+        manager.withModel(llm, llm.bindings.first(), variant = 2048) { }
+        manager.withModel(llm, llm.bindings.first(), variant = 4096) { }
+
+        assertEquals(listOf("llm", "llm"), runtime.loads)
+        assertEquals(listOf("llm"), runtime.unloads)
+    }
+
+    @Test
+    fun `an exclusive manager keeps at most one idle model resident`() = runBlocking {
+        val manager = RuntimeManager(
+            budgetBytes = { 16 * GB },
+            runtimes = mapOf(RuntimeKind.LLAMA_CPP to runtime),
+            clock = { ++now },
+            exclusive = true,
+        )
+        val gemma = model("gemma", bindings = listOf(binding(ramBytes = 2 * GB)))
+        val qwen = model("qwen", bindings = listOf(binding(ramBytes = 2 * GB)))
+
+        manager.withModel(gemma, gemma.bindings.first()) { }
+        manager.withModel(qwen, qwen.bindings.first()) { }
+
+        assertEquals(listOf("gemma"), runtime.unloads)
+        assertEquals(listOf("qwen"), manager.residentModels().map { it.modelId })
     }
 }
