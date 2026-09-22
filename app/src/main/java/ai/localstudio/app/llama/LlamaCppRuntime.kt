@@ -217,41 +217,32 @@ class LlamaCppRuntime(
             val headroom = effectiveHeadroomBytes()
             val wantBytes = (fileBytes * MAIN_MODEL_RAM_SAFETY_FACTOR).toLong()
             if (fileBytes > 0 && headroom < wantBytes) {
-                // A real device report showed Android's own Settings ->
-                // Running services screen listing 10GB free while this same
-                // ActivityManager.MemoryInfo.availMem call (the only public
-                // API for this) reported ~4GB moments later — a gap far
-                // wider than normal fluctuation. Settled, with a second real
-                // device report: Settings' "cached processes" view (~4-5GB
-                // free, matching ActivityManager closely) against its
-                // "running processes" view (~10GB free), with not one
-                // process in the cached list over ~200MB — the gap is
-                // reclaimable page cache, not memory a process holds, which
-                // is exactly the category ActivityManager.availMem doesn't
-                // count and the kernel's own MemAvailable does (see
-                // effectiveHeadroomBytes' own doc comment; this refusal
-                // already uses the higher of the two). /proc/meminfo is
-                // still logged in full below (best-effort; some devices'
-                // SELinux policy blocks an app from reading it at all) so a
-                // refusal that fires *despite* MemAvailable shows the real
-                // breakdown rather than requiring a second report to ask
-                // for it. memoryDiagnostics() adds ActivityManager's own
-                // totalMem/threshold/lowMemory. readProcSelfStatus() checks
-                // this process's own resident set isn't quietly holding
-                // onto some of the gap by itself (semantic memory not
-                // actually freed, a previous model's allocation lingering).
+                // Explicit product decision, not a bug: this used to throw
+                // ModelLoadException here and never attempt the native load
+                // at all. A real device report pushed back on that —
+                // refusing pre-emptively means every "not enough RAM" report
+                // is this heuristic's own guess (file size * 1.3 against a
+                // headroom estimate that has itself been wrong twice this
+                // same day), never a confirmed fact. Logged, then let
+                // through: if the device really can't do it, Android's own
+                // OOM killer firing produces a REASON_LOW_MEMORY exit this
+                // app already captures on next launch (AppLog.
+                // recordProcessExitIfNotable) — real evidence instead of a
+                // second-hand estimate, at the cost of losing the current
+                // turn if the guess turns out right. Once that evidence
+                // exists either way, the actual next step this was blocking
+                // (splitting a load into a required text stage and a
+                // skippable mmproj stage) is already how mmproj itself
+                // works below — this main-model load has no such split of
+                // its own to fall back to.
                 log(
                     "LOCAL_LOAD",
-                    "${file.name}: REFUSED — only ${headroom / 1_000_000}MB free " +
+                    "${file.name}: LOW ON RAM — only ${headroom / 1_000_000}MB free " +
                         "(max of ActivityManager.availMem and /proc/meminfo MemAvailable), " +
-                        "want ~${wantBytes / 1_000_000}MB" +
+                        "want ~${wantBytes / 1_000_000}MB — attempting anyway" +
                         " — ${memoryDiagnostics()}" +
                         (readProcMeminfo()?.let { " — /proc/meminfo: $it" } ?: " — /proc/meminfo unreadable") +
                         (readProcSelfStatus()?.let { " — /proc/self/status: $it" } ?: " — /proc/self/status unreadable"),
-                )
-                throw ModelLoadException(
-                    "Not enough free RAM for ${file.name}: ${headroom / 1_000_000}MB free, " +
-                        "need ~${wantBytes / 1_000_000}MB",
                 )
             }
         }
