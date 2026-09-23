@@ -148,7 +148,6 @@
     <string name="settings_download_policy_ask_every_time">Ask every time</string>
     <string name="settings_auto_download">Download recommended models automatically</string>
     <string name="settings_auto_download_hint">Right now, this only applies to the semantic-memory embedding model — it downloads itself in the background once memory is enabled. A manual tap on Download is never affected by this.</string>
-    <string name="settings_section_advanced">Advanced</string>
     <string name="settings_whisper_installed">Installed: %1$s</string>
     <string name="settings_whisper_none">Not installed</string>
     <string name="settings_whisper_error">Error: %1$s</string>
@@ -224,9 +223,6 @@
     <string name="models_orphans_title">Unknown files</string>
     <string name="models_orphans_subtitle">Found %1$d files, ~%2$s total. The current app version doesn\'t use them — likely left over from another version or development branch.</string>
     <string name="models_orphans_delete">Delete (%1$s)</string>
-    <string name="models_experimental_embeddings_title">Experimental: embedding models</string>
-    <string name="models_experimental_embeddings_subtitle">Manual download and sanity check for candidate memory-search embedding models — not needed for ordinary use. Base already loads automatically for real memory search (see Memory); this is for verifying it, or a future candidate, by hand.</string>
-    <string name="models_experimental_embeddings_open">Open</string>
     <string name="embed_screen_title">Experimental embedding models</string>
     <string name="embed_screen_explainer">Downloads and checks a candidate embedding model for semantic memory search. These models are never used for chat and are not added to the model catalog automatically — download one, tap Test, and check the numbers below before deciding whether it\'s any good.</string>
     <string name="embed_test">Test</string>
@@ -235,9 +231,6 @@
     <string name="embed_result_ok">✓ similar scored higher than dissimilar — looks sensible</string>
     <string name="embed_result_suspicious">⚠ dissimilar scored as high or higher — check pooling mode and query/passage prefixes</string>
     <string name="embed_result_error">Error: %1$s</string>
-    <string name="aicore_settings_title">Experimental: Gemini Nano (AICore)</string>
-    <string name="aicore_settings_subtitle">Manual smoke test for the on-device Gemini Nano model via AICore/ML Kit — not used by chat or memory yet. See docs/04-runtime.md.</string>
-    <string name="aicore_settings_open">Open</string>
     <string name="aicore_screen_title">Gemini Nano (AICore) test</string>
     <string name="aicore_screen_explainer">Checks whether Gemini Nano is reachable on this device via AICore, downloads it if needed, and lets you send it one test prompt. Nothing here is wired into chat or memory extraction — see docs/04-runtime.md for why this exists and what it\'s meant to answer.</string>
     <string name="aicore_check_status">Check status</string>

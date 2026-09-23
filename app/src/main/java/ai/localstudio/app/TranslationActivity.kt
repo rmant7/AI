@@ -3,6 +3,8 @@ package ai.localstudio.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
@@ -145,6 +147,19 @@ class TranslationActivity : AppCompatActivity() {
         binding.translationModelRow.setOnClickListener {
             startActivity(ModelsActivity.intent(this, ModelsActivity.Category.TRANSLATION))
         }
+
+        // Restored from Settings, not just left as whatever this Activity
+        // instance's own field happened to hold — a process kill (a real
+        // risk this app already has under memory pressure) loses that, and
+        // with it whatever the user had typed and not yet translated.
+        binding.translationInput.setText(container.settings.translationDraftText)
+        binding.translationInput.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                container.settings.translationDraftText = s?.toString().orEmpty()
+            }
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+        })
 
         updateCaveat()
     }

@@ -82,16 +82,6 @@ class SettingsActivity : AppCompatActivity() {
         binding.apiKeysButton.setOnClickListener {
             startActivity(ApiKeysActivity.intent(this, settings.providerId))
         }
-        // Manual, phone-only verification for a candidate embedding model —
-        // moved here from Models (which now only ever shows the one
-        // production model, E5_BASE) so ordinary use of Models never has to
-        // scroll past a broken candidate (E5_SMALL) to reach it.
-        binding.experimentalEmbeddingsButton.setOnClickListener {
-            startActivity(Intent(this, ExperimentalEmbeddingsActivity::class.java))
-        }
-        binding.aiCoreOpenButton.setOnClickListener {
-            startActivity(Intent(this, AiCoreTestActivity::class.java))
-        }
         setupDownloadPolicy()
 
         lifecycleScope.launch { container.whisperDownloads.state.collect { renderWhisper() } }

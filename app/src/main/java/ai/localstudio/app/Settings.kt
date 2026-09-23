@@ -98,6 +98,17 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putString(KEY_TRANSLATION_MODEL, value).apply()
 
     /**
+     * What's currently typed on the Translation screen — persisted on every
+     * keystroke so it survives a process kill (a real risk this app already
+     * has, under real memory pressure) or just navigating away to pick a
+     * different model and back, not only an in-memory Activity field that a
+     * kill would silently lose along with whatever the user had typed.
+     */
+    var translationDraftText: String
+        get() = prefs.getString(KEY_TRANSLATION_DRAFT, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_TRANSLATION_DRAFT, value).apply()
+
+    /**
      * Which engine both live-mic and file transcription in
      * [ai.localstudio.app.TranscribeActivity] actually use — set by
      * whichever of [whisperModelId]/[voskModelId] was picked last on the
@@ -276,6 +287,7 @@ class Settings(context: Context) {
         const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_VOSK_MODEL = "voskModelId"
         const val KEY_TRANSLATION_MODEL = "translationModel"
+        const val KEY_TRANSLATION_DRAFT = "translationDraftText"
         const val KEY_ACTIVE_STT_ENGINE = "activeSttEngine"
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_SEMANTIC_MEMORY = "semanticMemoryEnabled"
