@@ -1,0 +1,45 @@
+run: 336
+sha: a285f016306ca0d058908c0c8c00ba2d608be2d2
+job status: success
+---
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:49:5 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:49:7 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:50:2 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:50:4 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:50:5 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:50:7 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:2 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:7 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:9 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:14 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:22 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:25 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:32 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:38 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:42 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:61 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:65 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:51:68 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:2 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:7 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:12 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:20 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:25 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:30 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:34 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:38 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:41 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:48 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:56 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:64 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:66 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:52:71 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:53:2 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:53:7 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:53:11 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:54:2 Syntax error: Expecting a top level declaration.
+e: file:///home/runner/work/AI/AI/app/src/androidTest/java/ai/localstudio/app/whisper/WhisperBenchmarkTest.kt:54:3 Syntax error: Expecting a top level declaration.
+Execution failed for task ':app:compileDebugAndroidTestKotlin'.
+   > Compilation error. See log for more details
+BUILD FAILED in 3m 57s
+--- test results ---
