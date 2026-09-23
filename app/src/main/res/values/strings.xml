@@ -160,8 +160,7 @@
     <string name="settings_language_en">English</string>
     <string name="settings_language_ru">Русский</string>
     <string name="settings_provider">Model provider</string>
-    <string name="settings_provider_enabled">Enable as an answer source</string>
-    <string name="settings_provider_enabled_help">You can enable several at once — e.g. a local model and Gemini. The router tries the local model first (if enabled); if it doesn\'t respond or fails, it automatically tries the next enabled source instead of showing an error.</string>
+    <string name="settings_provider_enabled_help">Check a provider to use it as an answer source — you can check several at once, e.g. a local model and Gemini. The router tries them in the order below; if one doesn\'t respond or fails, it automatically tries the next checked one instead of showing an error. The provider you last tapped is the one shown below for editing its endpoint, key or model — unchecking it again keeps it shown, so you can still edit it while it\'s off.</string>
     <string name="settings_active_sources">Active sources: %1$s</string>
     <string name="settings_no_sources">No sources selected — using demo mode</string>
     <string name="settings_endpoint">Server address</string>
@@ -445,8 +444,6 @@
     <string name="translation_copy">Copy translation</string>
     <string name="translation_copied">Copied</string>
     <string name="translation_same_language">Source and target language are the same</string>
-    <string name="translation_failed">Translation failed: %1$s</string>
-    <string name="translation_model_too_large">The selected model needs more RAM than this device has — pick a smaller one in Models → Translation.</string>
     <string name="translation_model_note">Model: %1$s</string>
     <string name="translation_model_note_none">No model installed</string>
     <string name="translation_source_hint">Translate from</string>

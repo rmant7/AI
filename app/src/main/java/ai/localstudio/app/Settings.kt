@@ -89,7 +89,7 @@ class Settings(context: Context) {
      * Which downloaded local model [ai.localstudio.app.TranslationActivity]
      * uses — independent of [chatModel], picked on the Models screen's
      * Translation tab. Empty means "whichever local model chat is currently
-     * using" (see [AppContainer.translationOrchestrator]), not "none": a
+     * using" (see [AppContainer.translationLocalCandidate]), not "none": a
      * fresh install still translates with whatever's already installed for
      * chat, without a second download being required first.
      */

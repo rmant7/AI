@@ -162,8 +162,7 @@
     <string name="settings_language_en">English</string>
     <string name="settings_language_ru">Русский</string>
     <string name="settings_provider">Провайдер модели</string>
-    <string name="settings_provider_enabled">Включить как источник ответов</string>
-    <string name="settings_provider_enabled_help">Можно включить несколько сразу — например, локальную модель и Gemini. Раутер сначала обращается к локальной модели (если включена); если та не отвечает или падает, автоматически пробует следующий включённый источник, а не показывает ошибку.</string>
+    <string name="settings_provider_enabled_help">Отметь провайдера, чтобы использовать его как источник ответов — можно отметить сразу несколько, например локальную модель и Gemini. Раутер пробует их в порядке ниже; если один не отвечает или падает, автоматически пробует следующий отмеченный, а не показывает ошибку. Тот провайдер, который ты трогал последним, показан ниже для редактирования адреса, ключа или модели — сняв отметку, панель остаётся открытой, так что можно редактировать и выключенного.</string>
     <string name="settings_active_sources">Активные источники: %1$s</string>
     <string name="settings_no_sources">Источники не выбраны — используется демо-режим</string>
     <string name="settings_endpoint">Адрес сервера</string>
@@ -444,8 +443,6 @@
     <string name="translation_copy">Скопировать перевод</string>
     <string name="translation_copied">Скопировано</string>
     <string name="translation_same_language">Исходный и целевой язык совпадают</string>
-    <string name="translation_failed">Не удалось перевести: %1$s</string>
-    <string name="translation_model_too_large">Выбранной модели нужно больше памяти, чем есть на этом устройстве — выбери модель поменьше в Модели → Перевод.</string>
     <string name="translation_model_note">Модель: %1$s</string>
     <string name="translation_model_note_none">Модель не установлена</string>
     <string name="translation_source_hint">Перевести с</string>

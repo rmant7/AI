@@ -251,7 +251,7 @@ class ModelsActivity : AppCompatActivity() {
     // for the task), and AICore/Gemini Nano — the last one shares
     // [AppContainer.downloads] with nothing, since there is no file to fetch;
     // it is either available on this device or it isn't, discovered only
-    // when actually asked (see [AppContainer.translationOrchestrator]'s own
+    // when actually asked (see [AppContainer.translationLocalCandidate]'s own
     // doc comment). What this tab adds over just using the chat model as-is:
     // the choice is independent of [Settings.chatModel] — pick a different
     // model (or Gemini Nano) for translation without changing what chat
@@ -535,7 +535,7 @@ class ModelsActivity : AppCompatActivity() {
     /**
      * Not a [Row.Model] built from a [LocalModelSeed] like every other row
      * here — Gemini Nano is nothing this app downloads or stores itself (see
-     * [AppContainer.translationOrchestrator]'s own doc comment), so there is
+     * [AppContainer.translationLocalCandidate]'s own doc comment), so there is
      * no file, no [DownloadState], nothing to delete. Selecting it just
      * writes [CloudProviders.AICORE]'s id to [Settings.translationModel];
      * whether it is actually usable on this device is discovered the first

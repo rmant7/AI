@@ -46,7 +46,7 @@ object TranslationModels {
         ),
         // 7B and 10B below: same architecture, same known crash (a ggml repack
         // GEMM kernel faulting on this app's own T5 encoder path on a
-        // REPACK-capable ARM CPU — see AppContainer.translationOrchestrator's
+        // REPACK-capable ARM CPU — see AppContainer.buildTranslationOrchestrator's
         // and LlamaBridge.nativeGenerateT5's own history/comments) as the 3B
         // seed above until that's actually fixed upstream or worked around
         // here. Listed anyway, for a high-RAM device to have ready once it

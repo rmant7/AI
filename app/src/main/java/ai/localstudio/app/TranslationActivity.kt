@@ -3,6 +3,7 @@ package ai.localstudio.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -15,37 +16,41 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivityTranslationBinding
+import ai.localstudio.app.databinding.ItemTranslationResultBinding
 import ai.localstudio.app.llama.GenerationKeepAliveService
 import ai.localstudio.app.models.DownloadState
-import ai.localstudio.app.models.LocalModels
 import ai.localstudio.app.models.MadladLanguage
 import ai.localstudio.app.models.MadladLanguages
 import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.core.engine.UserRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 /**
- * Free-text translation, routed through [AppContainer.translationOrchestrator] —
- * a single local GGUF, chosen on the Models screen's Translation tab
- * ([ModelsActivity.Category.TRANSLATION]), prompted for the task rather than
- * run through a dedicated MT model. `memoryEnabled = false` and a fresh,
- * never-persisted `conversationId` per request keep this out of chat history
- * and memory retrieval — a translation isn't a conversation turn worth
- * remembering.
+ * Free-text translation, one card per source from
+ * [AppContainer.translationCompareCandidates] — every provider enabled in
+ * Settings, plus [CloudProviders.AICORE] always, whether or not it's
+ * separately enabled there: Gemini Nano costs nothing to try and answers in
+ * seconds. Each source is prompted for the task rather than run through a
+ * dedicated MT model, except the LOCAL entry when it names a
+ * [TranslationModels] seed — see [buildPrompt]. `memoryEnabled = false` and a
+ * fresh, never-persisted `conversationId` per request keep every source out
+ * of chat history and memory retrieval — a translation isn't a conversation
+ * turn worth remembering.
  *
  * Deliberately not [AppContainer.orchestrator] (what [ChatActivity] uses):
- * that one routes to whatever chat is currently configured for — AICore,
- * a cloud provider, or a multi-candidate fallback chain — which answered a
- * real translation request with Gemini Nano because AICore happened to also
- * be enabled for chat, with nothing on this screen explaining why. A
- * dedicated single-local-candidate orchestrator is predictable (always the
- * model this screen says it's using) and, as a side effect, never wrapped in
- * [ai.localstudio.core.runtime.FallbackTextRuntime] — so its "Answer from: X"
- * attribution footer is never appended to the text in the first place, and
- * copying the result copies only the translation.
+ * that one routes to whatever chat is currently configured for, tried as a
+ * *fallback chain* rather than shown side by side — a real translation
+ * request answered with Gemini Nano because AICore happened to also be
+ * enabled for chat, with nothing on this screen explaining why. Same as
+ * [AppContainer.compareCandidates], every source here is wrapped in
+ * [ai.localstudio.core.runtime.FallbackTextRuntime] even when it is a single
+ * candidate, for the "Answer from: X · Ns" attribution — [cleanTranslation]
+ * strips that footer before a card shows or copies its own result.
  *
  * Languages come from [MadladLanguages] — MADLAD-400's own 417-language
  * table — for both kinds of model this screen can be pointed at: a
@@ -137,7 +142,6 @@ class TranslationActivity : AppCompatActivity() {
             hideKeyboard()
             translate()
         }
-        binding.copyOutputButton.setOnClickListener { copyOutput() }
         binding.translationModelRow.setOnClickListener {
             startActivity(ModelsActivity.intent(this, ModelsActivity.Category.TRANSLATION))
         }
@@ -240,10 +244,10 @@ class TranslationActivity : AppCompatActivity() {
     }
 
     /**
-     * [container.translationOrchestrator] returns null only when
-     * [Settings.translationModel] names nothing installed and nothing else
-     * is configured to fall back to — the common case for that being a
-     * fresh install, before any translation model has ever been downloaded.
+     * [container.translationCompareCandidates] returns an empty list only
+     * when [Settings.translationModel] names nothing installed and even
+     * Gemini Nano's own candidate didn't build — practically only a fresh
+     * install, before any translation model has ever been downloaded.
      * Rather than just saying so and leaving the user to find Models ->
      * Translation on their own, offers the flagship pick
      * ([TranslationModels.SEEDS]'s first entry, MADLAD-400) right here.
@@ -251,9 +255,9 @@ class TranslationActivity : AppCompatActivity() {
     private fun offerMadladDownload() {
         val seed = TranslationModels.SEEDS.first()
         if (container.downloads.stateOf(seed) is DownloadState.Installed) {
-            // Installed but still not what translationOrchestrator resolved
-            // to — settings.translationModel names something else entirely
-            // that isn't installed either. Nothing to offer downloading;
+            // Installed but still not what translationLocalCandidate
+            // resolved to — settings.translationModel names something else
+            // entirely that isn't installed either. Nothing to offer downloading;
             // point at the picker instead.
             Toast.makeText(this, R.string.translation_no_model, Toast.LENGTH_LONG).show()
             return
@@ -287,105 +291,106 @@ class TranslationActivity : AppCompatActivity() {
             return
         }
 
-        val orchestrator = container.translationOrchestrator()
-        if (orchestrator == null) {
+        val sources = container.translationCompareCandidates()
+        if (sources.isEmpty()) {
+            // Only reachable when even Gemini Nano's own candidate somehow
+            // didn't build — translationCompareCandidates always includes
+            // it, so this is effectively a "nothing at all" fallback, same
+            // as the pre-compare single-orchestrator screen had.
             offerMadladDownload()
             return
         }
 
         translateJob?.cancel()
         setBusy(true)
+        binding.translationResultsContainer.removeAllViews()
         // Length only, never the text itself — this log is meant to be
         // copyable and shareable from LogActivity (see AppLog's own doc
         // comment), and a translation request is exactly the kind of
         // content a user would not expect to see in a bug report.
-        container.appLog.record("TRANSLATE", "${source.code} -> ${target.code}, ${text.length} chars")
+        container.appLog.record("TRANSLATE", "${source.code} -> ${target.code}, ${text.length} chars, ${sources.size} source(s)")
 
-        // translationOrchestrator() only ever resolves to a local GGUF or
-        // AICore (see its own doc comment) — never a cloud provider — so
-        // only Gemini Nano skips this: it runs as a system service, not
-        // CPU-bound inference in this process. Same reasoning as
-        // ChatActivity's own keepAlive: a device report showed this exact
-        // translate() call never finishing after the app fell out of the
-        // foreground LRU bucket.
-        val keepAlive = container.settings.translationModel != CloudProviders.AICORE.id
+        // Same reasoning as ChatActivity.sendCompare()'s own keepAlive: a
+        // device report showed a local translate() call never finishing
+        // after the app fell out of the foreground LRU bucket. One shared
+        // flag for the whole batch — only the local source (if any) needs
+        // it, a cloud/AICore source is network-bound, not CPU-bound.
+        val keepAlive = sources.any { it.isLocal }
         translateJob = lifecycleScope.launch {
             if (keepAlive) GenerationKeepAliveService.begin(this@TranslationActivity)
-            val prompt = buildPrompt(source, target, text)
-            val result = try {
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        withTimeout(GENERATION_TIMEOUT_MS) {
-                            orchestrator.handle(
-                                UserRequest(
-                                    // Unique per request and never saved to
-                                    // ChatHistoryStore — this is one-shot, not a
-                                    // conversation, so there is no earlier turn
-                                    // for a shared id to collide with anyway.
-                                    conversationId = "translate-" + System.currentTimeMillis(),
-                                    text = prompt,
-                                    memoryEnabled = false,
-                                ),
-                            )
+            try {
+                // Every card added up front on Main, before any async work
+                // starts — same reasoning as ChatActivity.sendCompare(): no
+                // two sources race to mutate translationResultsContainer.
+                val cards = sources.map { addResultCard(it.label) }
+                val jobs = sources.mapIndexed { index, translationSource ->
+                    async(Dispatchers.IO) {
+                        val prompt = buildPrompt(translationSource, source, target, text)
+                        val result = runCatching {
+                            withTimeout(GENERATION_TIMEOUT_MS) {
+                                translationSource.orchestrator.handle(
+                                    UserRequest(
+                                        // Unique per request and never saved to
+                                        // ChatHistoryStore — this is one-shot, not
+                                        // a conversation, so there is no earlier
+                                        // turn for a shared id to collide with.
+                                        conversationId = "translate-" + System.currentTimeMillis() + "-" + index,
+                                        text = prompt,
+                                        memoryEnabled = false,
+                                    ),
+                                )
+                            }
+                        }
+                        withContext(Dispatchers.Main) {
+                            result.onSuccess { answer ->
+                                container.appLog.record(
+                                    "TRANSLATE",
+                                    "${translationSource.label}: done, ${answer.text.length} chars back",
+                                )
+                                cards[index].resultText.text = cleanTranslation(answer.text)
+                            }.onFailure { error ->
+                                container.appLog.record(
+                                    "TRANSLATE",
+                                    "${translationSource.label}: FAILED: ${error.javaClass.simpleName}: ${error.message}",
+                                )
+                                cards[index].resultText.text = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                                    getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
+                                } else {
+                                    getString(R.string.chat_compare_generic_error, error.message ?: error.toString())
+                                }
+                            }
                         }
                     }
                 }
+                jobs.awaitAll()
             } finally {
+                setBusy(false)
                 if (keepAlive) GenerationKeepAliveService.end(this@TranslationActivity)
-            }
-
-            setBusy(false)
-            result.onSuccess { answer ->
-                container.appLog.record("TRANSLATE", "done, ${answer.text.length} chars back")
-                showOutput(cleanTranslation(answer.text))
-            }.onFailure { error ->
-                // Same "installed but rejected on RAM, not actually missing"
-                // case the message below already accounts for — logged with
-                // the actual numbers (this model's estimated footprint
-                // against the live budget) rather than just the exception's
-                // own generic "no installed model provides X", which says
-                // nothing about *why* a model that clearly is installed
-                // wasn't picked.
-                val detail = if (error is ai.localstudio.core.engine.NoModelForCapabilityException) {
-                    val seed = (LocalModels.SEEDS + TranslationModels.SEEDS)
-                        .firstOrNull { it.id == container.settings.translationModel }
-                    val device = container.device
-                    val sizeInfo = seed?.let { "size=${it.approxSizeBytes / 1_000_000}MB fitsBudget=${device.fitsBudget(it.approxSizeBytes)} " }.orEmpty()
-                    " — translationModel=${container.settings.translationModel} " + sizeInfo +
-                        "usableRamBudget=${device.usableRamBytes / 1_000_000}MB — " +
-                        AppContainer.currentMemoryDiagnostics(this@TranslationActivity)
-                } else {
-                    ""
-                }
-                container.appLog.record("TRANSLATE", "FAILED: ${error.javaClass.simpleName}: ${error.message}$detail")
-                // The generic "no model provides text_generation" message is
-                // technically accurate but misleading for this specific
-                // case: it also fires when the selected model IS installed
-                // but SuitabilityScorer rejected it for this device's RAM
-                // budget (real device report — a 7B model downloaded fine,
-                // was selected, and still failed with this exact exception,
-                // reading as "no model" when the real reason was "too big
-                // for this phone").
-                val message = if (error is ai.localstudio.core.engine.NoModelForCapabilityException) {
-                    getString(R.string.translation_model_too_large)
-                } else {
-                    getString(R.string.translation_failed, error.message ?: error.javaClass.simpleName)
-                }
-                Toast.makeText(this@TranslationActivity, message, Toast.LENGTH_LONG).show()
             }
         }
     }
 
+    /** One card per source, filled in as its own translation arrives — see [translate]. */
+    private fun addResultCard(label: String): ItemTranslationResultBinding {
+        val card = ItemTranslationResultBinding.inflate(LayoutInflater.from(this), binding.translationResultsContainer, true)
+        card.resultLabel.text = label
+        card.resultText.text = "…"
+        card.resultCopyButton.setOnClickListener { copyText(card.resultText.text?.toString().orEmpty()) }
+        return card
+    }
+
     /**
-     * [TranslationModels]' own expected format when that's what's selected —
-     * MADLAD-400 was fine-tuned on `<2xx> source text` and nothing else; an
-     * instruction wrapped around it the way [buildChatPrompt] does would
-     * just be more text for the encoder to (mis)translate, not an
-     * instruction it understands. Otherwise the chat-instruction prompt, for
-     * an ordinary GGUF prompted to translate.
+     * [TranslationModels]' own expected format, only for the LOCAL source
+     * when it names one of those seeds — MADLAD-400 was fine-tuned on
+     * `<2xx> source text` and nothing else; an instruction wrapped around it
+     * the way [buildChatPrompt] does would just be more text for the encoder
+     * to (mis)translate, not an instruction it understands. No other source
+     * (AICore, a cloud provider) is ever a T5 model, so every one of those
+     * always gets the chat-instruction prompt regardless of what the LOCAL
+     * source happens to be.
      */
-    private fun buildPrompt(source: MadladLanguage, target: MadladLanguage, text: String): String =
-        if (TranslationModels.SEEDS.any { it.id == container.settings.translationModel }) {
+    private fun buildPrompt(translationSource: AppContainer.CompareSource, source: MadladLanguage, target: MadladLanguage, text: String): String =
+        if (translationSource.isLocal && TranslationModels.SEEDS.any { it.id == container.settings.translationModel }) {
             "<2${target.code}> $text"
         } else {
             buildChatPrompt(source, target, text)
@@ -432,14 +437,8 @@ class TranslationActivity : AppCompatActivity() {
         binding.translationProgress.visibility = if (busy) View.VISIBLE else View.GONE
     }
 
-    private fun showOutput(text: String) {
-        binding.translationOutput.text = text
-        binding.translationOutputCard.visibility = if (text.isNotBlank()) View.VISIBLE else View.GONE
-    }
-
-    /** Copies only the translation — no model name, no language labels. */
-    private fun copyOutput() {
-        val text = binding.translationOutput.text?.toString().orEmpty()
+    /** One card's own copy button — copies only that card's translation, no label. */
+    private fun copyText(text: String) {
         if (text.isBlank()) return
         val clipboard = getSystemService(ClipboardManager::class.java)
         clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.menu_translation), text))

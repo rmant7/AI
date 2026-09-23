@@ -1444,7 +1444,7 @@ class AppContainer private constructor(private val context: Context) {
      * building a runtime and a [FallbackCandidate] just to answer that.
      *
      * [chosenId] defaults to the chat model ([localCandidate]'s own use), but
-     * takes an explicit id too — [translationOrchestrator] passes
+     * takes an explicit id too — [translationLocalCandidate] passes
      * [Settings.translationModel] here so a model picked for translation
      * doesn't have to be the same one chat is currently using.
      */
@@ -1458,120 +1458,136 @@ class AppContainer private constructor(private val context: Context) {
         return chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION)
     }
 
-    private var cachedTranslationOrchestrator: Orchestrator? = null
-    private var cachedTranslationSignature: String? = null
+    /**
+     * [Settings.translationModel] resolved to a local candidate — shared by
+     * every caller in [translationCompareCandidates] that needs the LOCAL
+     * entry built the identical way, instead of each resolving it separately
+     * and risking drift. Null for the AICore case (its own caller handles
+     * that id directly) and when nothing local is chosen or installed.
+     */
+    private fun translationLocalCandidate(): FallbackCandidate? {
+        val chosenId = settings.translationModel
+        if (chosenId == CloudProviders.AICORE.id) return null
+        val registry = localRegistry()
+        val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
+            ?: effectiveLocalSelection(registry)
+            ?: return null
+        return FallbackCandidate(
+            label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
+            runtime = sharedLlamaRuntime(),
+            model = selected.model,
+            binding = selected.binding,
+        )
+    }
+
+    private val translationCompareOrchestrators = mutableMapOf<String, Orchestrator>()
+    private val translationCompareSignatures = mutableMapOf<String, String>()
 
     /**
-     * A dedicated single-candidate orchestrator for [TranslationActivity] —
-     * deliberately not [orchestrator], which wires whatever chat is currently
-     * configured for (AICore, a cloud provider, or a multi-candidate fallback
-     * chain). Two reasons to keep this separate rather than reuse it:
-     *
-     * 1. Predictability — a translation should always come from the model the
-     *    Models screen's Translation tab has selected, not silently from
-     *    whichever provider chat's own fallback chain happens to answer with
-     *    first (a real report: AICore/Gemini Nano answered a translation
-     *    request because it was also enabled for chat, with no way to tell
-     *    from the Translation screen alone).
-     * 2. A single candidate never gets wrapped in [ai.localstudio.core.runtime.FallbackTextRuntime]
-     *    (see [orchestrator]'s own `candidates.size == 1` branch), so its
-     *    "Answer from: X · Ns" footer is never appended to the answer text in
-     *    the first place — no stripping needed on the way back out.
-     *
-     * [Settings.translationModel] names either a [LocalModels]/[TranslationModels]
-     * seed (routed through [LlamaCppRuntime], same as chat) or
-     * [CloudProviders.AICORE]'s id (routed through [AiCoreRuntime], same
-     * on-device candidate [aicoreCandidate] builds for chat) — Gemini Nano is
-     * "on-device" in the same sense a downloaded GGUF is, just with nothing
-     * this app fetches or stores itself, so it belongs in the same picker
-     * rather than being chat-only. Null only when [chosenId] names neither
-     * and no local model is installed at all — [TranslationActivity] shows
-     * that as "pick a model first" rather than silently falling back to
-     * whatever chat happens to be configured for.
+     * [compareCandidates]'s own idea, for [TranslationActivity]: one
+     * [CompareSource] per enabled provider, so a translation shows several
+     * drafts side by side instead of committing to whichever single model
+     * happens to be picked on the Models screen's Translation tab — real
+     * device report: MADLAD-400's own output for a low-resource language
+     * (Seychellois Creole) can be outright wrong with no way to tell short
+     * of trying another source. [CloudProviders.AICORE] is always included
+     * regardless of [Settings.enabledProviderIds]: Gemini Nano costs
+     * nothing to try, answers in seconds, and there's no reason to leave it
+     * out of a translation's own comparison just because chat happens to be
+     * configured without it. The LOCAL entry resolves against
+     * [Settings.translationModel] (see [translationLocalCandidate]), not
+     * [Settings.chatModel] the way [compareCandidates]'s own LOCAL entry does.
      */
-    fun translationOrchestrator(): Orchestrator? {
-        val chosenId = settings.translationModel
-        val candidate = if (chosenId == CloudProviders.AICORE.id) {
-            aicoreCandidate()
-        } else {
-            val registry = localRegistry()
-            val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
-                ?: effectiveLocalSelection(registry)
-                ?: return null
-            FallbackCandidate(
-                label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
-                runtime = sharedLlamaRuntime(),
-                model = selected.model,
-                binding = selected.binding,
-            )
+    fun translationCompareCandidates(): List<CompareSource> {
+        val providerIds = settings.enabledProviderIds + CloudProviders.AICORE.id
+        return CloudProviders.ALL.filter { it.id in providerIds }.mapNotNull { provider ->
+            val candidates = when (provider.id) {
+                CloudProviders.LOCAL.id -> listOfNotNull(translationLocalCandidate())
+                CloudProviders.AICORE.id -> listOf(aicoreCandidate())
+                else -> cloudCandidates(provider)
+            }
+            if (candidates.isEmpty()) return@mapNotNull null
+
+            val runtime: ModelRuntime = FallbackTextRuntime(candidates)
+            val label = candidates.singleOrNull()?.label ?: context.getString(provider.titleRes)
+            val isLocalOnly = candidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP }
+
+            val signature = (
+                listOf(
+                    settings.customEndpoint,
+                    settings.temperature,
+                    settings.topP,
+                    settings.topK,
+                    settings.repeatPenalty,
+                    settings.maxResponseTokens,
+                    settings.chatModelFor(provider.id),
+                    settings.apiKeyFor(provider.id),
+                    settings.translationModel,
+                ) + candidates.map { it.model.id }
+            ).joinToString("|")
+
+            val cached = translationCompareOrchestrators[provider.id]?.takeIf { translationCompareSignatures[provider.id] == signature }
+            val orchestrator = cached ?: buildTranslationOrchestrator(runtime, isLocalOnly, candidates).also {
+                translationCompareOrchestrators[provider.id] = it
+                translationCompareSignatures[provider.id] = signature
+            }
+            CompareSource(label, orchestrator, isLocalOnly)
         }
+    }
 
-        val signature = listOf(
-            candidate.model.id,
-            candidate.binding.runtime.id,
-            effectiveContextTokens(),
-            settings.temperature,
-            settings.topP,
-            settings.topK,
-            settings.repeatPenalty,
-            settings.maxResponseTokens,
-        ).joinToString("|")
-        cachedTranslationOrchestrator?.takeIf { cachedTranslationSignature == signature }?.let { return it }
-
-        val isLocalOnly = candidate.binding.runtime == RuntimeKind.LLAMA_CPP
-        if (isLocalOnly) {
+    /**
+     * The build behind every entry [translationCompareCandidates] returns —
+     * one [Orchestrator] for translation given whichever
+     * [runtime]/[registryCandidates] the caller already
+     * resolved (a single local/AICore candidate, or a cloud provider's own
+     * [FallbackTextRuntime] rotation). Never the user's chat persona/house
+     * rules ([systemPrompt] null) — a translation prompt is already fully
+     * self-contained (see [TranslationActivity.buildPrompt]) — and output is
+     * capped far below a chat reply's own ceiling: a real device report
+     * showed a general chat model ignore "reply with only the translation"
+     * and ramble for 457 tokens before the wall-clock timeout cut it off, for
+     * a task that never legitimately needs anywhere near
+     * [LOCAL_MAX_OUTPUT_TOKENS]. Capped unconditionally, not just for a local
+     * candidate — a cloud/AICore model rambling wastes the same wall-clock
+     * time.
+     */
+    private fun buildTranslationOrchestrator(
+        runtime: ModelRuntime,
+        isLocalOnly: Boolean,
+        registryCandidates: List<FallbackCandidate>,
+    ): Orchestrator {
+        if (registryCandidates.any { it.binding.runtime == RuntimeKind.LLAMA_CPP }) {
             // [releaseMemoryUnderPressure] otherwise only runs reactively,
             // off Android's own onTrimMemory callback — real device logs
             // showed that callback landing the same second a translation's
             // fresh model load started, with the embedding model (and
             // whatever chat model was still resident) not yet freed by the
             // time llama.cpp's own allocations ran, on a device already
-            // down to ~1-2 GB free. A native encoder-decoder allocation
-            // failing partway through has nothing graceful to do about
-            // it — freeing everything else *before* this load starts is
-            // cheaper than finding out after the fact. A resident chat
-            // model is freed by sharedRuntimeManager itself when this load
-            // starts, and only if it is a different model.
+            // down to ~1-2 GB free. A resident chat model itself is freed by
+            // sharedRuntimeManager when this load starts, and only if it is
+            // a different model — this is only the cross-subsystem piece.
             kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("translation model load", includeLocalModels = false) }
         }
         val runtimeManager = RuntimeManager(
             budgetBytes = { device.usableRamBytes },
-            runtimes = mapOf(candidate.runtime.kind to candidate.runtime, whisperCppRuntime.kind to whisperCppRuntime),
+            runtimes = mapOf(runtime.kind to runtime, whisperCppRuntime.kind to whisperCppRuntime),
         )
         val executors = NodeExecutors(
-            selector = ModelSelector(registry(candidate.runtime, listOf(candidate)), selectionDevice()),
+            selector = ModelSelector(registry(runtime, registryCandidates), selectionDevice()),
             runtimeManager = runtimeManager,
             contextEngine = ContextEngine(),
             memory = memory,
             memoryExperiment = memoryExperimentRunner,
             memoryExperimentMode = ExperimentMode.COMMERCIAL_MEMORY,
-            // Never the user's chat persona/house-rules — a translation
-            // prompt is already fully self-contained (see TranslationActivity.buildPrompt),
-            // and a system prompt telling the model to, say, "always answer
-            // as a pirate" is exactly the kind of thing that corrupts a
-            // translation without it being obvious why.
             systemPrompt = null,
             contextWindowTokens = if (isLocalOnly) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
             defaultRepeatPenalty = settings.repeatPenalty,
-            // A real device report: a general chat model (qwen3.5-4b)
-            // ignored the prompt's "reply with only the translation" and
-            // rambled for 457 tokens before the 120s wall-clock timeout cut
-            // it off — a single translated phrase never legitimately needs
-            // anywhere near LOCAL_MAX_OUTPUT_TOKENS (512, sized for a chat
-            // reply). Capped much lower and unconditionally (not gated on
-            // isLocalOnly — a cloud/AICore model rambling wastes the same
-            // wall-clock time): a model that ignores the instruction now
-            // gets cut off quickly with a wrong-but-fast answer instead of
-            // hanging for two minutes and failing outright.
             defaultMaxTokens = minOf(settings.maxResponseTokens, TRANSLATION_MAX_OUTPUT_TOKENS),
         )
-        return Orchestrator(CapabilityRouter(), executors).also {
-            cachedTranslationOrchestrator = it
-            cachedTranslationSignature = signature
-        }
+        return Orchestrator(CapabilityRouter(), executors)
     }
 
     /**
@@ -2045,7 +2061,7 @@ class AppContainer private constructor(private val context: Context) {
         private const val LOCAL_MAX_OUTPUT_TOKENS = 512
 
         // A translated phrase's own output length — see its call site in
-        // translationOrchestrator(). Deliberately far below LOCAL_MAX_OUTPUT_TOKENS:
+        // buildTranslationOrchestrator(). Deliberately far below LOCAL_MAX_OUTPUT_TOKENS:
         // that ceiling is sized for a chat reply, not a single translation.
         private const val TRANSLATION_MAX_OUTPUT_TOKENS = 200
 
@@ -2196,10 +2212,10 @@ class AppContainer private constructor(private val context: Context) {
                 // device had at least one other provider enabled alongside
                 // it, so AICore's candidate was always wrapped in a
                 // FALLBACK_CHAIN binding (which IS in this set) rather than
-                // standing alone — translationOrchestrator() deliberately
-                // never wraps a single candidate that way (see its own doc
-                // comment), which is what first exposed this: picking
-                // Gemini Nano for translation made SuitabilityScorer reject
+                // standing alone — the single-candidate translation
+                // orchestrator that used to exist deliberately never wrapped
+                // a candidate that way, which is what first exposed this:
+                // picking Gemini Nano for translation made SuitabilityScorer reject
                 // its own candidate as NO_SUPPORTED_RUNTIME before
                 // AiCoreRuntime ever got a chance to say whether it was
                 // actually available.
