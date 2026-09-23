@@ -36,6 +36,7 @@ import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.keys.ApiKeyRotator
 import ai.localstudio.core.router.CapabilityRouter
+import ai.localstudio.core.runtime.DeviceMemoryGatedRuntime
 import ai.localstudio.core.runtime.FallbackCandidate
 import ai.localstudio.core.runtime.FallbackTextRuntime
 import ai.localstudio.core.runtime.ModelRuntime
@@ -157,6 +158,18 @@ class AppContainer private constructor(private val context: Context) {
         exclusive = true,
         log = { appLog.record("RAM_MANAGER", it) },
     )
+
+    /**
+     * Shared between [sharedLlamaRuntime] and [aicoreCandidate] via
+     * [DeviceMemoryGatedRuntime] — see that class's own doc comment for the
+     * real-device OOM crash this exists to stop: [sharedRuntimeManager]'s
+     * budget has no visibility into AICore's own memory use (it isn't this
+     * app's own weights), so a Compare-mode batch that fires both at once
+     * could pass the local load's budget check and still lose to AICore's
+     * concurrent ramp-up. One mutex means at most one of the two is ever
+     * actually generating at a time.
+     */
+    private val deviceMemoryGate = Mutex()
 
     /**
      * Fronts [memory]'s semantic half. Constructing this is cheap and
@@ -1668,15 +1681,18 @@ class AppContainer private constructor(private val context: Context) {
      */
     private fun sharedLlamaRuntime(): ModelRuntime {
         val contextTokens = effectiveContextTokens()
-        return SharedRuntime(
-            inner = LlamaCppRuntime(
-                contextTokens = contextTokens,
-                log = appLog::record,
-                availableRamBytes = { currentAvailableRamBytes(context) },
-                memoryDiagnostics = { currentMemoryDiagnostics(context) },
+        return DeviceMemoryGatedRuntime(
+            inner = SharedRuntime(
+                inner = LlamaCppRuntime(
+                    contextTokens = contextTokens,
+                    log = appLog::record,
+                    availableRamBytes = { currentAvailableRamBytes(context) },
+                    memoryDiagnostics = { currentMemoryDiagnostics(context) },
+                ),
+                manager = sharedRuntimeManager,
+                variant = contextTokens,
             ),
-            manager = sharedRuntimeManager,
-            variant = contextTokens,
+            gate = deviceMemoryGate,
         )
     }
 
@@ -1739,13 +1755,15 @@ class AppContainer private constructor(private val context: Context) {
      * llama.cpp-sized estimate [localCandidate] uses: AICore's own weights
      * live in AICore's system service, not this app's process, so there is
      * nothing here for [RuntimeManager]'s RAM budget to actually plan for.
+     * [DeviceMemoryGatedRuntime] is the actual mitigation for that gap —
+     * see its own doc comment for the real crash it fixes.
      * See docs/04-runtime.md's "Gemini Nano / AICore feasibility" section.
      */
     private fun aicoreCandidate(): FallbackCandidate {
         val model = servedModel("gemini-nano-aicore", RuntimeKind.AICORE, Capability.TEXT_GENERATION, Capability.REASONING)
         return FallbackCandidate(
             label = context.getString(CloudProviders.AICORE.titleRes),
-            runtime = AiCoreRuntime(log = appLog::record),
+            runtime = DeviceMemoryGatedRuntime(AiCoreRuntime(log = appLog::record), deviceMemoryGate),
             model = model,
             binding = model.bindings.first(),
         )
