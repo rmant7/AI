@@ -1290,6 +1290,19 @@ class AppContainer private constructor(private val context: Context) {
     fun isModelResident(modelId: String): Boolean =
         sharedRuntimeManager.residentModels().any { it.modelId == modelId }
 
+    /**
+     * Whether every candidate here needs the small, on-device-sized context
+     * ceiling ([effectiveContextTokens]) instead of [CLOUD_CONTEXT_WINDOW_TOKENS] —
+     * deliberately not the same thing [isLocalOnly] means at each of this
+     * function's own call sites (output-length capping, whether a source
+     * streams): [RuntimeKind.LLAMA_CPP] and [RuntimeKind.AICORE] both need
+     * this, real cloud providers don't, and folding the two checks into one
+     * flag would have meant getting one of the other two decisions wrong to
+     * fix this one.
+     */
+    private fun needsSmallContextWindow(candidates: List<FallbackCandidate>): Boolean =
+        candidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP || it.binding.runtime == RuntimeKind.AICORE }
+
     private fun buildOrchestrator(
         runtime: ModelRuntime,
         isLocalOnly: Boolean,
@@ -1326,7 +1339,20 @@ class AppContainer private constructor(private val context: Context) {
             // down to survive on-device was also quietly capping how much
             // conversation/memory ever reached Gemini, unrelated to the
             // max-tokens leak fixed the same way in OpenAiRuntime.
-            contextWindowTokens = if (isLocalOnly) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
+            //
+            // AICore included, not just LLAMA_CPP (isLocalOnly, used a few
+            // lines down for output-length capping, means something
+            // different and stays narrow) — real device report: a 4590-char
+            // Compare-mode prompt, nowhere near CLOUD_CONTEXT_WINDOW_TOKENS
+            // (32,000 tokens), made Gemini Nano return a blank response,
+            // confirming what was flagged as an unverified hypothesis
+            // earlier: AICore has nothing like a real cloud provider's
+            // context limit. Reuses effectiveContextTokens() rather than a
+            // new guessed number — already the ceiling this app trusts for
+            // on-device inference; whether it's small enough specifically
+            // for AICore is itself unverified and may need its own,
+            // smaller number if this turns out not to be enough.
+            contextWindowTokens = if (needsSmallContextWindow(registryCandidates)) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
@@ -1580,7 +1606,9 @@ class AppContainer private constructor(private val context: Context) {
             memoryExperiment = memoryExperimentRunner,
             memoryExperimentMode = ExperimentMode.COMMERCIAL_MEMORY,
             systemPrompt = null,
-            contextWindowTokens = if (isLocalOnly) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
+            // See buildOrchestrator's own comment on why AICore is included
+            // here too, not just LLAMA_CPP.
+            contextWindowTokens = if (needsSmallContextWindow(registryCandidates)) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
