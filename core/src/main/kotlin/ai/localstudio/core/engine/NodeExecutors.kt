@@ -310,7 +310,15 @@ class NodeExecutors(
             ?.let { name -> MemoryScope.entries.firstOrNull { it.name.equals(name.trim(), true) } }
             ?: MemoryScope.WORKING
 
-        context.userMessage?.let {
+        // Same blank-text guard as the assistant side below: an image sent
+        // with no caption (attach-only, no typed text) makes userMessage an
+        // empty string, not null — context.userMessage?.let alone still let
+        // that reach provider.remember() and throw, surfacing as a bare
+        // "IllegalArgumentException: cannot remember blank text" right after
+        // an otherwise-successful generation (a real device report: this hit
+        // on both a local llama.cpp turn and an AICore turn, in each case a
+        // "with image" send with an empty text field).
+        context.userMessage?.takeIf { it.isNotBlank() }?.let {
             provider.remember(it, scope, mapOf(CONVERSATION_KEY to context.conversationId, ROLE_KEY to "user"))
         }
         // Real device report: a cloud candidate that streams zero chunks
