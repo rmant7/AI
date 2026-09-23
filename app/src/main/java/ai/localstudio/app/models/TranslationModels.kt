@@ -43,6 +43,7 @@ object TranslationModels {
             // selecting MADLAD-400 made every translation fail outright,
             // before nativeGenerateT5 ever got a chance to run.
             capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+            isT5EncoderDecoder = true,
         ),
         // 7B and 10B below: same architecture, same known crash (a ggml repack
         // GEMM kernel faulting on this app's own T5 encoder path on a
@@ -65,6 +66,7 @@ object TranslationModels {
             // this only affects the number shown before that happens.
             approxSizeBytes = 5_200_000_000,
             capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+            isT5EncoderDecoder = true,
         ),
         // thirteenbit/madlad400-10b-mt-gguf carries five quantisations of the
         // *same* 10B model as separate files in one repo — quantPriority
@@ -81,6 +83,7 @@ object TranslationModels {
             noteRes = R.string.note_madlad400_10b,
             approxSizeBytes = 5_220_000_000,
             capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+            isT5EncoderDecoder = true,
         ),
         LocalModelSeed(
             id = "madlad400-10b-mt-q4",
@@ -91,6 +94,7 @@ object TranslationModels {
             noteRes = R.string.note_madlad400_10b,
             approxSizeBytes = 6_690_000_000,
             capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+            isT5EncoderDecoder = true,
         ),
         LocalModelSeed(
             id = "madlad400-10b-mt-q5",
@@ -101,6 +105,7 @@ object TranslationModels {
             noteRes = R.string.note_madlad400_10b,
             approxSizeBytes = 7_710_000_000,
             capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+            isT5EncoderDecoder = true,
         ),
         LocalModelSeed(
             id = "madlad400-10b-mt-q6",
@@ -117,6 +122,7 @@ object TranslationModels {
             // before anything is actually downloaded either way.
             approxSizeBytes = 8_800_000_000,
             capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+            isT5EncoderDecoder = true,
         ),
         LocalModelSeed(
             id = "madlad400-10b-mt-q8",
@@ -126,6 +132,31 @@ object TranslationModels {
             paramsLabel = "10B · Q8_0 · T5 encoder-decoder",
             noteRes = R.string.note_madlad400_10b,
             approxSizeBytes = 11_400_000_000,
+            capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+            isT5EncoderDecoder = true,
+        ),
+        // TranslateGemma: a decoder-only Gemma 4B fine-tuned for translation
+        // — not a T5 encoder-decoder like MADLAD-400 above, so it does NOT
+        // set isT5EncoderDecoder and gets TranslationActivity.buildChatPrompt's
+        // ordinary instruction-style prompt instead of MADLAD's own
+        // `<2xx> text` format (which it was never trained on and would just
+        // mistranslate as more input text). Added on request; this sandbox
+        // has no network access to huggingface.co, so the exact GGUF
+        // filename/quantisation and approxSizeBytes below are both
+        // unverified — HuggingFaceResolver still resolves the real file and
+        // its real size live at download time regardless (see the 7B MADLAD
+        // seed's own comment on the same trade-off), so a wrong estimate
+        // here only ever affects the number shown before that happens.
+        LocalModelSeed(
+            id = "translategemma-4b",
+            title = "TranslateGemma 4B",
+            repoIds = listOf("42ailab/TranslateGemma-4B-GGUF"),
+            paramsLabel = "4B · Gemma · decoder-only",
+            noteRes = R.string.note_translategemma_4b,
+            // 4B at the default Q4_K_M-first priority, scaled from the 8B
+            // Llama 3.1 Q4 seed's own known ~4.9GB (LocalModels.kt) — same
+            // rough-estimate caveat as above.
+            approxSizeBytes = 2_450_000_000,
             capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
         ),
     )

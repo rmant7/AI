@@ -57,18 +57,20 @@ import kotlinx.coroutines.withTimeout
  * strips that footer before a card shows or copies its own result.
  *
  * Languages come from [MadladLanguages] — MADLAD-400's own 417-language
- * table — for both kinds of model this screen can be pointed at: a
- * [TranslationModels] seed (MADLAD-400 itself, a T5 encoder-decoder model —
- * see [ai.localstudio.app.llama.LlamaBridge.nativeGenerateT5]) uses a
- * language's `code` directly in its own `<2xx> source text` format with no
- * chat framing at all, while an ordinary chat GGUF from
- * [ai.localstudio.app.models.LocalModels] gets the instruction-style prompt
- * [buildChatPrompt] builds from a language's English `name`. [translate]
- * picks between the two prompt shapes by checking whether
- * [Settings.translationModel] names a [TranslationModels] seed — see
- * [buildPrompt]. A non-MADLAD model was never trained on most of these 417
- * languages, same caveat as always for a general model asked to translate
- * something it barely saw in training.
+ * table — for every kind of model this screen can be pointed at: a
+ * [ai.localstudio.app.models.LocalModelSeed] with
+ * [ai.localstudio.app.models.LocalModelSeed.isT5EncoderDecoder] set (MADLAD-400,
+ * a real T5 encoder-decoder — see [ai.localstudio.app.llama.LlamaBridge.nativeGenerateT5])
+ * uses a language's `code` directly in its own `<2xx> source text` format
+ * with no chat framing at all, while every other model — an ordinary chat
+ * GGUF from [ai.localstudio.app.models.LocalModels], or a decoder-only
+ * translation fine-tune from [TranslationModels] like TranslateGemma — gets
+ * the instruction-style prompt [buildChatPrompt] builds from a language's
+ * English `name`. [translate] picks between the two prompt shapes by
+ * checking [Settings.translationModel]'s own seed — see [buildPrompt]. A
+ * model never trained on a given language, MADLAD-400 included, is always a
+ * best-effort draft for it, same caveat as always for a model asked to
+ * translate something it barely saw in training.
  *
  * Even with MADLAD-400, Seychellois Creole output is a best-effort draft,
  * not a verified translation the way [PhrasebookActivity]'s pre-checked
@@ -481,17 +483,20 @@ class TranslationActivity : AppCompatActivity() {
     }
 
     /**
-     * [TranslationModels]' own expected format, only for the LOCAL source
-     * when it names one of those seeds — MADLAD-400 was fine-tuned on
-     * `<2xx> source text` and nothing else; an instruction wrapped around it
-     * the way [buildChatPrompt] does would just be more text for the encoder
-     * to (mis)translate, not an instruction it understands. No other source
-     * (AICore, a cloud provider) is ever a T5 model, so every one of those
-     * always gets the chat-instruction prompt regardless of what the LOCAL
-     * source happens to be.
+     * MADLAD-400's own expected format, only for the LOCAL source and only
+     * when [Settings.translationModel] names a real T5 encoder-decoder seed
+     * ([ai.localstudio.app.models.LocalModelSeed.isT5EncoderDecoder]) — it
+     * was fine-tuned on `<2xx> source text` and nothing else; an instruction
+     * wrapped around it the way [buildChatPrompt] does would just be more
+     * text for the encoder to (mis)translate, not an instruction it
+     * understands. Every other [TranslationModels] seed (TranslateGemma: a
+     * decoder-only chat model fine-tuned for translation, not an
+     * encoder-decoder) is a normal causal LM and gets the same
+     * chat-instruction prompt as AICore, a cloud provider, or an ordinary
+     * [ai.localstudio.app.models.LocalModels] seed.
      */
     private fun buildPrompt(translationSource: AppContainer.CompareSource, source: MadladLanguage, target: MadladLanguage, text: String): String =
-        if (translationSource.isLocal && TranslationModels.SEEDS.any { it.id == container.settings.translationModel }) {
+        if (translationSource.isLocal && TranslationModels.SEEDS.any { it.id == container.settings.translationModel && it.isT5EncoderDecoder }) {
             "<2${target.code}> $text"
         } else {
             buildChatPrompt(source, target, text)

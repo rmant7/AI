@@ -63,6 +63,21 @@ data class LocalModelSeed(
      * Null (every other seed) keeps the previous behaviour exactly.
      */
     val quantPriority: List<String>? = null,
+    /**
+     * True only for the MADLAD-400 family: a real T5 encoder-decoder,
+     * trained on its own `<2xx> source text` format with no chat framing at
+     * all (see [ai.localstudio.app.llama.LlamaBridge.nativeGenerateT5] and
+     * [ai.localstudio.app.TranslationActivity.buildPrompt]'s own doc
+     * comment). Every other [ai.localstudio.app.models.TranslationModels]
+     * seed — a decoder-only chat model fine-tuned for translation, like
+     * TranslateGemma — is a normal causal LM and gets
+     * [ai.localstudio.app.TranslationActivity.buildChatPrompt]'s
+     * instruction-style prompt instead, same as [LocalModels.SEEDS] already
+     * does; wrapping MADLAD's own tag format around one of those would just
+     * be more text for it to (mis)translate, not an instruction it
+     * understands.
+     */
+    val isT5EncoderDecoder: Boolean = false,
 ) {
     fun resolvedNote(context: android.content.Context): String = noteRes?.let { context.getString(it) } ?: note
 }

@@ -264,6 +264,7 @@
     <string name="note_madlad400_3b">Google MADLAD-400: 450+ languages. ~1.65GB.</string>
     <string name="note_madlad400_7b">Google MADLAD-400: 7B, 417+ languages. Needs a high-RAM device.</string>
     <string name="note_madlad400_10b">Google MADLAD-400: 10B, 417+ languages. Needs a high-RAM device.</string>
+    <string name="note_translategemma_4b">Gemma 4B fine-tuned for translation — a chat model, not an encoder-decoder like MADLAD-400. Unverified: added without checking its exact language coverage.</string>
     <string name="models_switched_voice">Voice input switched to %1$s</string>
     <string name="model_state_installed">Installed</string>
     <string name="model_state_paused">Paused: %1$s downloaded</string>
