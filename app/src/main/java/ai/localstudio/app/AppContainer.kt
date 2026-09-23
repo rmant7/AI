@@ -136,20 +136,23 @@ class AppContainer private constructor(private val context: Context) {
      * shared by whole orchestrators — every Compare-mode bubble answering
      * with the same chain, because all chains share one registry id.
      *
-     * Strict: [DeviceProfile.usableRamBytes] is itself live-RAM-aware now
-     * (see [profileOf]), so a load this still refuses is a confirmed
-     * shortage, not a stale estimate — real device report: with nothing else
-     * resident to evict, attempting one anyway (the earlier, explicitly
-     * requested trade-off, back when the estimate really could be wrong)
-     * OOM-killed the whole process twice in a row, taking a concurrent
-     * download down with it for no new information the first kill hadn't
-     * already given. [LlamaCppRuntime]'s own separate, narrower pre-flight
-     * check (a live headroom reading a few tens of milliseconds later, never
-     * throwing) is untouched — this is only the outer gate deciding whether
-     * to attempt the load at all.
+     * Strict, and budgeted off [DeviceProfile.liveRamBytes], not
+     * [DeviceProfile.usableRamBytes]: the latter is a user-set policy
+     * ceiling (`max(% of total, live free)`) — raising the RAM percentage
+     * in Settings clears it regardless of what's genuinely free, which is
+     * exactly right for what the Models screen labels "Recommended" and
+     * exactly wrong for a check that gates an actual native allocation.
+     * Real device report, same night, same mechanism three times: MADLAD-400
+     * 7B cleared a 13 GB policy ceiling (80% of a 16 GB phone) with only
+     * ~5 GB genuinely free; the weights loaded, then the OOM killer took the
+     * whole process out the moment generation allocated anything more — no
+     * Settings percentage can make memory that isn't there. [LlamaCppRuntime]'s
+     * own separate, narrower pre-flight check (a live headroom reading a few
+     * tens of milliseconds later, never throwing) is untouched — this is
+     * only the outer gate deciding whether to attempt the load at all.
      */
     private val sharedRuntimeManager = RuntimeManager(
-        budgetBytes = { device.usableRamBytes },
+        budgetBytes = { device.liveRamBytes },
         runtimes = emptyMap(),
         exclusive = true,
         log = { appLog.record("RAM_MANAGER", it) },

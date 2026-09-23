@@ -70,6 +70,29 @@ data class DeviceProfile(
         ).coerceAtMost((totalRamBytes * MAX_RAM_FRACTION).toLong())
 
     /**
+     * What a load could actually get *right now* — the load-time
+     * counterpart to [usableRamBytes], which is deliberately generous: a
+     * user-set policy ceiling ("what this device is allowed to reach for"),
+     * not a promise that memory is physically there this instant.
+     * [usableRamBytes]'s `max(totalRamBytes * ramBudgetFraction, ...)` term
+     * exists specifically so raising [ramBudgetFraction] can clear that
+     * floor regardless of live memory — useful for what the Models screen
+     * labels "Recommended", fatal for an admission check that actually
+     * triggers a native allocation. Real device report, same night, same
+     * mechanism three times: raising the RAM percentage to 80% made
+     * MADLAD-400 7B clear [usableRamBytes] (13 GB) while only ~5 GB was
+     * genuinely free; the weights loaded, then the OOM killer took the
+     * whole process out the moment generation allocated anything more.
+     * This is just [usableRamBytes]'s own live term, isolated: no policy
+     * floor to clear, only what [freeRamSafetyFactor] says is safe to trust
+     * of what's actually free (plus this app's own evictable models,
+     * already folded into [availableRamBytes] by the caller — see
+     * `AppContainer.profileOf`).
+     */
+    val liveRamBytes: Long
+        get() = (availableRamBytes * freeRamSafetyFactor).toLong()
+
+    /**
      * Whether a model of this artifact size can actually be loaded under the
      * user's current RAM budget ([usableRamBytes]) — the one authoritative
      * check [classifyFit] and the Models screen's own download-time gate both

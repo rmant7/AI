@@ -73,6 +73,29 @@ class DeviceFitTest {
     }
 
     @Test
+    fun `liveRamBytes ignores a raised policy ceiling that live memory does not back up`() {
+        // Real device report: raising ramBudgetFraction to 80% on a 16.3GB
+        // phone put usableRamBytes at ~13GB while only ~5GB was genuinely
+        // free — MADLAD-400 7B (~6.76GB estimated) cleared that ceiling,
+        // loaded, and the whole process was OOM-killed moments into
+        // generation. liveRamBytes must stay governed by what's actually
+        // free regardless of how high the policy floor is set.
+        val device = DeviceProfile(
+            totalRamBytes = 16_331_000_000,
+            availableRamBytes = 5_386_000_000,
+            availableStorageBytes = 100 * GB,
+            cpuCores = 8,
+            androidApiLevel = 35,
+            supportedRuntimes = setOf(RuntimeKind.LLAMA_CPP),
+            ramBudgetFraction = 0.8,
+            freeRamSafetyFactor = 0.95,
+        )
+        assertTrue(device.usableRamBytes > 13 * GB, "usableRamBytes was ${device.usableRamBytes}")
+        assertTrue(device.liveRamBytes < 5_386_000_000, "liveRamBytes was ${device.liveRamBytes}")
+        assertTrue(device.liveRamBytes < 6_760_000_000, "MADLAD-7B's estimate must not clear liveRamBytes here")
+    }
+
+    @Test
     fun `nonsense input is too large rather than a crash`() {
         assertEquals(ModelFit.TOO_LARGE, deviceWithRam(16).classifyFit(0))
         assertEquals(ModelFit.TOO_LARGE, deviceWithRam(16).classifyFit(-1))
