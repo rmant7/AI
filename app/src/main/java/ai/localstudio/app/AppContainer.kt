@@ -897,7 +897,7 @@ class AppContainer private constructor(private val context: Context) {
         modelStore,
         tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
-        appLogForMmproj = { message -> appLog.record("MMPROJ_DOWNLOAD", message) },
+        log = appLog::record,
     )
 
     // No auto-download of Tiny on first launch: voice input's mic button and

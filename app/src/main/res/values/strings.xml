@@ -216,7 +216,7 @@
     <string name="model_details">Details</string>
     <string name="model_retry">Retry</string>
     <string name="models_custom_title">Custom model from Hugging Face</string>
-    <string name="models_custom_hint">Enter a repo like owner/repo that contains a .gguf file — the app will pick a suitable quantization on its own.</string>
+    <string name="models_custom_hint">Enter a repo like owner/repo (or paste its huggingface.co link) that contains a .gguf file — the app will pick a suitable quantization on its own.</string>
     <string name="models_custom_add">Add</string>
     <string name="models_custom_input_hint">owner/repo with a GGUF file</string>
     <string name="models_custom_bad_format">Expected the format owner/repo</string>

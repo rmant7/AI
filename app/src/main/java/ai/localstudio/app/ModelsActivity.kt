@@ -870,8 +870,8 @@ class ModelsActivity : AppCompatActivity() {
             .setMessage(R.string.models_custom_hint)
             .setView(input)
             .setPositiveButton(R.string.model_download) { _, _ ->
-                val repo = input.text?.toString()?.trim().orEmpty()
-                if (repo.contains('/')) {
+                val repo = normalizeRepoInput(input.text?.toString().orEmpty())
+                if (repo != null) {
                     val seed = LocalModels.custom(repo)
                     if (customSeeds.none { it.id == seed.id }) customSeeds += seed
                     NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
@@ -882,6 +882,33 @@ class ModelsActivity : AppCompatActivity() {
             }
             .setNegativeButton(R.string.dialog_cancel, null)
             .show()
+    }
+
+    /**
+     * Accepts `owner/repo` as documented, but also whatever pasting a repo
+     * page's own address bar actually produces — real device report: a full
+     * `https://huggingface.co/owner/repo` link passed the old bare
+     * `contains('/')` check and was used as the repo id verbatim, which
+     * [HuggingFaceResolver] can't resolve (it builds its own API URL out of
+     * `owner/repo`) — the download failed with no visible error the user
+     * could connect back to what they'd typed, since [ModelDownloads] didn't
+     * log anything either (see its own `log` parameter, added alongside
+     * this). Strips a `https://`/`http://` scheme and a `huggingface.co/`
+     * host, then keeps only the first two remaining path segments — so a
+     * link to one specific file (`.../blob/main/model.gguf`) or tree
+     * (`.../tree/main`) still resolves to the repo itself, not a path
+     * [HuggingFaceResolver] would treat as a nonexistent repo. Null means
+     * still not enough there to be a repo id.
+     */
+    private fun normalizeRepoInput(raw: String): String? {
+        val stripped = raw.trim()
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .removePrefix("www.")
+            .removePrefix("huggingface.co/")
+            .trim('/')
+        val segments = stripped.split('/').filter { it.isNotBlank() }
+        return if (segments.size >= 2) "${segments[0]}/${segments[1]}" else null
     }
 
     private fun describeDevice(device: DeviceProfile) = buildString {

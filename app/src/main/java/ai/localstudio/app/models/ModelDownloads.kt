@@ -44,8 +44,17 @@ class ModelDownloads(
      * Android services or notifications.
      */
     private val onDownloadStarted: () -> Unit = {},
-    /** Best-effort mmproj download failures go here rather than surfacing as the model's own DownloadState.Failed — see [downloadMmproj]. */
-    private val appLogForMmproj: ((String) -> Unit)? = null,
+    /**
+     * Real device report: a custom model's download failed (a malformed repo
+     * id — see [ai.localstudio.app.ModelsActivity.normalizeRepoInput]'s own
+     * doc comment) with nothing about it anywhere in the app's own log — this
+     * class published the failure only as a [DownloadState] the Models
+     * screen's own row happened to be showing at the time, the same as every
+     * other subsystem's `appLog.record(tag, message)` calls, and every real
+     * download's start/failure/success now goes through it too, not just a
+     * projector's best-effort one (see [downloadMmproj]'s own use of it).
+     */
+    private val log: (tag: String, message: String) -> Unit = { _, _ -> },
 ) {
 
     private val states = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
@@ -108,6 +117,7 @@ class ModelDownloads(
         val downloader = ModelDownloader()
         downloaders[seed.id] = downloader
         jobs[seed.id] = scope.launch {
+            log("MODEL_DOWNLOAD", "${seed.id}: resolving from ${seed.repoIds}")
             publish(seed, DownloadState.Resolving(seed.repoIds.first()))
             try {
                 val (source, resolved) = HuggingFaceResolver.resolveAny(
@@ -115,9 +125,12 @@ class ModelDownloads(
                     tokenProvider(),
                     seed.quantPriority ?: ArtifactResolver.DEFAULT_QUANT_PRIORITY,
                 )
+                log("MODEL_DOWNLOAD", "${seed.id}: resolved via $source -> ${resolved.fileName} (${gb(resolved.sizeBytes)})")
                 val free = store.freeSpaceBytes()
                 if (resolved.sizeBytes > 0 && resolved.sizeBytes + SLACK_BYTES > free) {
-                    publish(seed, DownloadState.Failed("Not enough space: need ${gb(resolved.sizeBytes)}, ${gb(free)} free"))
+                    val message = "Not enough space: need ${gb(resolved.sizeBytes)}, ${gb(free)} free"
+                    log("MODEL_DOWNLOAD", "${seed.id}: FAILED: $message")
+                    publish(seed, DownloadState.Failed(message))
                     return@launch
                 }
 
@@ -143,19 +156,18 @@ class ModelDownloads(
                 val installedSize = installedFile.length()
                 if (resolved.sizeBytes > 0 && installedSize != resolved.sizeBytes) {
                     installedFile.delete()
-                    publish(
-                        seed,
-                        DownloadState.Failed(
-                            "File corrupted: got $installedSize bytes, expected ${resolved.sizeBytes}",
-                        ),
-                    )
+                    val message = "File corrupted: got $installedSize bytes, expected ${resolved.sizeBytes}"
+                    log("MODEL_DOWNLOAD", "${seed.id}: FAILED: $message")
+                    publish(seed, DownloadState.Failed(message))
                     return@launch
                 }
 
                 if (seed.mmprojFileName != null) downloadMmproj(seed, downloader)
 
+                log("MODEL_DOWNLOAD", "${seed.id}: installed")
                 publish(seed, DownloadState.Installed)
             } catch (e: Exception) {
+                log("MODEL_DOWNLOAD", "${seed.id}: FAILED: ${e.javaClass.simpleName}: ${e.message}")
                 publish(seed, DownloadState.Failed(e.message ?: e.toString()))
             } finally {
                 downloaders.remove(seed.id)
@@ -175,7 +187,7 @@ class ModelDownloads(
         val fileName = seed.mmprojFileName ?: return
         val resolved = HuggingFaceResolver.resolveExact(seed.repoIds, fileName, tokenProvider())
         if (resolved == null) {
-            appLogForMmproj?.invoke("$fileName not found in any of ${seed.repoIds}")
+            log("MMPROJ_DOWNLOAD", "$fileName not found in any of ${seed.repoIds}")
             return
         }
         val (source, file) = resolved
@@ -190,7 +202,7 @@ class ModelDownloads(
             // A corrupt or half-downloaded projector must not look installed —
             // ModelStore.hasMmproj checks file presence, not validity beyond size.
             store.mmprojFileFor(seed).delete()
-            appLogForMmproj?.invoke("mmproj download failed for ${seed.id}: ${it.message}")
+            log("MMPROJ_DOWNLOAD", "mmproj download failed for ${seed.id}: ${it.message}")
         }
     }
 

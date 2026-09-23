@@ -218,7 +218,7 @@
     <string name="model_details">Подробности</string>
     <string name="model_retry">Повторить</string>
     <string name="models_custom_title">Своя модель с Hugging Face</string>
-    <string name="models_custom_hint">Укажите репозиторий вида owner/repo, содержащий файл .gguf — приложение само выберет подходящее квантование.</string>
+    <string name="models_custom_hint">Укажите репозиторий вида owner/repo (или вставьте ссылку на huggingface.co), содержащий файл .gguf — приложение само выберет подходящее квантование.</string>
     <string name="models_custom_add">Добавить</string>
     <string name="models_custom_input_hint">owner/repo с GGUF-файлом</string>
     <string name="models_custom_bad_format">Нужен формат owner/repo</string>
