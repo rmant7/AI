@@ -1525,7 +1525,19 @@ class AppContainer private constructor(private val context: Context) {
      * [Settings.chatModel] the way [compareCandidates]'s own LOCAL entry does.
      */
     fun translationCompareCandidates(): List<CompareSource> {
-        val providerIds = settings.enabledProviderIds + CloudProviders.AICORE.id
+        // LOCAL forced in alongside AICORE, not just gated by
+        // enabledProviderIds like the cloud providers below: real device
+        // report — MADLAD-400 7B, explicitly picked on Models ->
+        // Translation, never even attempted (no LOCAL_LOAD line at all,
+        // success or failure) because the general "Local" chat-provider
+        // checkbox in Settings happened to be unchecked. That checkbox
+        // governs chat's own fallback chain; Settings.translationModel is a
+        // separate, dedicated choice this screen has always respected
+        // regardless of chat's own provider configuration (see
+        // translationLocalCandidate's own doc comment) — conflating the two
+        // here silently dropped the one source the user most explicitly
+        // asked for.
+        val providerIds = settings.enabledProviderIds + CloudProviders.AICORE.id + CloudProviders.LOCAL.id
         return CloudProviders.ALL.filter { it.id in providerIds }.mapNotNull { provider ->
             val candidates = when (provider.id) {
                 CloudProviders.LOCAL.id -> listOfNotNull(translationLocalCandidate())
