@@ -435,6 +435,8 @@
     <string name="translation_input_hint">Text to translate</string>
     <string name="translation_translate">Translate</string>
     <string name="translation_copy">Copy translation</string>
+    <string name="translation_speak">Speak translation</string>
+    <string name="translation_speak_unavailable">No voice available for this language</string>
     <string name="translation_copied">Copied</string>
     <string name="translation_same_language">Source and target language are the same</string>
     <string name="translation_model_note">Model: %1$s</string>

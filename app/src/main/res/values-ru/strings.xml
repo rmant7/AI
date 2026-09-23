@@ -434,6 +434,8 @@
     <string name="translation_input_hint">Текст для перевода</string>
     <string name="translation_translate">Перевести</string>
     <string name="translation_copy">Скопировать перевод</string>
+    <string name="translation_speak">Озвучить перевод</string>
+    <string name="translation_speak_unavailable">Для этого языка нет доступного голоса</string>
     <string name="translation_copied">Скопировано</string>
     <string name="translation_same_language">Исходный и целевой язык совпадают</string>
     <string name="translation_model_note">Модель: %1$s</string>

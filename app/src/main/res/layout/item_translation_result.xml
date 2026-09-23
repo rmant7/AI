@@ -41,6 +41,16 @@
                 android:textSize="16sp" />
 
             <ImageButton
+                android:id="@+id/resultSpeakButton"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/translation_speak"
+                android:padding="6dp"
+                android:src="@drawable/ic_play_arrow"
+                app:tint="?attr/colorOnSurfaceVariant" />
+
+            <ImageButton
                 android:id="@+id/resultCopyButton"
                 android:layout_width="36dp"
                 android:layout_height="36dp"

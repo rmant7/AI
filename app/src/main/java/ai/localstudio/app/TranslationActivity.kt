@@ -3,6 +3,7 @@ package ai.localstudio.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
@@ -24,6 +25,7 @@ import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.MadladLanguage
 import ai.localstudio.app.models.MadladLanguages
 import ai.localstudio.app.models.TranslationModels
+import ai.localstudio.app.models.TtsVoiceFallback
 import ai.localstudio.core.engine.UserRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -94,6 +96,17 @@ class TranslationActivity : AppCompatActivity() {
     private var selectedSource: MadladLanguage? = null
     private var selectedTarget: MadladLanguage? = null
 
+    /**
+     * Speaks a card's own result aloud, in [selectedTarget]'s language —
+     * every card in one translate() batch shares the same target, so this
+     * is initialized once per Activity, not per card. Null until
+     * [TextToSpeech]'s own async init callback fires; a tap before then (or
+     * one that finds no usable voice — see [ttsLocaleFor]) just shows
+     * [R.string.translation_speak_unavailable] instead of speaking.
+     */
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityTranslationBinding.inflate(layoutInflater)
@@ -119,25 +132,31 @@ class TranslationActivity : AppCompatActivity() {
         binding.sourceLanguageInput.setAdapter(languageAdapter)
         binding.targetLanguageInput.setAdapter(languageAdapter)
         binding.sourceLanguageInput.setOnItemClickListener { parent, _, position, _ ->
-            selectedSource = displayOf[parent.getItemAtPosition(position) as String]
+            setSource(displayOf[parent.getItemAtPosition(position) as String])
             updateCaveat()
         }
         binding.targetLanguageInput.setOnItemClickListener { parent, _, position, _ ->
-            selectedTarget = displayOf[parent.getItemAtPosition(position) as String]
+            setTarget(displayOf[parent.getItemAtPosition(position) as String])
             updateCaveat()
         }
 
-        // Russian -> Seychellois Creole is this app's actual use case
-        // (Seychelles travel, per docs) — the default the screen opens on,
-        // not an arbitrary first entry.
-        selectLanguage(binding.sourceLanguageInput, languages.firstOrNull { it.code == "ru" }) { selectedSource = it }
-        selectLanguage(binding.targetLanguageInput, languages.firstOrNull { it.code == "crs" }) { selectedTarget = it }
+        // Restored from Settings — real device report: navigating to Chat
+        // and back reset this screen to a hardcoded default, discarding
+        // whatever pair (Russian -> Hebrew, in that report) was actually
+        // last in use, the same in-memory-field-only gap translationDraftText
+        // already closed for the input text. Russian -> Seychellois Creole
+        // (Seychelles travel, per docs) is only the very first-launch
+        // default, when nothing has been picked yet.
+        val defaultSourceCode = container.settings.translationSourceLang.ifBlank { "ru" }
+        val defaultTargetCode = container.settings.translationTargetLang.ifBlank { "crs" }
+        selectLanguage(binding.sourceLanguageInput, languages.firstOrNull { it.code == defaultSourceCode }) { setSource(it) }
+        selectLanguage(binding.targetLanguageInput, languages.firstOrNull { it.code == defaultTargetCode }) { setTarget(it) }
 
         binding.swapLanguagesButton.setOnClickListener {
             val source = selectedSource
             val target = selectedTarget
-            selectLanguage(binding.sourceLanguageInput, target) { selectedSource = it }
-            selectLanguage(binding.targetLanguageInput, source) { selectedTarget = it }
+            selectLanguage(binding.sourceLanguageInput, target) { setSource(it) }
+            selectLanguage(binding.targetLanguageInput, source) { setTarget(it) }
         }
 
         binding.translateButton.setOnClickListener {
@@ -161,6 +180,8 @@ class TranslationActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
         })
 
+        tts = TextToSpeech(this) { status -> ttsReady = status == TextToSpeech.SUCCESS }
+
         updateCaveat()
     }
 
@@ -171,6 +192,13 @@ class TranslationActivity : AppCompatActivity() {
         // than only in onCreate so coming back from picking a model actually
         // shows the pick.
         updateModelNote()
+    }
+
+    override fun onDestroy() {
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+        super.onDestroy()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -190,6 +218,17 @@ class TranslationActivity : AppCompatActivity() {
     private fun selectLanguage(field: android.widget.AutoCompleteTextView, language: MadladLanguage?, assign: (MadladLanguage?) -> Unit) {
         assign(language)
         field.setText(language?.let { displayNames.getValue(it.code) }.orEmpty(), false)
+    }
+
+    /** [selectedSource]/[selectedTarget]'s only two setters — every path that changes either goes through one of these, so persistence can't be forgotten at a new call site. */
+    private fun setSource(language: MadladLanguage?) {
+        selectedSource = language
+        container.settings.translationSourceLang = language?.code.orEmpty()
+    }
+
+    private fun setTarget(language: MadladLanguage?) {
+        selectedTarget = language
+        container.settings.translationTargetLang = language?.code.orEmpty()
     }
 
     /**
@@ -391,7 +430,42 @@ class TranslationActivity : AppCompatActivity() {
         card.resultLabel.text = label
         card.resultText.text = "…"
         card.resultCopyButton.setOnClickListener { copyText(card.resultText.text?.toString().orEmpty()) }
+        card.resultSpeakButton.setOnClickListener { speak(card.resultText.text?.toString().orEmpty()) }
         return card
+    }
+
+    /**
+     * Speaks [text] aloud in [selectedTarget]'s language — every card in one
+     * batch shares that same target (see [translate]), so this asks once
+     * per tap rather than needing to know which card it came from.
+     */
+    private fun speak(text: String) {
+        if (text.isBlank() || text == "…") return
+        val engine = tts
+        if (engine == null || !ttsReady) {
+            Toast.makeText(this, R.string.translation_speak_unavailable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val locale = selectedTarget?.code?.let { ttsLocaleFor(engine, it) }
+        if (locale == null) {
+            Toast.makeText(this, R.string.translation_speak_unavailable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        engine.language = locale
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "translation")
+    }
+
+    /**
+     * [code] itself if [engine] has a voice for it, otherwise
+     * [TtsVoiceFallback]'s closest-sounding substitute if [engine] has a
+     * voice for *that* — null when neither does, which [speak] shows as
+     * [R.string.translation_speak_unavailable] rather than a silent no-op.
+     */
+    private fun ttsLocaleFor(engine: TextToSpeech, code: String): java.util.Locale? {
+        val direct = java.util.Locale(code)
+        if (engine.isLanguageAvailable(direct) >= TextToSpeech.LANG_AVAILABLE) return direct
+        val fallback = TtsVoiceFallback.closestAvailable(code)?.let { java.util.Locale(it) } ?: return null
+        return fallback.takeIf { engine.isLanguageAvailable(it) >= TextToSpeech.LANG_AVAILABLE }
     }
 
     /**
