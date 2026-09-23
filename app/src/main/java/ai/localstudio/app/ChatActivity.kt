@@ -638,7 +638,7 @@ class ChatActivity : AppCompatActivity() {
                 }
                 binding.messages.scrollToPosition(adapter.itemCount - 1)
 
-                val jobs = sources.mapIndexed { index, (label, orchestrator, isLocal) ->
+                val jobs = sources.mapIndexed { index, (label, orchestrator, isLocal, hideOnFailure) ->
                     val placeholderIndex = placeholderIndexes[index]
                     async(Dispatchers.IO) {
                         val partial = MutableStateFlow<String?>(null)
@@ -705,6 +705,7 @@ class ChatActivity : AppCompatActivity() {
                         // source instead of being swallowed and rendered as
                         // just another error — the exact bug just fixed in
                         // FallbackTextRuntime for the sequential fallback path.
+                        var failed = false
                         val rendered = try {
                             val answer = kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
                                 orchestrator.handle(
@@ -721,11 +722,13 @@ class ChatActivity : AppCompatActivity() {
                             }
                             answer.text.ifBlank { getString(R.string.chat_empty_answer) }
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                            failed = true
                             container.appLog.record("GENERATION_ERROR", "$label: timeout after ${GENERATION_TIMEOUT_MS}ms")
                             withPartial(partial.value, getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000))
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Exception) {
+                            failed = true
                             container.appLog.record("GENERATION_ERROR", "$label: ${e.javaClass.simpleName}: ${e.message}")
                             withPartial(partial.value, getString(R.string.chat_compare_generic_error, e.message ?: e.toString()))
                         } finally {
@@ -736,9 +739,19 @@ class ChatActivity : AppCompatActivity() {
                             // still stop either way.
                             renderJob?.cancel()
                         }
+                        // hideOnFailure (Gemini Nano, see CompareSource's doc
+                        // comment) means a failed bubble is noise, not a
+                        // result — so the placeholder is left untouched here
+                        // (never shown with error text) and dropped in the
+                        // batch pass below, once every source has settled and
+                        // removing it can't shift another still-running
+                        // source's own placeholderIndex out from under it.
+                        val hide = failed && hideOnFailure
                         withContext(Dispatchers.Main) {
-                            adapter.update(placeholderIndex, Message.assistant(body = "**$label:**\n$rendered", details = null).copy(timestamp = startedAt))
-                            binding.messages.scrollToPosition(adapter.itemCount - 1)
+                            if (!hide) {
+                                adapter.update(placeholderIndex, Message.assistant(body = "**$label:**\n$rendered", details = null).copy(timestamp = startedAt))
+                                binding.messages.scrollToPosition(adapter.itemCount - 1)
+                            }
                             // Persisted the moment THIS source finishes, not
                             // only once every source has: a native crash in
                             // one candidate (llama.cpp, most often the local
@@ -754,9 +767,20 @@ class ChatActivity : AppCompatActivity() {
                             // shown on screen before the crash.
                             persist()
                         }
+                        hide
                     }
                 }
-                jobs.awaitAll()
+                val hideFlags = jobs.awaitAll()
+                if (hideFlags.any { it }) {
+                    withContext(Dispatchers.Main) {
+                        // Highest index first so removing one doesn't shift
+                        // the position of another not-yet-removed one.
+                        placeholderIndexes.indices.reversed().forEach { i ->
+                            if (hideFlags[i]) adapter.remove(placeholderIndexes[i])
+                        }
+                        persist()
+                    }
+                }
             } finally {
                 isGenerating = false
                 generationJob = null

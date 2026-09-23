@@ -1395,8 +1395,22 @@ class AppContainer private constructor(private val context: Context) {
      * token or waits for the full response — a cloud call is fast enough
      * end-to-end that progressive rendering only adds visual noise, while a
      * local model can take minutes and needs the incremental feedback.
+     *
+     * [hideOnFailure] is for [CloudProviders.AICORE] specifically, in both
+     * [compareCandidates] (chat) and [translationCompareCandidates]: Gemini
+     * Nano's own readiness is only knowable by actually asking it (see
+     * [aicoreCandidate]'s own doc comment) — not installed on this device,
+     * AICore's service not bound, a blank response — and unlike every other
+     * source here, that is not something explaining to the user actually
+     * helps with; a failed bubble/card for it is just noise, so the caller
+     * removes it instead of showing the error.
      */
-    data class CompareSource(val label: String, val orchestrator: Orchestrator, val isLocal: Boolean)
+    data class CompareSource(
+        val label: String,
+        val orchestrator: Orchestrator,
+        val isLocal: Boolean,
+        val hideOnFailure: Boolean = false,
+    )
 
     fun compareCandidates(): List<CompareSource> =
         enabledProviders().mapNotNull { provider ->
@@ -1454,7 +1468,7 @@ class AppContainer private constructor(private val context: Context) {
                 compareOrchestrators[provider.id] = it
                 compareSignatures[provider.id] = signature
             }
-            CompareSource(label, orchestrator, isLocalOnly)
+            CompareSource(label, orchestrator, isLocalOnly, hideOnFailure = provider.id == CloudProviders.AICORE.id)
         }
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
@@ -1569,7 +1583,7 @@ class AppContainer private constructor(private val context: Context) {
                 translationCompareOrchestrators[provider.id] = it
                 translationCompareSignatures[provider.id] = signature
             }
-            CompareSource(label, orchestrator, isLocalOnly)
+            CompareSource(label, orchestrator, isLocalOnly, hideOnFailure = provider.id == CloudProviders.AICORE.id)
         }
     }
 

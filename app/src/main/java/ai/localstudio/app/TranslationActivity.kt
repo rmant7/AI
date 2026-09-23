@@ -407,10 +407,22 @@ class TranslationActivity : AppCompatActivity() {
                                     "TRANSLATE",
                                     "${translationSource.label}: FAILED: ${error.javaClass.simpleName}: ${error.message}",
                                 )
-                                cards[index].resultText.text = if (error is kotlinx.coroutines.TimeoutCancellationException) {
-                                    getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
+                                // A source the caller added on the user's own
+                                // behalf (Gemini Nano, forced in regardless of
+                                // Settings — see CompareSource's own doc
+                                // comment) just disappears on failure instead
+                                // of showing an error for something the user
+                                // never asked to see in the first place — not
+                                // installed on this device, AICore's service
+                                // not bound, whatever else.
+                                if (translationSource.hideOnFailure) {
+                                    binding.translationResultsContainer.removeView(cards[index].root)
                                 } else {
-                                    getString(R.string.chat_compare_generic_error, error.message ?: error.toString())
+                                    cards[index].resultText.text = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                                        getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
+                                    } else {
+                                        getString(R.string.chat_compare_generic_error, error.message ?: error.toString())
+                                    }
                                 }
                             }
                         }
