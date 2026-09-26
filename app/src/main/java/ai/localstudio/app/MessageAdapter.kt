@@ -93,6 +93,18 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.Holder>() {
     /** Index of the last message, for the placeholder bubble a streamed answer fills in — -1 when there is none yet. */
     fun lastIndex(): Int = messages.size - 1
 
+    /**
+     * Drops the message at [index] entirely — how Compare mode hides a
+     * [ai.localstudio.app.AppContainer.CompareSource] whose [ai.localstudio.app.AppContainer.CompareSource.hideOnFailure]
+     * source failed, instead of leaving an error bubble for it. Callers
+     * removing more than one index in the same pass must go highest-to-lowest
+     * so earlier indices stay valid.
+     */
+    fun remove(index: Int) {
+        messages.removeAt(index)
+        notifyItemRemoved(index)
+    }
+
     fun clear() {
         val size = messages.size
         messages.clear()

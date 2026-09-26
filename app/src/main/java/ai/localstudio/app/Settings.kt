@@ -86,6 +86,48 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putString(KEY_VOSK_MODEL, value).apply()
 
     /**
+     * Which downloaded local model [ai.localstudio.app.TranslationActivity]
+     * uses — independent of [chatModel], picked on the Models screen's
+     * Translation tab. Empty means "whichever local model chat is currently
+     * using" (see [AppContainer.translationLocalCandidate]), not "none": a
+     * fresh install still translates with whatever's already installed for
+     * chat, without a second download being required first.
+     */
+    var translationModel: String
+        get() = prefs.getString(KEY_TRANSLATION_MODEL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_TRANSLATION_MODEL, value).apply()
+
+    /**
+     * What's currently typed on the Translation screen — persisted on every
+     * keystroke so it survives a process kill (a real risk this app already
+     * has, under real memory pressure) or just navigating away to pick a
+     * different model and back, not only an in-memory Activity field that a
+     * kill would silently lose along with whatever the user had typed.
+     */
+    var translationDraftText: String
+        get() = prefs.getString(KEY_TRANSLATION_DRAFT, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_TRANSLATION_DRAFT, value).apply()
+
+    /**
+     * The last source/target language codes picked on the Translation
+     * screen — real device report: [ai.localstudio.app.TranslationActivity]'s
+     * own `selectedSource`/`selectedTarget` fields were in-memory only, so
+     * navigating to Chat and back (an Activity recreation under memory
+     * pressure, the same real risk [translationDraftText] exists for) reset
+     * the screen to its hardcoded ru -> crs default, silently discarding
+     * whatever pair — Russian -> Hebrew, in that report — was actually last
+     * in use. Empty means "never picked one yet"; the Activity's own
+     * ru/crs default still applies in that case, not here.
+     */
+    var translationSourceLang: String
+        get() = prefs.getString(KEY_TRANSLATION_SOURCE_LANG, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_TRANSLATION_SOURCE_LANG, value).apply()
+
+    var translationTargetLang: String
+        get() = prefs.getString(KEY_TRANSLATION_TARGET_LANG, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_TRANSLATION_TARGET_LANG, value).apply()
+
+    /**
      * Which engine both live-mic and file transcription in
      * [ai.localstudio.app.TranscribeActivity] actually use — set by
      * whichever of [whisperModelId]/[voskModelId] was picked last on the
@@ -263,6 +305,10 @@ class Settings(context: Context) {
         const val KEY_ASR_MODEL = "asrModel"
         const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_VOSK_MODEL = "voskModelId"
+        const val KEY_TRANSLATION_MODEL = "translationModel"
+        const val KEY_TRANSLATION_DRAFT = "translationDraftText"
+        const val KEY_TRANSLATION_SOURCE_LANG = "translationSourceLang"
+        const val KEY_TRANSLATION_TARGET_LANG = "translationTargetLang"
         const val KEY_ACTIVE_STT_ENGINE = "activeSttEngine"
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_SEMANTIC_MEMORY = "semanticMemoryEnabled"

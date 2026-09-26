@@ -150,9 +150,22 @@ jobs:
           for tag in $(gh release list --limit 500 --json tagName --jq '.[].tagName' | grep -E '^(apk-[0-9]+|rolling)$' || true); do
             gh release delete "$tag" -y --cleanup-tag || echo "::warning::could not delete old release $tag, continuing"
           done
+          # --target: without it, `gh release create` points a brand-new tag
+          # at the repository's default branch (main) rather than the commit
+          # actually built — harmless for main-branch builds (they're the
+          # same ref) but wrong for every claude/** branch build, which is
+          # most of them: the "rolling" tag silently pointed at whatever
+          # main's HEAD happened to be, while this release's own notes
+          # (correctly) named the real commit — a real device report caught
+          # this as the release page showing tag "rolling" -> an old main
+          # commit right next to "Debug build of <the actual new commit>" in
+          # the same release, which is exactly the kind of mismatch that
+          # makes "which commit is this APK actually built from" unanswerable
+          # by looking at the tag.
           gh release create rolling "${{ steps.apk.outputs.path }}" \
             --title "Local AI Studio debug APK (latest — build ${GITHUB_RUN_NUMBER})" \
             --notes "Debug build of ${GITHUB_SHA}. Устанавливается без подписи релиза; runtime по умолчанию — встроенный демонстрационный, адрес OpenAI-совместимого сервера задаётся в настройках." \
+            --target "${GITHUB_SHA}" \
             --prerelease
 
   # An APK that compiles is not the same as an app that runs. This launches the

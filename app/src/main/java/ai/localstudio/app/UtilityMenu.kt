@@ -17,10 +17,13 @@ import androidx.appcompat.app.AppCompatActivity
  * [handle] from `onOptionsItemSelected`, so navigating between any two of
  * them is one tap, not a round trip through Chat.
  *
- * Deliberately not [ChatActivity] itself — that screen's own menu already
- * carries every one of these entries plus chat-specific ones (Memory,
- * Share, Clear), and mixing this object into it would just mean the same
- * item added twice.
+ * [ChatActivity] uses this too, alongside its own chat-specific items
+ * (Memory, Share, Clear, and a History item of its own — see [inflate]'s
+ * `skip` parameter). Used to maintain its own separate, hand-written copy
+ * of this same list instead; that drifted out of sync with this one in
+ * practice (Log ended up nowhere near last there, unlike everywhere else)
+ * simply because a new entry added here had no way to also update Chat's
+ * copy short of remembering to do it by hand every time.
  */
 object UtilityMenu {
     private data class Entry(val id: Int, val titleRes: Int, val activityClass: Class<out AppCompatActivity>)
@@ -32,19 +35,39 @@ object UtilityMenu {
     // Menu.add "order" value below, so Android falls back to insertion
     // order) — Log goes last, same position it held before Transcribe and
     // Benchmark were added after History instead of after it.
+    //
+    // Chat itself is an entry here too, first in the list — real device
+    // report: every *other* screen could jump straight to any other, but
+    // none of them could jump back to the actual ongoing conversation
+    // without the system Back button, since [inflate] already excludes
+    // whichever screen is showing it, and Chat had never been in this list
+    // at all to be excluded from. [inflate]'s own `activity::class.java`
+    // check still keeps it out of [ChatActivity]'s own menu the same way
+    // every other entry stays out of its own screen's menu.
     private val ENTRIES = listOf(
+        Entry(9000, R.string.menu_chat, ChatActivity::class.java),
         Entry(9001, R.string.menu_models, ModelsActivity::class.java),
         Entry(9002, R.string.menu_files, FilesActivity::class.java),
         Entry(9003, R.string.menu_settings, SettingsActivity::class.java),
         Entry(9004, R.string.menu_history, HistoryActivity::class.java),
         Entry(9006, R.string.menu_transcribe, TranscribeActivity::class.java),
         Entry(9007, R.string.menu_benchmark, BenchmarkActivity::class.java),
+        Entry(9008, R.string.menu_translation, TranslationActivity::class.java),
+        Entry(9009, R.string.menu_phrasebook, PhrasebookActivity::class.java),
         Entry(9005, R.string.menu_log, LogActivity::class.java),
     )
 
-    /** Adds every entry except the one for [activity]'s own screen — no point offering "go to where you already are." */
-    fun inflate(activity: AppCompatActivity, menu: Menu) {
-        ENTRIES.filter { it.activityClass != activity::class.java }
+    /**
+     * Adds every entry except the one for [activity]'s own screen (no point
+     * offering "go to where you already are") and any in [skip] — for
+     * [ChatActivity]'s History item specifically, which needs a result back
+     * (which conversation got picked, or deleted) that a plain
+     * [handle]-driven `startActivity` has no way to deliver. [ChatActivity]
+     * adds its own History item instead, so it stays in the same menu
+     * without the entry this function would otherwise add colliding with it.
+     */
+    fun inflate(activity: AppCompatActivity, menu: Menu, skip: Set<Class<out AppCompatActivity>> = emptySet()) {
+        ENTRIES.filter { it.activityClass != activity::class.java && it.activityClass !in skip }
             .forEach { entry -> menu.add(0, entry.id, 0, entry.titleRes) }
     }
 

@@ -22,6 +22,7 @@
     <string name="settings_compare_mode_hint">If several sources are enabled, the request is sent to all of them at once and answers appear as they arrive. Normally (off) — local model first, cloud only if it fails.</string>
     <string name="chat_compare_waiting">Waiting for answers…</string>
     <string name="menu_settings">Settings</string>
+    <string name="menu_chat">Chat</string>
     <string name="menu_models">Models</string>
     <string name="menu_clear">New chat</string>
     <string name="menu_history">Chat history</string>
@@ -29,6 +30,8 @@
     <string name="menu_log">Error log</string>
     <string name="menu_transcribe">Audio</string>
     <string name="menu_benchmark">STT Benchmark</string>
+    <string name="menu_translation">Translation</string>
+    <string name="menu_phrasebook">Phrasebook</string>
 
     <string name="benchmark_hint">Picks a folder of audio files and runs every registered speech-to-text backend against every file, so their speed and output can be compared on identical input. See docs/16-stt-benchmark.md.</string>
     <string name="benchmark_pick_folder">Pick folder</string>
@@ -145,7 +148,6 @@
     <string name="settings_download_policy_ask_every_time">Ask every time</string>
     <string name="settings_auto_download">Download recommended models automatically</string>
     <string name="settings_auto_download_hint">Right now, this only applies to the semantic-memory embedding model — it downloads itself in the background once memory is enabled. A manual tap on Download is never affected by this.</string>
-    <string name="settings_section_advanced">Advanced</string>
     <string name="settings_whisper_installed">Installed: %1$s</string>
     <string name="settings_whisper_none">Not installed</string>
     <string name="settings_whisper_error">Error: %1$s</string>
@@ -157,8 +159,7 @@
     <string name="settings_language_en">English</string>
     <string name="settings_language_ru">Русский</string>
     <string name="settings_provider">Model provider</string>
-    <string name="settings_provider_enabled">Enable as an answer source</string>
-    <string name="settings_provider_enabled_help">You can enable several at once — e.g. a local model and Gemini. The router tries the local model first (if enabled); if it doesn\'t respond or fails, it automatically tries the next enabled source instead of showing an error.</string>
+    <string name="settings_provider_enabled_help">Check a provider to use it as an answer source — you can check several at once, e.g. a local model and Gemini. The router tries them in the order below; if one doesn\'t respond or fails, it automatically tries the next checked one instead of showing an error. The provider you last tapped is the one shown below for editing its endpoint, key or model — unchecking it again keeps it shown, so you can still edit it while it\'s off.</string>
     <string name="settings_active_sources">Active sources: %1$s</string>
     <string name="settings_no_sources">No sources selected — using demo mode</string>
     <string name="settings_endpoint">Server address</string>
@@ -190,6 +191,7 @@
     <string name="models_category_text">Chat</string>
     <string name="models_category_voice">Voice</string>
     <string name="models_category_embedding">Embedding</string>
+    <string name="models_category_translation">Translation</string>
     <string name="embed_status_loaded">Loaded ✓</string>
     <string name="embed_status_memory_off">Not loaded — Long-term memory is off (Memory settings)</string>
     <string name="embed_status_semantic_off">Not loaded — Semantic retrieval is off (Memory settings)</string>
@@ -206,22 +208,21 @@
     <string name="download_confirm_message_ask">Downloads are set to ask every time (Settings → Downloads). Start this one now?</string>
     <string name="model_delete">Delete</string>
     <string name="model_cancel">Cancel</string>
+    <string name="model_pause">Pause</string>
+    <string name="model_resume">Resume</string>
     <string name="model_use">Use</string>
     <string name="model_installed">Installed</string>
     <string name="model_native_missing">Local runtime isn\'t available for this device</string>
     <string name="model_details">Details</string>
     <string name="model_retry">Retry</string>
     <string name="models_custom_title">Custom model from Hugging Face</string>
-    <string name="models_custom_hint">Enter a repo like owner/repo that contains a .gguf file — the app will pick a suitable quantization on its own.</string>
+    <string name="models_custom_hint">Enter a repo like owner/repo (or paste its huggingface.co link) that contains a .gguf file — the app will pick a suitable quantization on its own.</string>
     <string name="models_custom_add">Add</string>
     <string name="models_custom_input_hint">owner/repo with a GGUF file</string>
     <string name="models_custom_bad_format">Expected the format owner/repo</string>
     <string name="models_orphans_title">Unknown files</string>
     <string name="models_orphans_subtitle">Found %1$d files, ~%2$s total. The current app version doesn\'t use them — likely left over from another version or development branch.</string>
     <string name="models_orphans_delete">Delete (%1$s)</string>
-    <string name="models_experimental_embeddings_title">Experimental: embedding models</string>
-    <string name="models_experimental_embeddings_subtitle">Manual download and sanity check for candidate memory-search embedding models — not needed for ordinary use. Base already loads automatically for real memory search (see Memory); this is for verifying it, or a future candidate, by hand.</string>
-    <string name="models_experimental_embeddings_open">Open</string>
     <string name="embed_screen_title">Experimental embedding models</string>
     <string name="embed_screen_explainer">Downloads and checks a candidate embedding model for semantic memory search. These models are never used for chat and are not added to the model catalog automatically — download one, tap Test, and check the numbers below before deciding whether it\'s any good.</string>
     <string name="embed_test">Test</string>
@@ -230,9 +231,6 @@
     <string name="embed_result_ok">✓ similar scored higher than dissimilar — looks sensible</string>
     <string name="embed_result_suspicious">⚠ dissimilar scored as high or higher — check pooling mode and query/passage prefixes</string>
     <string name="embed_result_error">Error: %1$s</string>
-    <string name="aicore_settings_title">Experimental: Gemini Nano (AICore)</string>
-    <string name="aicore_settings_subtitle">Manual smoke test for the on-device Gemini Nano model via AICore/ML Kit — not used by chat or memory yet. See docs/04-runtime.md.</string>
-    <string name="aicore_settings_open">Open</string>
     <string name="aicore_screen_title">Gemini Nano (AICore) test</string>
     <string name="aicore_screen_explainer">Checks whether Gemini Nano is reachable on this device via AICore, downloads it if needed, and lets you send it one test prompt. Nothing here is wired into chat or memory extraction — see docs/04-runtime.md for why this exists and what it\'s meant to answer.</string>
     <string name="aicore_check_status">Check status</string>
@@ -256,8 +254,20 @@
     <string name="models_vosk_header">Vosk — genuinely streaming, an alternative to Whisper for both live mic and file transcription</string>
     <string name="models_vosk_note">Vosk models work fully offline once downloaded. \"Use\" makes Vosk the active engine for both the live-mic section and file transcription on the Transcribe screen — see docs/14-vosk-spike.md. Switching back to a Whisper model does the same for Whisper; each engine still remembers its own last pick.</string>
     <string name="models_switched_chat">Chat switched to %1$s</string>
+    <string name="models_switched_translation">Translation now uses %1$s</string>
+    <string name="models_translation_aicore_header">On-device, no download</string>
+    <string name="models_translation_aicore_note">Google Gemini Nano, if this device has it — nothing to fetch or store, availability is discovered the first time it\'s actually asked to translate.</string>
+    <string name="models_translation_aicore_subtitle">Gemini Nano via AICore · availability varies by device</string>
+    <string name="models_translation_specialized_header">Specialized translation models</string>
+    <string name="models_translation_specialized_note">Trained for translation specifically, not prompted like a chat model — supports many languages including low-resource ones. New native code in this app (encoder-decoder inference); flag anything that looks wrong via Error log.</string>
+    <string name="models_translation_note">A general chat model, prompted to translate instead — works for common languages but has seen little of a low-resource one like Seychellois Creole. Independent of the chat model above: pick a smaller, faster one here if you want, without changing what chat answers with.</string>
+    <string name="note_madlad400_3b">Google MADLAD-400: 450+ languages. ~1.65GB.</string>
+    <string name="note_madlad400_7b">Google MADLAD-400: 7B, 417+ languages. Needs a high-RAM device.</string>
+    <string name="note_madlad400_10b">Google MADLAD-400: 10B, 417+ languages. Needs a high-RAM device.</string>
+    <string name="note_translategemma_4b">Gemma 4B fine-tuned for translation — a chat model, not an encoder-decoder like MADLAD-400. Unverified: added without checking its exact language coverage.</string>
     <string name="models_switched_voice">Voice input switched to %1$s</string>
     <string name="model_state_installed">Installed</string>
+    <string name="model_state_paused">Paused: %1$s downloaded</string>
     <string name="model_state_resolving">Looking for file: %1$s…</string>
     <string name="model_state_error">Error: %1$s</string>
     <string name="model_state_wait_other">Wait for the current download to finish</string>
@@ -267,6 +277,7 @@
     <string name="model_fit_too_large">very large</string>
     <string name="model_catalog_stale">⚠ source unavailable (checked at startup)</string>
     <string name="model_ram_warning">This model exceeds the memory budget for your device. The system will most likely force-close the app while generating a response — with no error message, it will just close. Continue anyway?</string>
+    <string name="model_ram_warning_numbers">Estimated need: ~%1$s. Memory budget right now (incl. free RAM): ~%2$s.</string>
     <string name="model_ram_warning_continue">Use it anyway</string>
     <string name="dialog_ok">Got it</string>
     <string name="dialog_cancel">Cancel</string>
@@ -349,6 +360,9 @@
     <string name="transcribe_notification_channel">File transcription</string>
     <string name="transcribe_notification_title">Transcribing</string>
     <string name="transcribe_notification_running">Transcription running…</string>
+    <string name="generation_notification_channel">Generation</string>
+    <string name="generation_notification_title">Generating a response</string>
+    <string name="generation_notification_running">Keeping the model running while the screen is off or the app is in the background…</string>
     <string name="benchmark_notification_channel">STT Benchmark</string>
     <string name="benchmark_notification_title">Benchmark running</string>
     <string name="benchmark_notification_running">Comparing STT backends…</string>
@@ -382,6 +396,7 @@
     <string name="note_llama_3_1_8b">A classic; holds up well in long conversations.</string>
 
     <string name="model_exceeds_ram_budget">exceeds memory budget</string>
+    <string name="model_loaded_now">loaded in RAM now</string>
     <string name="download_progress_label">%1$s: %2$s of %3$s</string>
     <string name="device_ram_line">RAM: %1$s total, %2$s free</string>
     <string name="device_budget_line">Model budget: %1$s (%2$d%% RAM)</string>
@@ -409,4 +424,37 @@
     <string name="chat_default_file_name">file</string>
     <string name="chat_default_image_name">image</string>
     <string name="error_could_not_decode_image">Couldn\'t decode the image</string>
+
+    <!-- Translation screen: prompts the currently selected chat model to
+         translate, rather than running a dedicated MT model — see
+         TranslationActivity's own doc comment for why. -->
+    <string name="translation_swap">Swap languages</string>
+    <string name="translation_change_model">Change</string>
+    <string name="translation_crs_caveat">Seychellois Creole is low-resource — treat this as a rough draft. For pre-checked phrases, see Phrasebook.</string>
+    <string name="translation_no_model">No local model installed. Open Models → Translation to download one.</string>
+    <string name="translation_offer_download">%1$s isn\'t downloaded yet. Download it now (~1.65GB) and use it for this translation once it\'s ready?</string>
+    <string name="translation_input_hint">Text to translate</string>
+    <string name="translation_translate">Translate</string>
+    <string name="translation_copy">Copy translation</string>
+    <string name="translation_speak">Speak translation</string>
+    <string name="translation_speak_unavailable">No voice available for this language</string>
+    <string name="translation_copied">Copied</string>
+    <string name="translation_same_language">Source and target language are the same</string>
+    <string name="translation_model_note">Model: %1$s</string>
+    <string name="translation_model_note_none">No model installed</string>
+    <string name="translation_source_hint">Translate from</string>
+    <string name="translation_target_hint">Translate to</string>
+    <string name="translation_no_language">Pick both languages first</string>
+
+    <!-- Phrasebook screen: a fixed, pre-checked set of situational phrases —
+         see PhrasebookActivity's own doc comment and the pilot data at
+         app/src/main/assets/phrasebook_crs.json. -->
+    <string name="phrasebook_situation_basics">Basics</string>
+    <string name="phrasebook_situation_taxi">Taxi</string>
+    <string name="phrasebook_situation_travel">Getting around</string>
+    <string name="phrasebook_situation_food">Food</string>
+    <string name="phrasebook_situation_shopping">Shopping</string>
+    <string name="phrasebook_badge_verified">checked</string>
+    <string name="phrasebook_badge_unverified">unverified</string>
+    <string name="phrasebook_load_failed">Couldn\'t load the phrasebook. See Error log for details.</string>
 </resources>

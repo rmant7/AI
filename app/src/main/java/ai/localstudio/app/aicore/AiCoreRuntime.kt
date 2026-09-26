@@ -143,8 +143,33 @@ private class AiCoreTextModel(
             outcome.fold(
                 onSuccess = { text ->
                     log("AICORE_GENERATE", "$modelId: done in ${System.currentTimeMillis() - start}ms, ${text.length} chars")
-                    trySend(text)
-                    close()
+                    // Real device report: repeatedly, on a long chat prompt
+                    // (Compare mode's full assembled context, several
+                    // thousand characters), the SDK call "succeeded" with a
+                    // blank candidate — no exception, nothing to fall back
+                    // from, just an empty bubble under "Ответ от: Gemini
+                    // Nano (AICore)" that reads as a real, deliberately
+                    // silent answer. Most likely cause: this candidate's
+                    // context window isn't sized for Gemini Nano's actual
+                    // on-device limit at all right now (AppContainer routes
+                    // any non-llama.cpp candidate, AICore included, through
+                    // CLOUD_CONTEXT_WINDOW_TOKENS — 32,000, sized for a real
+                    // network API — rather than something scoped to what the
+                    // Prompt API can actually take), but whatever the exact
+                    // cause, a blank result is never a real answer worth
+                    // showing as one. Treated as a failure here is what lets
+                    // FallbackTextRuntime move on to the next candidate
+                    // instead of silently stopping at nothing.
+                    if (text.isBlank()) {
+                        val reason = "Gemini Nano (AICore) returned an empty answer " +
+                            "(likely: this prompt is longer than it can actually handle) — " +
+                            "pick a different model in Settings instead."
+                        log("AICORE_GENERATE", "$modelId: FAILED — blank response")
+                        close(ModelLoadException(reason))
+                    } else {
+                        trySend(text)
+                        close()
+                    }
                 },
                 onFailure = { error ->
                     if (error is CancellationException) {

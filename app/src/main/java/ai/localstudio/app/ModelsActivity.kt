@@ -28,6 +28,7 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
+import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.app.vosk.VoskDownloadState
 import ai.localstudio.app.vosk.VoskModelSeed
 import ai.localstudio.app.vosk.VoskModelStore
@@ -67,7 +68,7 @@ class ModelsActivity : AppCompatActivity() {
      * choose between" framing this tab exists to avoid: nothing here ever
      * changes [Settings.chatModel].
      */
-    enum class Category { TEXT, VOICE, EMBEDDING }
+    enum class Category { TEXT, VOICE, EMBEDDING, TRANSLATION }
 
     private lateinit var binding: ActivityModelsBinding
     private lateinit var container: AppContainer
@@ -104,6 +105,10 @@ class ModelsActivity : AppCompatActivity() {
                 category = Category.EMBEDDING
                 binding.categoryToggle.check(R.id.categoryEmbedding)
             }
+            Category.TRANSLATION.name -> {
+                category = Category.TRANSLATION
+                binding.categoryToggle.check(R.id.categoryTranslation)
+            }
         }
 
         binding.categoryToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
@@ -111,9 +116,20 @@ class ModelsActivity : AppCompatActivity() {
             category = when (checkedId) {
                 R.id.categoryVoice -> Category.VOICE
                 R.id.categoryEmbedding -> Category.EMBEDDING
+                R.id.categoryTranslation -> Category.TRANSLATION
                 else -> Category.TEXT
             }
             render()
+            // Real device report: switching to Translation landed scrolled
+            // to wherever the previously-shown category (Text, with its own
+            // much longer general chat-model list) happened to leave the
+            // RecyclerView, well past the specialized MADLAD-400 section
+            // this tab actually leads with — a plain notifyDataSetChanged()
+            // (inside render(), via DiffUtil) never resets scroll position
+            // on its own. Every render() from here on (a download's own
+            // progress ticking, for one) should still leave scroll alone;
+            // this only fires on an actual tab switch.
+            binding.models.scrollToPosition(0)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -179,10 +195,10 @@ class ModelsActivity : AppCompatActivity() {
      * would have picked a smaller model had they known.
      */
     private fun useLocally(seed: LocalModelSeed) {
-        if (!fitsRamBudget(seed, container.device)) {
+        if (!container.device.fitsBudget(seed.approxSizeBytes)) {
             AlertDialog.Builder(this)
                 .setTitle(seed.title)
-                .setMessage(R.string.model_ram_warning)
+                .setMessage(ramWarningMessage(seed.approxSizeBytes))
                 .setPositiveButton(R.string.model_ram_warning_continue) { _, _ -> switchToLocal(seed) }
                 .setNegativeButton(R.string.dialog_cancel, null)
                 .show()
@@ -191,15 +207,96 @@ class ModelsActivity : AppCompatActivity() {
         switchToLocal(seed)
     }
 
+    private fun ramWarningMessage(approxSizeBytes: Long): String {
+        val estimate = approxSizeBytes * DeviceProfile.ESTIMATE_NUMERATOR / DeviceProfile.ESTIMATE_DENOMINATOR
+        return getString(R.string.model_ram_warning) + "\n\n" +
+            getString(R.string.model_ram_warning_numbers, size(estimate), size(container.device.usableRamBytes))
+    }
+
     private fun switchToLocal(seed: LocalModelSeed) {
+        logModelSwitch("chat", seed.title, seed.approxSizeBytes)
         container.settings.providerId = CloudProviders.LOCAL.id
         container.settings.chatModel = seed.id
         Toast.makeText(this, getString(R.string.models_switched_chat, seed.title), Toast.LENGTH_SHORT).show()
         render()
     }
 
-    private fun fitsRamBudget(seed: LocalModelSeed, device: DeviceProfile): Boolean =
-        seed.approxSizeBytes == 0L || seed.approxSizeBytes * 13 / 10 <= device.usableRamBytes
+    /**
+     * Real device report: a 9B chat model (~5.5 GB on disk) switched to for
+     * translation with no warning at all — unlike [useLocally] above, this
+     * used to write [Settings.translationModel] outright — then failed the
+     * first time it was actually asked to translate, deep inside
+     * [ai.localstudio.core.registry.SuitabilityScorer]'s own RAM rejection,
+     * reading as "no model" (see [TranslationActivity.translate]'s own
+     * comment on that exact exception). Same confirm-before-switching gate
+     * [useLocally] already has, so the warning lands at the moment a smaller
+     * model could still be picked instead, not after a confusing failure.
+     */
+    private fun logModelSwitch(purpose: String, title: String, approxSizeBytes: Long) {
+        val device = container.device
+        container.appLog.record(
+            "MODEL_SWITCH",
+            "$purpose: $title — size=" +
+                (if (approxSizeBytes > 0) size(approxSizeBytes) else "n/a") +
+                " fitsBudget=${device.fitsBudget(approxSizeBytes)} usableRamBudget=${size(device.usableRamBytes)} — " +
+                AppContainer.currentMemoryDiagnostics(this),
+        )
+    }
+
+    // ── Translation model ─────────────────────────────────────────────────
+    //
+    // Three kinds of candidate, all picked the same way (tap "Use", stored in
+    // [Settings.translationModel]) but fetched/run differently: [TranslationModels]
+    // (a specialized T5 GGUF), [LocalModels] (an ordinary chat GGUF prompted
+    // for the task), and AICore/Gemini Nano — the last one shares
+    // [AppContainer.downloads] with nothing, since there is no file to fetch;
+    // it is either available on this device or it isn't, discovered only
+    // when actually asked (see [AppContainer.translationLocalCandidate]'s own
+    // doc comment). What this tab adds over just using the chat model as-is:
+    // the choice is independent of [Settings.chatModel] — pick a different
+    // model (or Gemini Nano) for translation without changing what chat
+    // answers with.
+
+    private fun onTranslationPrimary(seed: LocalModelSeed) {
+        when (container.downloads.stateOf(seed)) {
+            is DownloadState.Installed -> useForTranslationLocal(seed)
+            is DownloadState.Running, is DownloadState.Resolving -> container.downloads.cancel(seed)
+            else -> NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
+        }
+    }
+
+    /** Same confirm-before-switching gate [useLocally] has — see [logModelSwitch]'s own comment. */
+    private fun useForTranslationLocal(seed: LocalModelSeed) {
+        if (!container.device.fitsBudget(seed.approxSizeBytes)) {
+            AlertDialog.Builder(this)
+                .setTitle(seed.title)
+                .setMessage(ramWarningMessage(seed.approxSizeBytes))
+                .setPositiveButton(R.string.model_ram_warning_continue) { _, _ ->
+                    useForTranslation(seed.id, seed.title, seed.approxSizeBytes)
+                }
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .show()
+            return
+        }
+        useForTranslation(seed.id, seed.title, seed.approxSizeBytes)
+    }
+
+    private fun onTranslationSecondary(seed: LocalModelSeed) {
+        when (val state = container.downloads.stateOf(seed)) {
+            is DownloadState.Failed -> showDetails(seed.title, state.message)
+            else -> {
+                container.downloads.delete(seed)
+                render()
+            }
+        }
+    }
+
+    private fun useForTranslation(modelId: String, title: String, approxSizeBytes: Long = 0L) {
+        logModelSwitch("translation", title, approxSizeBytes)
+        container.settings.translationModel = modelId
+        Toast.makeText(this, getString(R.string.models_switched_translation, title), Toast.LENGTH_SHORT).show()
+        render()
+    }
 
     // ── Voice models ───────────────────────────────────────────────────────
 
@@ -222,6 +319,7 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun useForVoice(seed: WhisperModelSeed) {
+        logModelSwitch("voice", seed.title, seed.approxSizeBytes)
         container.settings.whisperModelId = seed.id
         container.settings.activeSttEngine = AsrEngineType.WHISPER
         Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
@@ -249,6 +347,7 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun useForVosk(seed: VoskModelSeed) {
+        logModelSwitch("voice", seed.title, seed.approxSizeBytes)
         container.settings.voskModelId = seed.id
         container.settings.activeSttEngine = AsrEngineType.VOSK
         Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
@@ -273,6 +372,7 @@ class ModelsActivity : AppCompatActivity() {
                 Category.VOICE -> voiceRows(device)
                 Category.EMBEDDING -> embeddingRows()
                 Category.TEXT -> textRows(device)
+                Category.TRANSLATION -> translationRows(device)
             },
         )
     }
@@ -283,11 +383,41 @@ class ModelsActivity : AppCompatActivity() {
 
         val freshness = container.catalogFreshness.cached()
 
-        (LocalModels.SEEDS + customSeeds).forEach { seed ->
+        // Already-resident models first (an actual answer, right now, with
+        // no load to wait through or risk failing), then models that merely
+        // fit the budget, over-budget ones last — sortedWith is stable, so
+        // within each of those three groups the catalog's own order still
+        // holds. Real device report: several models showing "Recommended"
+        // would still refuse to load once the RAM budget was turned down,
+        // scattered through the list with no way to tell which ones were
+        // actually pickable without opening each in turn.
+        val sortedSeeds = (LocalModels.SEEDS + customSeeds).sortedWith(
+            compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
+                .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
+        )
+        sortedSeeds.forEach { seed ->
             val state = container.downloads.stateOf(seed)
+            val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
+            // Real device report: the ✓ (selected) mark reads as "this is
+            // using RAM right now" — it never meant that, only "this is what
+            // Settings points to". isModelResident actually answers "using
+            // RAM right now", separately from selected, since a model can be
+            // selected but evicted (translation freed for a chat load, or
+            // vice versa), or resident-and-idle without being the current
+            // selection at all.
+            val isLoadedNow = container.isModelResident(seed.id)
+            // Real device report: settings.chatModel kept pointing at a model
+            // that doesn't fit the budget (chosen anyway through the warning
+            // dialog, or before the budget was turned down) — the row showed
+            // its ✓ and "Installed" the same as a model that actually works,
+            // even though every real attempt to use it fails on load with
+            // "Not enough free RAM". requiring fitsBudget here is what makes
+            // the checkmark mean "this is what will actually answer", not
+            // just "this is what Settings happens to point to" — tapping Use
+            // again re-shows the warning and, once accepted, still ends up
+            // right back here, since nothing about the RAM budget changed.
             val selected = container.settings.providerId == CloudProviders.LOCAL.id &&
-                container.settings.chatModel == seed.id
-            val fitsBudget = fitsRamBudget(seed, device)
+                container.settings.chatModel == seed.id && fitsBudget
             // Checked at the last app launch, not at render time — this is
             // what "недоступен" means below: at least one source 404'd or
             // was gated the last time this catalogue was refreshed, before
@@ -307,17 +437,20 @@ class ModelsActivity : AppCompatActivity() {
                         if (totalApproxBytes > 0) append(" · ~${size(totalApproxBytes)}")
                         append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
                         if (!fitsBudget) append(" · ").append(getString(R.string.model_exceeds_ram_budget))
+                        if (isLoadedNow) append(" · ").append(getString(R.string.model_loaded_now))
                         if (knownStale) append(" · ").append(getString(R.string.model_catalog_stale))
                         append("\n").append(seed.resolvedNote(this@ModelsActivity))
                     },
                     selected = selected,
                     status = textStatus(state, container.modelStore.installedSize(seed)),
-                    progress = (state as? DownloadState.Running)?.progress?.fraction,
+                    progress = downloadProgress(state, seed),
                     indeterminate = state is DownloadState.Resolving,
                     primaryLabel = when (state) {
                         is DownloadState.Installed ->
                             getString(if (selected) R.string.model_installed else R.string.model_use)
-                        is DownloadState.Running, is DownloadState.Resolving -> getString(R.string.model_cancel)
+                        is DownloadState.Running -> getString(R.string.model_pause)
+                        is DownloadState.Paused -> getString(R.string.model_resume)
+                        is DownloadState.Resolving -> getString(R.string.model_cancel)
                         is DownloadState.Failed -> getString(R.string.model_retry)
                         DownloadState.Idle -> getString(R.string.model_download)
                     },
@@ -325,10 +458,13 @@ class ModelsActivity : AppCompatActivity() {
                     secondaryLabel = when (state) {
                         is DownloadState.Failed -> getString(R.string.model_details)
                         is DownloadState.Installed -> getString(R.string.model_delete)
+                        is DownloadState.Paused -> getString(R.string.model_delete)
                         else -> null
                     },
                     onPrimary = { onTextPrimary(seed) },
                     onSecondary = { onTextSecondary(seed) },
+                    warnsOverBudget = !fitsBudget,
+                    loadedNow = isLoadedNow,
                 ),
             )
         }
@@ -340,7 +476,7 @@ class ModelsActivity : AppCompatActivity() {
         // or versions never touches app-private storage on its own, so
         // without this such a file just sits there, invisible and
         // undeletable through the app, for as long as it stays installed.
-        val orphans = container.modelStore.orphanedFiles(LocalModels.SEEDS + customSeeds)
+        val orphans = container.modelStore.orphanedFiles(LocalModels.SEEDS + TranslationModels.SEEDS + customSeeds)
         if (orphans.isNotEmpty()) {
             val totalBytes = orphans.sumOf { it.length() }
             add(
@@ -361,6 +497,111 @@ class ModelsActivity : AppCompatActivity() {
         }
 
         add(Row.Custom)
+    }
+
+    private fun translationRows(device: DeviceProfile): List<Row> = buildList {
+        if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
+
+        // MADLAD-400 first: the flagship pick — an actual translation model
+        // covering hundreds of languages, not a chat model prompted for the
+        // task (see TranslationModels' own doc comment on why this is a
+        // separate catalog) — and the one TranslationActivity offers to
+        // download itself when nothing is installed yet, so it belongs
+        // where that offer points: the top of this list, not buried under
+        // AICore and the general chat models.
+        add(Row.Header(getString(R.string.models_translation_specialized_header)))
+        add(Row.Note(getString(R.string.models_translation_specialized_note)))
+        // MADLAD stays flagship-first among equals (sortedByDescending is
+        // stable) — this only ever promotes a specific quant that happens to
+        // already be resident right now, never reorders the curated
+        // size progression otherwise.
+        TranslationModels.SEEDS.sortedByDescending { container.isModelResident(it.id) }
+            .forEach { seed -> add(translationModelRow(seed, device)) }
+
+        add(Row.Header(getString(R.string.models_translation_aicore_header)))
+        add(Row.Note(getString(R.string.models_translation_aicore_note)))
+        add(aicoreTranslationRow())
+
+        add(Row.Note(getString(R.string.models_translation_note)))
+        add(Row.Header(getString(R.string.models_local_header)))
+        (LocalModels.SEEDS + customSeeds).sortedWith(
+            compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
+                .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
+        ).forEach { seed -> add(translationModelRow(seed, device)) }
+
+        add(Row.Custom)
+    }
+
+    /**
+     * Not a [Row.Model] built from a [LocalModelSeed] like every other row
+     * here — Gemini Nano is nothing this app downloads or stores itself (see
+     * [AppContainer.translationLocalCandidate]'s own doc comment), so there is
+     * no file, no [DownloadState], nothing to delete. Selecting it just
+     * writes [CloudProviders.AICORE]'s id to [Settings.translationModel];
+     * whether it is actually usable on this device is discovered the first
+     * time a translation is actually attempted, same as it already is for
+     * AICore as a chat candidate.
+     */
+    private fun aicoreTranslationRow(): Row.Model {
+        val selected = container.settings.translationModel == CloudProviders.AICORE.id
+        return Row.Model(
+            title = getString(CloudProviders.AICORE.titleRes),
+            subtitle = getString(R.string.models_translation_aicore_subtitle),
+            selected = selected,
+            status = null,
+            progress = null,
+            indeterminate = false,
+            primaryLabel = getString(if (selected) R.string.model_installed else R.string.model_use),
+            primaryEnabled = !selected,
+            secondaryLabel = null,
+            onPrimary = { useForTranslation(CloudProviders.AICORE.id, getString(CloudProviders.AICORE.titleRes)) },
+            onSecondary = {},
+        )
+    }
+
+    private fun translationModelRow(seed: LocalModelSeed, device: DeviceProfile): Row.Model {
+        val state = container.downloads.stateOf(seed)
+        val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
+        // Same reasoning as textRows' own selected — see its comment.
+        val selected = container.settings.translationModel == seed.id && fitsBudget
+        // Same reasoning as textRows' own isLoadedNow — see its comment.
+        val isLoadedNow = container.isModelResident(seed.id)
+
+        return Row.Model(
+            title = seed.title,
+            subtitle = buildString {
+                append(seed.paramsLabel)
+                if (seed.approxSizeBytes > 0) append(" · ~${size(seed.approxSizeBytes)}")
+                append(" · ").append(fitLabel(device.classifyFit(seed.approxSizeBytes.takeIf { it > 0 } ?: 1)))
+                if (!fitsBudget) append(" · ").append(getString(R.string.model_exceeds_ram_budget))
+                if (isLoadedNow) append(" · ").append(getString(R.string.model_loaded_now))
+                append("\n").append(seed.resolvedNote(this@ModelsActivity))
+            },
+            selected = selected,
+            status = textStatus(state, container.modelStore.installedSize(seed)),
+            progress = downloadProgress(state, seed),
+            indeterminate = state is DownloadState.Resolving,
+            primaryLabel = when (state) {
+                is DownloadState.Installed ->
+                    getString(if (selected) R.string.model_installed else R.string.model_use)
+                is DownloadState.Running -> getString(R.string.model_pause)
+                is DownloadState.Paused -> getString(R.string.model_resume)
+                is DownloadState.Resolving -> getString(R.string.model_cancel)
+                is DownloadState.Failed -> getString(R.string.model_retry)
+                DownloadState.Idle -> getString(R.string.model_download)
+            },
+            primaryEnabled = !(state is DownloadState.Installed && selected),
+            secondaryLabel = when (state) {
+                is DownloadState.Failed -> getString(R.string.model_details)
+                is DownloadState.Installed -> getString(R.string.model_delete)
+                is DownloadState.Paused -> getString(R.string.model_delete)
+                else -> null
+            },
+            onPrimary = { onTranslationPrimary(seed) },
+            onSecondary = { onTranslationSecondary(seed) },
+            warnsOverBudget = !fitsBudget,
+            loadedNow = isLoadedNow,
+        )
     }
 
     // ── Embedding model ────────────────────────────────────────────────────
@@ -394,7 +635,8 @@ class ModelsActivity : AppCompatActivity() {
                 indeterminate = state is ExperimentalDownloadState.Resolving,
                 primaryLabel = when (state) {
                     is ExperimentalDownloadState.Installed -> getString(R.string.model_state_installed)
-                    is ExperimentalDownloadState.Running, ExperimentalDownloadState.Resolving -> getString(R.string.model_cancel)
+                    is ExperimentalDownloadState.Running -> getString(R.string.model_pause)
+                    ExperimentalDownloadState.Resolving -> getString(R.string.model_cancel)
                     is ExperimentalDownloadState.Failed -> getString(R.string.model_retry)
                     ExperimentalDownloadState.Idle -> getString(R.string.model_download)
                 },
@@ -518,7 +760,7 @@ class ModelsActivity : AppCompatActivity() {
                     primaryLabel = when (state) {
                         is WhisperDownloadState.Installed ->
                             getString(if (selected) R.string.model_installed else R.string.model_use)
-                        is WhisperDownloadState.Running -> getString(R.string.model_cancel)
+                        is WhisperDownloadState.Running -> getString(R.string.model_pause)
                         is WhisperDownloadState.Failed -> getString(R.string.model_retry)
                         WhisperDownloadState.Idle -> getString(R.string.model_download)
                     },
@@ -571,7 +813,7 @@ class ModelsActivity : AppCompatActivity() {
                     primaryLabel = when (state) {
                         is VoskDownloadState.Installed ->
                             getString(if (selected) R.string.model_installed else R.string.model_use)
-                        is VoskDownloadState.Running -> getString(R.string.model_cancel)
+                        is VoskDownloadState.Running -> getString(R.string.model_pause)
                         is VoskDownloadState.Failed -> getString(R.string.model_retry)
                         VoskDownloadState.Idle -> getString(R.string.model_download)
                     },
@@ -591,6 +833,7 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun textStatus(state: DownloadState, installedBytes: Long): String? = when (state) {
         is DownloadState.Installed -> getString(R.string.model_state_installed) + " · ${size(installedBytes)}"
+        is DownloadState.Paused -> getString(R.string.model_state_paused, size(state.partialBytes))
         is DownloadState.Resolving -> getString(R.string.model_state_resolving, state.repoId)
         is DownloadState.Running ->
             getString(
@@ -603,6 +846,20 @@ class ModelsActivity : AppCompatActivity() {
         DownloadState.Idle -> null
     }
 
+    /**
+     * [DownloadState.Running]'s own progress, or — for [DownloadState.Paused]
+     * — [LocalModelSeed.approxSizeBytes] standing in for the real total
+     * (not re-resolved until the download actually restarts), same
+     * approximation [fitLabel]/[fitsBudget] already use for this seed
+     * elsewhere on this screen.
+     */
+    private fun downloadProgress(state: DownloadState, seed: LocalModelSeed): Float? = when (state) {
+        is DownloadState.Running -> state.progress.fraction
+        is DownloadState.Paused ->
+            seed.approxSizeBytes.takeIf { it > 0 }?.let { (state.partialBytes.toFloat() / it).coerceIn(0f, 1f) }
+        else -> null
+    }
+
     private fun addCustomRepo() {
         val input = android.widget.EditText(this).apply {
             hint = getString(R.string.models_custom_input_hint)
@@ -613,8 +870,8 @@ class ModelsActivity : AppCompatActivity() {
             .setMessage(R.string.models_custom_hint)
             .setView(input)
             .setPositiveButton(R.string.model_download) { _, _ ->
-                val repo = input.text?.toString()?.trim().orEmpty()
-                if (repo.contains('/')) {
+                val repo = normalizeRepoInput(input.text?.toString().orEmpty())
+                if (repo != null) {
                     val seed = LocalModels.custom(repo)
                     if (customSeeds.none { it.id == seed.id }) customSeeds += seed
                     NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
@@ -625,6 +882,33 @@ class ModelsActivity : AppCompatActivity() {
             }
             .setNegativeButton(R.string.dialog_cancel, null)
             .show()
+    }
+
+    /**
+     * Accepts `owner/repo` as documented, but also whatever pasting a repo
+     * page's own address bar actually produces — real device report: a full
+     * `https://huggingface.co/owner/repo` link passed the old bare
+     * `contains('/')` check and was used as the repo id verbatim, which
+     * [HuggingFaceResolver] can't resolve (it builds its own API URL out of
+     * `owner/repo`) — the download failed with no visible error the user
+     * could connect back to what they'd typed, since [ModelDownloads] didn't
+     * log anything either (see its own `log` parameter, added alongside
+     * this). Strips a `https://`/`http://` scheme and a `huggingface.co/`
+     * host, then keeps only the first two remaining path segments — so a
+     * link to one specific file (`.../blob/main/model.gguf`) or tree
+     * (`.../tree/main`) still resolves to the repo itself, not a path
+     * [HuggingFaceResolver] would treat as a nonexistent repo. Null means
+     * still not enough there to be a repo id.
+     */
+    private fun normalizeRepoInput(raw: String): String? {
+        val stripped = raw.trim()
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .removePrefix("www.")
+            .removePrefix("huggingface.co/")
+            .trim('/')
+        val segments = stripped.split('/').filter { it.isNotBlank() }
+        return if (segments.size >= 2) "${segments[0]}/${segments[1]}" else null
     }
 
     private fun describeDevice(device: DeviceProfile) = buildString {
@@ -672,6 +956,10 @@ class ModelsActivity : AppCompatActivity() {
             val secondaryLabel: String?,
             val onPrimary: () -> Unit,
             val onSecondary: () -> Unit,
+            /** Whether this size fails [DeviceProfile.fitsBudget] — see [ModelHolder.bind]. */
+            val warnsOverBudget: Boolean = false,
+            /** Whether [AppContainer.isModelResident] says this model is actually in RAM right now — see [ModelHolder.bind]. */
+            val loadedNow: Boolean = false,
         ) : Row
     }
 
@@ -711,6 +999,7 @@ class ModelsActivity : AppCompatActivity() {
             is Row.Model -> listOf(
                 row.title, row.subtitle, row.selected, row.status, row.progress,
                 row.indeterminate, row.primaryLabel, row.primaryEnabled, row.secondaryLabel,
+                row.warnsOverBudget, row.loadedNow,
             )
             else -> row
         }
@@ -753,10 +1042,17 @@ class ModelsActivity : AppCompatActivity() {
 
     private class ModelHolder(val binding: ItemLocalModelBinding) : RecyclerView.ViewHolder(binding.root) {
 
+        // Captured once, before any row ever recolors it — a recycled
+        // ViewHolder must fall back to exactly this color for every row that
+        // doesn't warn, or a red subtitle from whichever row last warned
+        // would keep bleeding into an unrelated row reusing the same holder.
+        private val defaultSubtitleColor = binding.localSubtitle.currentTextColor
+
         fun bindCustom(onClick: () -> Unit) {
             val context = binding.root.context
             binding.localTitle.text = context.getString(R.string.models_custom_title)
             binding.localSubtitle.text = context.getString(R.string.models_custom_hint)
+            binding.localSubtitle.setTextColor(defaultSubtitleColor)
             binding.localStatus.visibility = View.GONE
             binding.localProgress.visibility = View.GONE
             binding.localSecondaryButton.visibility = View.GONE
@@ -768,6 +1064,32 @@ class ModelsActivity : AppCompatActivity() {
         fun bind(row: Row.Model) {
             binding.localTitle.text = if (row.selected) "${row.title}  ✓" else row.title
             binding.localSubtitle.text = row.subtitle
+            // A plain text suffix ("exceeds RAM budget") read as just another
+            // detail among several, easy to miss right next to a fit label
+            // that used to say "Recommended" for the same model (see
+            // DeviceProfile.classifyFit's own doc comment on that
+            // contradiction). Coloring the whole line makes a model that
+            // will refuse to load visually distinct at a glance, not just a
+            // few extra words in the middle of the same run of text.
+            //
+            // Real device report: the ✓ mark was read as "this is using RAM
+            // right now" — it only ever meant "this is Settings' current
+            // pick" (see isLoadedNow's own comment at its call sites). This
+            // is the actual "using RAM right now" signal, colored distinctly
+            // from the ✓ so the two questions ("what's configured" vs
+            // "what's actually loaded, this instant") don't collapse back
+            // into looking like the same thing again.
+            binding.localSubtitle.setTextColor(
+                when {
+                    row.loadedNow -> com.google.android.material.color.MaterialColors.getColor(
+                        binding.root, com.google.android.material.R.attr.colorPrimary, defaultSubtitleColor,
+                    )
+                    row.warnsOverBudget -> com.google.android.material.color.MaterialColors.getColor(
+                        binding.root, com.google.android.material.R.attr.colorError, defaultSubtitleColor,
+                    )
+                    else -> defaultSubtitleColor
+                },
+            )
 
             binding.localStatus.text = row.status.orEmpty()
             binding.localStatus.visibility = if (row.status.isNullOrBlank()) View.GONE else View.VISIBLE

@@ -96,6 +96,10 @@ struct Session {
     llama_context *ctx = nullptr;
     const llama_vocab *vocab = nullptr;
     std::atomic<bool> cancelled{false};
+    // What nativeLoad configured the context with — nativeGenerateT5 needs
+    // this to restore n_threads_batch after temporarily forcing it to 1 for
+    // the encoder pass (see that function's own comment for why).
+    int32_t threads = 1;
 
     // Set by nativeLoadMmproj, once, after nativeLoad — null for every model
     // without a downloaded projector file, which is every model until a
@@ -499,6 +503,23 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     contextParams.n_batch = BATCH_SIZE;
     contextParams.n_threads = threads;
     contextParams.n_threads_batch = threads;
+    // llama_context_default_params() leaves this false — fine for every
+    // decoder-only chat model this function loads, but an encoder-decoder
+    // (T5-family, MADLAD-400) needs its own encoder pass's output actually
+    // extracted: llama_encode()'s T5 branch only populates the
+    // cross-attention state (cross.v_embd / cross.n_enc / cross.seq_ids_enc)
+    // the decoder later reads from when its embd output tensor is non-null,
+    // which requires this flag. Left false, that branch is silently skipped
+    // — the decoder then cross-attends against empty/stale state, which is
+    // exactly the kind of invariant a ggml assertion trips on (observed on a
+    // real device as SIGILL/ILL_ILLOPC, not a plain segfault). Checked on
+    // the model rather than nativeHasEncoder(handle) because the context —
+    // and therefore a handle — doesn't exist yet at this point; scoped to
+    // T5 models only since every other caller of nativeLoad doesn't need
+    // the extra extraction cost.
+    if (llama_model_has_encoder(model)) {
+        contextParams.embeddings = true;
+    }
 
     llama_context *ctx = llama_init_from_model(model, contextParams);
     if (ctx == nullptr) {
@@ -511,6 +532,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     session->model = model;
     session->ctx = ctx;
     session->vocab = llama_model_get_vocab(model);
+    session->threads = threads;
     LOGI("loaded %s, n_ctx=%u, threads=%d", path.c_str(), llama_n_ctx(ctx), threads);
     return reinterpret_cast<jlong>(session);
   } catch (const std::exception &e) {
@@ -899,6 +921,174 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     return -10;
   } catch (...) {
     LOGE("nativeGenerate: unknown exception");
+    return -10;
+  }
+}
+
+/**
+ * True for an encoder-decoder GGUF (T5-family — MADLAD-400 is the one this
+ * app knows about, see TranslationModels.kt) loaded through [nativeLoad],
+ * false for every ordinary decoder-only chat GGUF. [LlamaCppRuntime] reads
+ * this once after loading to decide whether a turn goes through
+ * [nativeGenerate]'s chat-template path or [nativeGenerateT5]'s — feeding a
+ * decoder-only model's prompt straight to [nativeGenerateT5] would call
+ * llama_encode() on a model that has no encoder at all (undefined behaviour
+ * upstream); the reverse would run T5 through a chat template it was never
+ * trained on and produce nonsense, not an error. Cheap: reads a field
+ * already resolved at load time, no extra work over what nativeLoad did.
+ */
+JNIEXPORT jboolean JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeHasEncoder(JNIEnv *, jobject, jlong handle) {
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr || session->model == nullptr) return JNI_FALSE;
+    return llama_model_has_encoder(session->model) ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * Generation for an encoder-decoder (T5-family) model — MADLAD-400's own
+ * expected input, `<2xx> source text` with `xx` the target language code
+ * (built in Kotlin; see TranslationActivity), fed to the encoder whole, then
+ * the decoder sampled token by token the same way [nativeGenerate]'s chat
+ * path already does.
+ *
+ * Deliberately not folded into [nativeGenerate]: that function's prompt
+ * comes from [applyChatTemplate] (a chat turn) and reuses a cross-call KV
+ * prefix cache ([Session::cachedTokens]) tuned for a resent multi-turn
+ * conversation. Neither applies here — there is no chat template for T5, and
+ * a one-shot translation call has no meaningful prefix to reuse — so this is
+ * its own function with its own, much shorter, one-shot path: tokenize,
+ * [llama_encode] once, prime the decoder with its start token, then hand off
+ * to the exact same [runDecodeLoop] the chat path uses for everything after
+ * that first token. `llama_memory_seq_rm(..., -1, -1)` up front clears
+ * whatever a *previous* call on this same session left behind — encoder
+ * output and decoder KV state both — since unlike chat turns, one
+ * translation request has nothing worth carrying into the next.
+ */
+JNIEXPORT jint JNICALL
+Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateT5(
+    JNIEnv *env, jobject, jlong handle, jstring sourceText,
+    jint maxTokens, jfloat temperature, jfloat topP, jint topK, jfloat repeatPenalty,
+    jobject callback) {
+
+    auto *session = reinterpret_cast<Session *>(handle);
+    if (session == nullptr) return -1;
+    session->cancelled.store(false);
+    raiseThreadPriority();
+  try {
+    jclass callbackClass = env->GetObjectClass(callback);
+    jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
+    if (onToken == nullptr) return -2;
+
+    const std::string source = toStdString(env, sourceText);
+
+    std::vector<llama_token> tokens(source.size() + 64);
+    int32_t count = llama_tokenize(
+        session->vocab, source.c_str(), (int32_t) source.size(),
+        tokens.data(), (int32_t) tokens.size(), true, true);
+    if (count < 0) {
+        tokens.resize(-count);
+        count = llama_tokenize(
+            session->vocab, source.c_str(), (int32_t) source.size(),
+            tokens.data(), (int32_t) tokens.size(), true, true);
+    }
+    if (count <= 0) return -3;
+    tokens.resize(count);
+
+    const uint32_t contextSize = llama_n_ctx(session->ctx);
+    const uint32_t reserved = std::min<uint32_t>((uint32_t) std::max(maxTokens, 0) + 4, contextSize / 2);
+    if ((uint32_t) count + reserved >= contextSize) {
+        count = (int32_t) contextSize - (int32_t) reserved - 1;
+        if (count <= 0) return -4; // context too small to hold any source text at all
+    }
+
+    // ggml's ARM-optimized Q4_K repack GEMM kernel (ggml_gemm_q4_K_8x8_q8_K,
+    // used for MADLAD-400's quantization on a REPACK-capable CPU — see the
+    // feature line this app logs at startup) crashes (SIGILL/ILL_ILLOPC —
+    // not a plain segfault) on the tiny row counts this function is
+    // normally called with. MADLAD-400's own `<2xx> text` format tokenizes a
+    // short phrase down to a handful of tokens, and two earlier, narrower
+    // paddings (a plain multiple of 4 — the row-count assert in this
+    // kernel's portable *_generic fallback, ggml_gemm_q4_K_8x8_q8_K_generic,
+    // which is not the function actually crashing — and, separately, one
+    // thread doing the whole batch instead of several dividing it) each
+    // still crashed on a real device afterward. Neither repack.cpp nor
+    // repack.h in ggml's own source at this pinned tag even contains the
+    // optimized kernel's actual chunking logic (tensor_traits::
+    // forward_mul_mat_one_chunk isn't in either file), so its real alignment
+    // requirement is not something this app can pin down from outside it.
+    // 32 is a wide margin past the "8x8" tile size the type name itself
+    // advertises, at negligible extra cost — a T5 encoder pass this short is
+    // already the fast part of a translation. Padding the encoder batch is
+    // a call-site workaround either way, not a change to ggml itself. EOS is
+    // what padding already means at the *end* of this exact input —
+    // llama_tokenize above was called with add_special=true, so the real
+    // content already ends on one; extending that boundary marker perturbs
+    // self-attention far less than any other filler token would.
+    const int32_t paddedCount = ((count + 31) / 32) * 32;
+    if (paddedCount > count) {
+        const llama_token padToken = llama_vocab_eos(session->vocab);
+        if ((size_t) paddedCount > tokens.size()) tokens.resize(paddedCount);
+        for (int32_t i = count; i < paddedCount; i++) tokens[i] = padToken;
+    }
+
+    // No prefix to reuse across calls — see this function's own doc comment.
+    llama_memory_seq_rm(llama_get_memory(session->ctx), 0, -1, -1);
+
+    llama_batch encoderBatch = llama_batch_init(paddedCount, 0, 1);
+    for (int32_t i = 0; i < paddedCount; i++) {
+        encoderBatch.token[i] = tokens[i];
+        encoderBatch.pos[i] = i;
+        encoderBatch.n_seq_id[i] = 1;
+        encoderBatch.seq_id[i][0] = 0;
+        encoderBatch.logits[i] = false; // the encoder's own output isn't sampled
+    }
+    encoderBatch.n_tokens = paddedCount;
+    // Padding the *total* token count to a multiple of 4 (above) was not
+    // enough on its own — a real device crash trace showed the identical
+    // SIGILL in ggml_gemm_q4_K_8x8_q8_K again after that fix, in what were
+    // two different worker threads at once. ggml's CPU backend splits a
+    // multi-token batch's matmul work across session->threads worker
+    // threads (see forward_mul_mat_one_chunk — one chunk per thread), so
+    // that kernel's row-count assert is checked against each thread's own
+    // *chunk*, not the padded total; four threads dividing even a
+    // conveniently-sized batch can still each land on a chunk that isn't
+    // itself a multiple of 4. A handful of tokens gains nothing from
+    // parallelizing across threads anyway, so sidestepping the chunking
+    // entirely — one thread, one chunk, always exactly this function's own
+    // already-padded total — is more reliable than trying to predict
+    // ggml's own chunk-size arithmetic from outside it. n_threads_batch is
+    // what controls this (per llama.h: "used for prompt and batch
+    // processing"); restored right after, since this only needs to hold for
+    // the encoder call itself.
+    llama_set_n_threads(session->ctx, session->threads, 1);
+    const int32_t encodeResult = llama_encode(session->ctx, encoderBatch);
+    llama_set_n_threads(session->ctx, session->threads, session->threads);
+    llama_batch_free(encoderBatch);
+    if (encodeResult != 0) {
+        LOGE("nativeGenerateT5: encode failed (%d)", encodeResult);
+        return -5;
+    }
+
+    llama_token decoderStart = llama_model_decoder_start_token(session->model);
+    if (decoderStart < 0) decoderStart = llama_vocab_bos(session->vocab);
+    if (llama_decode(session->ctx, llama_batch_get_one(&decoderStart, 1)) != 0) {
+        LOGE("nativeGenerateT5: decoder priming failed");
+        return -6;
+    }
+
+    DecodeLoopResult result = runDecodeLoop(
+        env, session, callback, onToken, maxTokens, temperature, topP, topK, repeatPenalty,
+        /*used=*/1, contextSize);
+    // Not tracked in Session::cachedTokens/promptTokens — those belong to
+    // nativeGenerate's chat-turn cache, which this one-shot path doesn't
+    // participate in.
+    session->decodedTokens = result.produced;
+    return result.produced;
+  } catch (const std::exception &e) {
+    LOGE("nativeGenerateT5: exception: %s", e.what());
+    return -10;
+  } catch (...) {
+    LOGE("nativeGenerateT5: unknown exception");
     return -10;
   }
 }

@@ -53,6 +53,31 @@ data class LocalModelSeed(
      * upfront estimate optimistic, never wrong in the dangerous direction.
      */
     val mmprojApproxSizeBytes: Long = 0,
+    /**
+     * Overrides [ArtifactResolver.DEFAULT_QUANT_PRIORITY] for this seed —
+     * needed for a repo that hosts several quantisations of the same model
+     * as separate files (unlike the common case of one repo per quant): with
+     * no override every such seed would resolve to whichever quant happens
+     * to rank first in the shared default list, so two seeds pointed at the
+     * same multi-quant repo would silently download the identical file.
+     * Null (every other seed) keeps the previous behaviour exactly.
+     */
+    val quantPriority: List<String>? = null,
+    /**
+     * True only for the MADLAD-400 family: a real T5 encoder-decoder,
+     * trained on its own `<2xx> source text` format with no chat framing at
+     * all (see [ai.localstudio.app.llama.LlamaBridge.nativeGenerateT5] and
+     * [ai.localstudio.app.TranslationActivity.buildPrompt]'s own doc
+     * comment). Every other [ai.localstudio.app.models.TranslationModels]
+     * seed — a decoder-only chat model fine-tuned for translation, like
+     * TranslateGemma — is a normal causal LM and gets
+     * [ai.localstudio.app.TranslationActivity.buildChatPrompt]'s
+     * instruction-style prompt instead, same as [LocalModels.SEEDS] already
+     * does; wrapping MADLAD's own tag format around one of those would just
+     * be more text for it to (mis)translate, not an instruction it
+     * understands.
+     */
+    val isT5EncoderDecoder: Boolean = false,
 ) {
     fun resolvedNote(context: android.content.Context): String = noteRes?.let { context.getString(it) } ?: note
 }
@@ -76,7 +101,19 @@ object LocalModels {
             ),
             paramsLabel = "E4B · Q4",
             noteRes = R.string.note_gemma_4_e4b,
-            approxSizeBytes = 2_600_000_000,
+            // Real device report: this catalog said 2.6GB, but every
+            // LOCAL_LOAD REFUSED line's own "want ~6470MB" (file.length() *
+            // 1.3, computed from the actual installed file, not this field)
+            // reverse-engineers to a real file size of ~4.98GB — nearly
+            // double. "E4B" is Gemma's MatFormer/elastic naming (the same
+            // family as Gemma 3n's E2B/E4B): the checkpoint a GGUF export
+            // actually bundles for that effective size is not the same as
+            // a plain dense 4B model's weights, which is what this number
+            // was estimated from originally. Wrong in a way that mattered:
+            // every fitsBudget/classifyFit call for this model — the "no
+            // warning before switching" gap, the fit label, the sort order
+            // — was computing against a size barely half the real one.
+            approxSizeBytes = 4_980_000_000,
             // Confirmed present in this exact repo (unsloth/gemma-4-E4B-it-GGUF/
             // blob/main/mmproj-F16.gguf) rather than assumed from a naming
             // convention — the same mistake that cost real debugging time
@@ -177,7 +214,8 @@ object LocalModels {
             ),
             paramsLabel = "9B · Q4",
             noteRes = R.string.note_qwen3_5_9b,
-            approxSizeBytes = 5_500_000_000,
+            // From the installed file (LOCAL_LOAD's "want ~7384MB" / 1.3).
+            approxSizeBytes = 5_680_000_000,
             capabilities = setOf(Capability.TEXT_GENERATION, Capability.REASONING, Capability.CODING),
         ),
         LocalModelSeed(

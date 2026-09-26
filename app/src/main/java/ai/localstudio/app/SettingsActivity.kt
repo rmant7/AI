@@ -9,6 +9,7 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.CheckBox
 import android.widget.EditText
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
@@ -31,12 +32,13 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var settings: Settings
     private lateinit var container: AppContainer
 
-    // Persisted the moment the checkbox changes (see the listener below), but
-    // also kept in memory across spinner switches so enabling several
-    // providers in one visit (switch to Gemini, check it, switch to Mistral,
-    // check that too) accumulates correctly instead of only ever remembering
-    // whichever provider is selected right now.
+    // Persisted the moment a checkbox changes (see buildProviderCheckboxes'
+    // own listener), but also kept in memory here so checking several
+    // providers in one visit (Gemini, then Mistral) accumulates correctly.
     private var pendingEnabled = mutableSetOf<String>()
+
+    /** One row per [CloudProviders.ALL] entry — see [buildProviderCheckboxes]. */
+    private val providerCheckboxes = mutableMapOf<String, CheckBox>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,25 +52,7 @@ class SettingsActivity : AppCompatActivity() {
         pendingEnabled = settings.enabledProviderIds.toMutableSet()
 
         setupLanguageSpinner()
-
-        binding.providerSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            CloudProviders.ALL.map { getString(it.titleRes) },
-        )
-        binding.providerSpinner.setSelection(
-            CloudProviders.ALL.indexOfFirst { it.id == settings.providerId }.coerceAtLeast(0),
-        )
-        binding.providerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                // Persisted immediately so the per-provider key and model below
-                // are read and written under the right provider.
-                settings.providerId = CloudProviders.ALL[position].id
-                showProvider(CloudProviders.ALL[position])
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
+        buildProviderCheckboxes()
 
         binding.compareModeCheck.isChecked = settings.compareMode
         binding.compareModeCheck.setOnCheckedChangeListener { _, checked -> settings.compareMode = checked }
@@ -81,12 +65,6 @@ class SettingsActivity : AppCompatActivity() {
         binding.endpointInput.persistOnChange { value -> if (settings.provider.editableUrl) settings.customEndpoint = value }
         binding.apiKeyInput.persistOnChange { value -> if (settings.provider.needsKey) settings.apiKey = value }
         binding.chatModelInput.persistOnChange { settings.chatModel = it }
-        binding.providerEnabledCheck.setOnCheckedChangeListener { _, checked ->
-            val id = settings.providerId
-            if (checked) pendingEnabled += id else pendingEnabled -= id
-            settings.enabledProviderIds = pendingEnabled
-            renderEnabledSummary()
-        }
         showProvider(settings.provider)
         renderEnabledSummary()
 
@@ -103,16 +81,6 @@ class SettingsActivity : AppCompatActivity() {
         }
         binding.apiKeysButton.setOnClickListener {
             startActivity(ApiKeysActivity.intent(this, settings.providerId))
-        }
-        // Manual, phone-only verification for a candidate embedding model —
-        // moved here from Models (which now only ever shows the one
-        // production model, E5_BASE) so ordinary use of Models never has to
-        // scroll past a broken candidate (E5_SMALL) to reach it.
-        binding.experimentalEmbeddingsButton.setOnClickListener {
-            startActivity(Intent(this, ExperimentalEmbeddingsActivity::class.java))
-        }
-        binding.aiCoreOpenButton.setOnClickListener {
-            startActivity(Intent(this, AiCoreTestActivity::class.java))
         }
         setupDownloadPolicy()
 
@@ -159,6 +127,36 @@ class SettingsActivity : AppCompatActivity() {
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    /**
+     * One [CheckBox] per [CloudProviders.ALL] entry, replacing the old
+     * spinner + separate "enable" checkbox — real user feedback: seeing
+     * every provider's on/off state took spinning through each one in turn,
+     * with nothing showing which were already enabled without doing that.
+     * Checking a row both toggles [pendingEnabled] and selects that provider
+     * for the detail panel below ([showProvider]) — unchecking it again
+     * still leaves it selected, so its endpoint/key/model stay visible and
+     * editable while temporarily disabled.
+     */
+    private fun buildProviderCheckboxes() {
+        binding.providerCheckboxList.removeAllViews()
+        providerCheckboxes.clear()
+        for (provider in CloudProviders.ALL) {
+            val box = CheckBox(this).apply {
+                text = getString(provider.titleRes)
+                isChecked = provider.id in pendingEnabled
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) pendingEnabled += provider.id else pendingEnabled -= provider.id
+                    settings.enabledProviderIds = pendingEnabled
+                    settings.providerId = provider.id
+                    showProvider(provider)
+                    renderEnabledSummary()
+                }
+            }
+            binding.providerCheckboxList.addView(box)
+            providerCheckboxes[provider.id] = box
         }
     }
 
@@ -221,10 +219,9 @@ class SettingsActivity : AppCompatActivity() {
             getString(R.string.settings_chat_model_hint)
         }
         binding.chatModelHint.visibility = if (provider.freeModels.isEmpty()) View.GONE else View.VISIBLE
-        // Setting this can re-fire the checkbox's own listener, but that
-        // listener only reproduces the membership state already being set
-        // here, so it's a harmless no-op rather than something to suppress.
-        binding.providerEnabledCheck.isChecked = provider.id in pendingEnabled
+        // Bold marks which row's detail panel is showing below — distinct
+        // from the checkbox's own checked state, which only means enabled.
+        providerCheckboxes.forEach { (id, box) -> box.setTypeface(null, if (id == provider.id) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL) }
     }
 
     private fun renderApiKeysSummary(provider: CloudProvider) {

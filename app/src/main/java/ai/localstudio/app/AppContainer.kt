@@ -36,10 +36,12 @@ import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.keys.ApiKeyRotator
 import ai.localstudio.core.router.CapabilityRouter
+import ai.localstudio.core.runtime.DeviceMemoryGatedRuntime
 import ai.localstudio.core.runtime.FallbackCandidate
 import ai.localstudio.core.runtime.FallbackTextRuntime
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.RuntimeManager
+import ai.localstudio.core.runtime.SharedRuntime
 import ai.localstudio.app.attach.AttachedDocument
 import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.benchmark.BenchmarkOrchestrator
@@ -60,12 +62,14 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.llama.LlamaCppMemoryEmbedder
 import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.llama.LlamaCppRuntime
+import ai.localstudio.app.llama.readMemAvailableBytes
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
 import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
+import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.app.routing.ModelCooldownStore
 import ai.localstudio.app.vosk.VoskDownloads
 import ai.localstudio.app.vosk.VoskFileTranscriber
@@ -119,6 +123,53 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Errors the app has hit, readable and copyable from Settings → "Журнал ошибок". Declared here, ahead of its usual place below, so memory/memoryExperimentLogger (right after) can already reference it. */
     val appLog = AppLog(context)
+
+    /**
+     * Where every on-device LLM actually lives, whichever path asked for it —
+     * chat, a fallback chain, a Compare-mode source, translation. Each of
+     * those wraps its [LlamaCppRuntime] in a [SharedRuntime] pointed here, so
+     * one GGUF can never be resident twice, and loading a different one
+     * evicts the previous one first ([RuntimeManager]'s `exclusive` mode —
+     * see its own doc comment on why budget arithmetic can't decide
+     * coexistence for memory-mapped weights). Real device reports behind
+     * this: Qwen 9B hanging for five minutes while Gemma stayed resident in a
+     * chain nobody's budget could see, and — when this manager was instead
+     * shared by whole orchestrators — every Compare-mode bubble answering
+     * with the same chain, because all chains share one registry id.
+     *
+     * Strict, and budgeted off [DeviceProfile.liveRamBytes], not
+     * [DeviceProfile.usableRamBytes]: the latter is a user-set policy
+     * ceiling (`max(% of total, live free)`) — raising the RAM percentage
+     * in Settings clears it regardless of what's genuinely free, which is
+     * exactly right for what the Models screen labels "Recommended" and
+     * exactly wrong for a check that gates an actual native allocation.
+     * Real device report, same night, same mechanism three times: MADLAD-400
+     * 7B cleared a 13 GB policy ceiling (80% of a 16 GB phone) with only
+     * ~5 GB genuinely free; the weights loaded, then the OOM killer took the
+     * whole process out the moment generation allocated anything more — no
+     * Settings percentage can make memory that isn't there. [LlamaCppRuntime]'s
+     * own separate, narrower pre-flight check (a live headroom reading a few
+     * tens of milliseconds later, never throwing) is untouched — this is
+     * only the outer gate deciding whether to attempt the load at all.
+     */
+    private val sharedRuntimeManager = RuntimeManager(
+        budgetBytes = { device.liveRamBytes },
+        runtimes = emptyMap(),
+        exclusive = true,
+        log = { appLog.record("RAM_MANAGER", it) },
+    )
+
+    /**
+     * Shared between [sharedLlamaRuntime] and [aicoreCandidate] via
+     * [DeviceMemoryGatedRuntime] — see that class's own doc comment for the
+     * real-device OOM crash this exists to stop: [sharedRuntimeManager]'s
+     * budget has no visibility into AICore's own memory use (it isn't this
+     * app's own weights), so a Compare-mode batch that fires both at once
+     * could pass the local load's budget check and still lose to AICore's
+     * concurrent ramp-up. One mutex means at most one of the two is ever
+     * actually generating at a time.
+     */
+    private val deviceMemoryGate = Mutex()
 
     /**
      * Fronts [memory]'s semantic half. Constructing this is cheap and
@@ -617,12 +668,16 @@ class AppContainer private constructor(private val context: Context) {
      * load independently and are each just as capable of sitting resident
      * and uncounted through a real OOM as the LLM was.
      */
-    private suspend fun releaseMemoryUnderPressure(reason: String, level: Int = Int.MAX_VALUE) {
+    private suspend fun releaseMemoryUnderPressure(
+        reason: String,
+        level: Int = Int.MAX_VALUE,
+        includeLocalModels: Boolean = true,
+    ) {
         if (semanticMemoryEmbedder.isReady) {
             semanticMemoryEmbedder.unload()
             appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
         }
-        releaseLocalModels()
+        if (includeLocalModels) releaseLocalModels()
         releaseWhisperEngines(reason, level)
     }
 
@@ -834,7 +889,7 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /** Recomputed on demand: free memory moves, and the budget is user-settable. */
-    val device: DeviceProfile get() = profileOf(context, settings.ramBudgetFraction)
+    val device: DeviceProfile get() = profileOf(context, settings.ramBudgetFraction, sharedRuntimeManager.residentBytes)
 
     val modelStore = ModelStore(context)
 
@@ -842,7 +897,7 @@ class AppContainer private constructor(private val context: Context) {
         modelStore,
         tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
-        appLogForMmproj = { message -> appLog.record("MMPROJ_DOWNLOAD", message) },
+        log = appLog::record,
     )
 
     // No auto-download of Tiny on first launch: voice input's mic button and
@@ -1097,8 +1152,15 @@ class AppContainer private constructor(private val context: Context) {
     @Volatile
     var routerSessionActive: Boolean = false
 
-    /** Seeds that are on disk right now, newest state each time it is asked. */
-    fun installedSeeds(): List<LocalModelSeed> = LocalModels.SEEDS.filter { modelStore.isInstalled(it) }
+    /**
+     * Seeds that are on disk right now, newest state each time it is asked —
+     * [LocalModels.SEEDS] (chat GGUFs) and [TranslationModels.SEEDS]
+     * (specialized encoder-decoder translation GGUFs) alike, since both are
+     * fetched and stored the same way and [localRegistry] needs to resolve
+     * either kind by id.
+     */
+    fun installedSeeds(): List<LocalModelSeed> =
+        (LocalModels.SEEDS + TranslationModels.SEEDS).filter { modelStore.isInstalled(it) }
 
     val experimentalEmbeddingDownloads = ExperimentalEmbeddingDownloads(
         experimentalEmbeddingStore,
@@ -1212,19 +1274,6 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * Every [RuntimeManager] this container has ever built, so
-     * [releaseLocalModels] has something to actually reach — buildOrchestrator
-     * otherwise hands its manager straight to [NodeExecutors] with no
-     * reference kept anywhere else. Never pruned: an old, already-empty
-     * manager left in this list costs nothing (no native resources, just a
-     * small object), and a manager whose cached [Orchestrator] slot was
-     * replaced after a signature change — see compareCandidates' own doc
-     * comment on that gap — still gets evicted through here instead of
-     * staying orphaned forever.
-     */
-    private val runtimeManagers = mutableListOf<RuntimeManager>()
-
-    /**
      * Frees every locally-loaded model (the LLM, its vision projector). Two
      * callers: [releaseMemoryUnderPressure], under real system memory
      * pressure — a multi-GB resident model with nothing ever freeing it was
@@ -1239,56 +1288,59 @@ class AppContainer private constructor(private val context: Context) {
      * using it.
      */
     suspend fun releaseLocalModels() {
-        runtimeManagers.forEach { it.evictIdle() }
+        sharedRuntimeManager.evictIdle()
     }
+
+    /**
+     * Whether [modelId] is resident in [sharedRuntimeManager] right now —
+     * used by the Models screen to put what's actually warm at the top of
+     * its list, ahead of what merely fits the budget but would still need a
+     * fresh load. Best-effort, not locked: a model can go resident/idle
+     * between this read and the next render, the same way [fitsBudget] is
+     * already a snapshot rather than a guarantee — both are advisory
+     * ordering, not something anything else depends on being exact.
+     */
+    fun isModelResident(modelId: String): Boolean =
+        sharedRuntimeManager.residentModels().any { it.modelId == modelId }
+
+    /**
+     * Whether every candidate here needs the small, on-device-sized context
+     * ceiling ([effectiveContextTokens]) instead of [CLOUD_CONTEXT_WINDOW_TOKENS] —
+     * deliberately not the same thing [isLocalOnly] means at each of this
+     * function's own call sites (output-length capping, whether a source
+     * streams): [RuntimeKind.LLAMA_CPP] and [RuntimeKind.AICORE] both need
+     * this, real cloud providers don't, and folding the two checks into one
+     * flag would have meant getting one of the other two decisions wrong to
+     * fix this one.
+     */
+    private fun needsSmallContextWindow(candidates: List<FallbackCandidate>): Boolean =
+        candidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP || it.binding.runtime == RuntimeKind.AICORE }
 
     private fun buildOrchestrator(
         runtime: ModelRuntime,
         isLocalOnly: Boolean,
         registryCandidates: List<FallbackCandidate>,
     ): Orchestrator {
-        // Every previously-built manager's idle models, freed before this one
-        // even exists — not just eventually, via releaseLocalModels(). That
-        // was written on the assumption something would call it soon after a
-        // manager got superseded (a settings change, a 503 cooldown
-        // invalidating the cached orchestrator, a Compare-mode signature
-        // change); in practice its only caller is the mic button, which this
-        // build hides — so nothing ever ran it, and a superseded manager's
-        // already-loaded local model just sat resident, uncounted, for the
-        // rest of the process's life. The next buildOrchestrator() call then
-        // loaded a second, fully separate copy of the same GGUF right
-        // alongside it: this is what an OOM kill shortly after a router
-        // rebuild looked like in the app log. runBlocking is deliberate, not
-        // a shortcut: this runs on the same thread about to build a new
-        // RuntimeManager regardless, evictIdle() only touches refCount==0
-        // entries (nothing this could contend with is still generating), and
-        // freeing an idle llama.cpp context is a bounded, fast native call —
-        // unlike loading one.
-        runtimeManagers.forEach { existing -> kotlinx.coroutines.runBlocking { existing.evictIdle() } }
-        val manager = RuntimeManager(
-            // Remote and stub models hold no local weights; the budget starts
-            // mattering the moment an on-device runtime is added. Note this
-            // budget does not see inside a fallback chain: FallbackTextModel
-            // loads each wrapped candidate directly rather than through this
-            // manager, so a local model loaded as part of a chain is not
-            // tracked or evicted the way a standalone local model is.
-            budgetBytes = device.usableRamBytes,
-            // whisperCppRuntime is always registered alongside whichever text
-            // runtime this orchestrator is for — SPEECH_TO_TEXT is a
-            // capability every orchestrator can be asked for regardless of
-            // which text-generation runtime backs it, and previously wasn't
-            // registered at all (RuntimeManager.acquire threw "no runtime
-            // registered for whisper_cpp" the moment anything tried). See
-            // docs/13-asr-pipeline-migration.md.
-            runtimes = buildMap {
-                put(runtime.kind, runtime)
-                put(whisperCppRuntime.kind, whisperCppRuntime)
-            },
+        // The semantic-memory embedder and whisper engines are freed before a
+        // local load (real device report: the embedder staying resident
+        // starved a new chat load). The previous LLM is not: that is
+        // sharedRuntimeManager's job at the moment the new one actually
+        // loads, so a rebuild for an unrelated setting (temperature, say)
+        // no longer throws away a warm multi-GB model for nothing.
+        if (registryCandidates.any { it.binding.runtime == RuntimeKind.LLAMA_CPP }) {
+            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("chat model load", includeLocalModels = false) }
+        }
+        // Its own manager, holding only this orchestrator's handles — the
+        // weights of a local model inside them live in sharedRuntimeManager
+        // (see SharedRuntime). One manager shared by whole orchestrators
+        // cached every Compare-mode chain under the same "fallback-chain" id.
+        val runtimeManager = RuntimeManager(
+            budgetBytes = { device.usableRamBytes },
+            runtimes = mapOf(runtime.kind to runtime, whisperCppRuntime.kind to whisperCppRuntime),
         )
-        runtimeManagers += manager
         val executors = NodeExecutors(
-            selector = ModelSelector(registry(runtime, registryCandidates), device),
-            runtimeManager = manager,
+            selector = ModelSelector(registry(runtime, registryCandidates), selectionDevice()),
+            runtimeManager = runtimeManager,
             contextEngine = ContextEngine(),
             memory = memory,
             memoryExperiment = memoryExperimentRunner,
@@ -1300,7 +1352,20 @@ class AppContainer private constructor(private val context: Context) {
             // down to survive on-device was also quietly capping how much
             // conversation/memory ever reached Gemini, unrelated to the
             // max-tokens leak fixed the same way in OpenAiRuntime.
-            contextWindowTokens = if (isLocalOnly) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
+            //
+            // AICore included, not just LLAMA_CPP (isLocalOnly, used a few
+            // lines down for output-length capping, means something
+            // different and stays narrow) — real device report: a 4590-char
+            // Compare-mode prompt, nowhere near CLOUD_CONTEXT_WINDOW_TOKENS
+            // (32,000 tokens), made Gemini Nano return a blank response,
+            // confirming what was flagged as an unverified hypothesis
+            // earlier: AICore has nothing like a real cloud provider's
+            // context limit. Reuses effectiveContextTokens() rather than a
+            // new guessed number — already the ceiling this app trusts for
+            // on-device inference; whether it's small enough specifically
+            // for AICore is itself unverified and may need its own,
+            // smaller number if this turns out not to be enough.
+            contextWindowTokens = if (needsSmallContextWindow(registryCandidates)) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
             defaultTemperature = settings.temperature,
             defaultTopP = settings.topP,
             defaultTopK = settings.topK,
@@ -1343,8 +1408,22 @@ class AppContainer private constructor(private val context: Context) {
      * token or waits for the full response — a cloud call is fast enough
      * end-to-end that progressive rendering only adds visual noise, while a
      * local model can take minutes and needs the incremental feedback.
+     *
+     * [hideOnFailure] is for [CloudProviders.AICORE] specifically, in both
+     * [compareCandidates] (chat) and [translationCompareCandidates]: Gemini
+     * Nano's own readiness is only knowable by actually asking it (see
+     * [aicoreCandidate]'s own doc comment) — not installed on this device,
+     * AICore's service not bound, a blank response — and unlike every other
+     * source here, that is not something explaining to the user actually
+     * helps with; a failed bubble/card for it is just noise, so the caller
+     * removes it instead of showing the error.
      */
-    data class CompareSource(val label: String, val orchestrator: Orchestrator, val isLocal: Boolean)
+    data class CompareSource(
+        val label: String,
+        val orchestrator: Orchestrator,
+        val isLocal: Boolean,
+        val hideOnFailure: Boolean = false,
+    )
 
     fun compareCandidates(): List<CompareSource> =
         enabledProviders().mapNotNull { provider ->
@@ -1377,6 +1456,9 @@ class AppContainer private constructor(private val context: Context) {
             // way orchestrator() already caches the single-provider path:
             // reused for this provider as long as nothing that would change
             // its wiring actually has.
+            // The weights themselves are held by sharedRuntimeManager, not
+            // this cached orchestrator, so chat's own path and this one reuse
+            // one resident copy rather than each loading its own.
             val signature = (
                 listOf(
                     settings.customEndpoint,
@@ -1399,7 +1481,7 @@ class AppContainer private constructor(private val context: Context) {
                 compareOrchestrators[provider.id] = it
                 compareSignatures[provider.id] = signature
             }
-            CompareSource(label, orchestrator, isLocalOnly)
+            CompareSource(label, orchestrator, isLocalOnly, hideOnFailure = provider.id == CloudProviders.AICORE.id)
         }
 
     /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
@@ -1409,18 +1491,170 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * Same resolution [localCandidate] uses — the explicit choice from
-     * Models if it's actually installed, [ModelSelector]'s best fit
-     * otherwise — factored out so [localVisionAvailable] can ask "which
-     * model, specifically" without also building a runtime and a
-     * [FallbackCandidate] just to answer that.
+     * The explicit choice from Models if it's actually installed,
+     * [ModelSelector]'s best fit otherwise — factored out so
+     * [localVisionAvailable] can ask "which model, specifically" without also
+     * building a runtime and a [FallbackCandidate] just to answer that.
+     *
+     * [chosenId] defaults to the chat model ([localCandidate]'s own use), but
+     * takes an explicit id too — [translationLocalCandidate] passes
+     * [Settings.translationModel] here so a model picked for translation
+     * doesn't have to be the same one chat is currently using.
      */
-    private fun effectiveLocalSelection(registry: ModelRegistry): SelectedModel? {
-        val chosenId = settings.chatModelFor(CloudProviders.LOCAL.id)
+    private fun effectiveLocalSelection(
+        registry: ModelRegistry,
+        chosenId: String = settings.chatModelFor(CloudProviders.LOCAL.id),
+    ): SelectedModel? {
         val chosen = registry.find(chosenId)
             ?.takeIf { it.state == InstallState.INSTALLED }
             ?.let { entry -> SelectedModel(entry.model, entry.model.bindings.first()) }
         return chosen ?: ModelSelector(registry, device).selectOrNull(Capability.TEXT_GENERATION)
+    }
+
+    /**
+     * [Settings.translationModel] resolved to a local candidate — shared by
+     * every caller in [translationCompareCandidates] that needs the LOCAL
+     * entry built the identical way, instead of each resolving it separately
+     * and risking drift. Null for the AICore case (its own caller handles
+     * that id directly) and when nothing local is chosen or installed.
+     */
+    private fun translationLocalCandidate(): FallbackCandidate? {
+        val chosenId = settings.translationModel
+        if (chosenId == CloudProviders.AICORE.id) return null
+        val registry = localRegistry()
+        val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
+            ?: effectiveLocalSelection(registry)
+            ?: return null
+        return FallbackCandidate(
+            label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
+            runtime = sharedLlamaRuntime(),
+            model = selected.model,
+            binding = selected.binding,
+        )
+    }
+
+    private val translationCompareOrchestrators = mutableMapOf<String, Orchestrator>()
+    private val translationCompareSignatures = mutableMapOf<String, String>()
+
+    /**
+     * [compareCandidates]'s own idea, for [TranslationActivity]: one
+     * [CompareSource] per enabled provider, so a translation shows several
+     * drafts side by side instead of committing to whichever single model
+     * happens to be picked on the Models screen's Translation tab — real
+     * device report: MADLAD-400's own output for a low-resource language
+     * (Seychellois Creole) can be outright wrong with no way to tell short
+     * of trying another source. [CloudProviders.AICORE] is always included
+     * regardless of [Settings.enabledProviderIds]: Gemini Nano costs
+     * nothing to try, answers in seconds, and there's no reason to leave it
+     * out of a translation's own comparison just because chat happens to be
+     * configured without it. The LOCAL entry resolves against
+     * [Settings.translationModel] (see [translationLocalCandidate]), not
+     * [Settings.chatModel] the way [compareCandidates]'s own LOCAL entry does.
+     */
+    fun translationCompareCandidates(): List<CompareSource> {
+        // LOCAL forced in alongside AICORE, not just gated by
+        // enabledProviderIds like the cloud providers below: real device
+        // report — MADLAD-400 7B, explicitly picked on Models ->
+        // Translation, never even attempted (no LOCAL_LOAD line at all,
+        // success or failure) because the general "Local" chat-provider
+        // checkbox in Settings happened to be unchecked. That checkbox
+        // governs chat's own fallback chain; Settings.translationModel is a
+        // separate, dedicated choice this screen has always respected
+        // regardless of chat's own provider configuration (see
+        // translationLocalCandidate's own doc comment) — conflating the two
+        // here silently dropped the one source the user most explicitly
+        // asked for.
+        val providerIds = settings.enabledProviderIds + CloudProviders.AICORE.id + CloudProviders.LOCAL.id
+        return CloudProviders.ALL.filter { it.id in providerIds }.mapNotNull { provider ->
+            val candidates = when (provider.id) {
+                CloudProviders.LOCAL.id -> listOfNotNull(translationLocalCandidate())
+                CloudProviders.AICORE.id -> listOf(aicoreCandidate())
+                else -> cloudCandidates(provider)
+            }
+            if (candidates.isEmpty()) return@mapNotNull null
+
+            val runtime: ModelRuntime = FallbackTextRuntime(candidates)
+            val label = candidates.singleOrNull()?.label ?: context.getString(provider.titleRes)
+            val isLocalOnly = candidates.all { it.binding.runtime == RuntimeKind.LLAMA_CPP }
+
+            val signature = (
+                listOf(
+                    settings.customEndpoint,
+                    settings.temperature,
+                    settings.topP,
+                    settings.topK,
+                    settings.repeatPenalty,
+                    settings.maxResponseTokens,
+                    settings.chatModelFor(provider.id),
+                    settings.apiKeyFor(provider.id),
+                    settings.translationModel,
+                ) + candidates.map { it.model.id }
+            ).joinToString("|")
+
+            val cached = translationCompareOrchestrators[provider.id]?.takeIf { translationCompareSignatures[provider.id] == signature }
+            val orchestrator = cached ?: buildTranslationOrchestrator(runtime, isLocalOnly, candidates).also {
+                translationCompareOrchestrators[provider.id] = it
+                translationCompareSignatures[provider.id] = signature
+            }
+            CompareSource(label, orchestrator, isLocalOnly, hideOnFailure = provider.id == CloudProviders.AICORE.id)
+        }
+    }
+
+    /**
+     * The build behind every entry [translationCompareCandidates] returns —
+     * one [Orchestrator] for translation given whichever
+     * [runtime]/[registryCandidates] the caller already
+     * resolved (a single local/AICore candidate, or a cloud provider's own
+     * [FallbackTextRuntime] rotation). Never the user's chat persona/house
+     * rules ([systemPrompt] null) — a translation prompt is already fully
+     * self-contained (see [TranslationActivity.buildPrompt]) — and output is
+     * capped far below a chat reply's own ceiling: a real device report
+     * showed a general chat model ignore "reply with only the translation"
+     * and ramble for 457 tokens before the wall-clock timeout cut it off, for
+     * a task that never legitimately needs anywhere near
+     * [LOCAL_MAX_OUTPUT_TOKENS]. Capped unconditionally, not just for a local
+     * candidate — a cloud/AICore model rambling wastes the same wall-clock
+     * time.
+     */
+    private fun buildTranslationOrchestrator(
+        runtime: ModelRuntime,
+        isLocalOnly: Boolean,
+        registryCandidates: List<FallbackCandidate>,
+    ): Orchestrator {
+        if (registryCandidates.any { it.binding.runtime == RuntimeKind.LLAMA_CPP }) {
+            // [releaseMemoryUnderPressure] otherwise only runs reactively,
+            // off Android's own onTrimMemory callback — real device logs
+            // showed that callback landing the same second a translation's
+            // fresh model load started, with the embedding model (and
+            // whatever chat model was still resident) not yet freed by the
+            // time llama.cpp's own allocations ran, on a device already
+            // down to ~1-2 GB free. A resident chat model itself is freed by
+            // sharedRuntimeManager when this load starts, and only if it is
+            // a different model — this is only the cross-subsystem piece.
+            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("translation model load", includeLocalModels = false) }
+        }
+        val runtimeManager = RuntimeManager(
+            budgetBytes = { device.usableRamBytes },
+            runtimes = mapOf(runtime.kind to runtime, whisperCppRuntime.kind to whisperCppRuntime),
+        )
+        val executors = NodeExecutors(
+            selector = ModelSelector(registry(runtime, registryCandidates), selectionDevice()),
+            runtimeManager = runtimeManager,
+            contextEngine = ContextEngine(),
+            memory = memory,
+            memoryExperiment = memoryExperimentRunner,
+            memoryExperimentMode = ExperimentMode.COMMERCIAL_MEMORY,
+            systemPrompt = null,
+            // See buildOrchestrator's own comment on why AICore is included
+            // here too, not just LLAMA_CPP.
+            contextWindowTokens = if (needsSmallContextWindow(registryCandidates)) effectiveContextTokens() else CLOUD_CONTEXT_WINDOW_TOKENS,
+            defaultTemperature = settings.temperature,
+            defaultTopP = settings.topP,
+            defaultTopK = settings.topK,
+            defaultRepeatPenalty = settings.repeatPenalty,
+            defaultMaxTokens = minOf(settings.maxResponseTokens, TRANSLATION_MAX_OUTPUT_TOKENS),
+        )
+        return Orchestrator(CapabilityRouter(), executors)
     }
 
     /**
@@ -1438,6 +1672,40 @@ class AppContainer private constructor(private val context: Context) {
         val seedId = effectiveLocalSelection(localRegistry())?.model?.id ?: return false
         val seed = LocalModels.SEEDS.firstOrNull { it.id == seedId } ?: return false
         return modelStore.hasMmproj(seed)
+    }
+
+    /**
+     * A [LlamaCppRuntime] whose loads go through [sharedRuntimeManager]. The
+     * context size is the residency variant: a copy loaded with a smaller
+     * window is reloaded, not reused, once a document needs the bigger one.
+     */
+    private fun sharedLlamaRuntime(): ModelRuntime {
+        val contextTokens = effectiveContextTokens()
+        return DeviceMemoryGatedRuntime(
+            inner = SharedRuntime(
+                inner = LlamaCppRuntime(
+                    contextTokens = contextTokens,
+                    log = appLog::record,
+                    availableRamBytes = { currentAvailableRamBytes(context) },
+                    memoryDiagnostics = { currentMemoryDiagnostics(context) },
+                ),
+                manager = sharedRuntimeManager,
+                variant = contextTokens,
+            ),
+            gate = deviceMemoryGate,
+        )
+    }
+
+    /**
+     * The device as [ModelSelector] sees it when choosing among candidates
+     * the user already picked: RAM only rules out a model that could never
+     * fit on this phone at all. Whether it fits *right now* is decided at
+     * load time by [sharedRuntimeManager] — a live-RAM reading taken when an
+     * orchestrator happens to be built (and then cached) refused Qwen 9B for
+     * translation with 8.5 GB genuinely free.
+     */
+    private fun selectionDevice(): DeviceProfile = device.let {
+        it.copy(availableRamBytes = it.totalRamBytes, ramBudgetFraction = DeviceProfile.MAX_RAM_FRACTION)
     }
 
     /**
@@ -1465,11 +1733,7 @@ class AppContainer private constructor(private val context: Context) {
             // a generic label in the log and in the answer's own attribution
             // line answered "was it local?" but not "which local model?".
             label = "${context.getString(CloudProviders.LOCAL.titleRes)}: ${selected.model.id}",
-            runtime = LlamaCppRuntime(
-                contextTokens = effectiveContextTokens(),
-                log = appLog::record,
-                availableRamBytes = { currentAvailableRamBytes(context) },
-            ),
+            runtime = sharedLlamaRuntime(),
             model = selected.model,
             binding = selected.binding,
         )
@@ -1491,13 +1755,15 @@ class AppContainer private constructor(private val context: Context) {
      * llama.cpp-sized estimate [localCandidate] uses: AICore's own weights
      * live in AICore's system service, not this app's process, so there is
      * nothing here for [RuntimeManager]'s RAM budget to actually plan for.
+     * [DeviceMemoryGatedRuntime] is the actual mitigation for that gap —
+     * see its own doc comment for the real crash it fixes.
      * See docs/04-runtime.md's "Gemini Nano / AICore feasibility" section.
      */
     private fun aicoreCandidate(): FallbackCandidate {
         val model = servedModel("gemini-nano-aicore", RuntimeKind.AICORE, Capability.TEXT_GENERATION, Capability.REASONING)
         return FallbackCandidate(
             label = context.getString(CloudProviders.AICORE.titleRes),
-            runtime = AiCoreRuntime(log = appLog::record),
+            runtime = DeviceMemoryGatedRuntime(AiCoreRuntime(log = appLog::record), deviceMemoryGate),
             model = model,
             binding = model.bindings.first(),
         )
@@ -1679,8 +1945,8 @@ class AppContainer private constructor(private val context: Context) {
         // Independent of the branch above (which is about text generation):
         // whenever a whisper.cpp model is actually installed on disk, it's
         // registered too, so SPEECH_TO_TEXT resolves to it via WhisperCppRuntime
-        // — see runtimeManagers/buildOrchestrator for why that runtime is
-        // always in RuntimeManager's map regardless of which one this
+        // — see sharedRuntimeManager/buildOrchestrator for why that runtime
+        // is always in RuntimeManager's map regardless of which one this
         // orchestrator's own `runtime` argument is. Still not reachable from
         // any screen in this app yet (see whisperEngine's own comment above,
         // used directly by ChatActivity's mic button instead) — this is what
@@ -1851,6 +2117,8 @@ class AppContainer private constructor(private val context: Context) {
         // actually assembled, not with this number.
         private const val CLOUD_CONTEXT_WINDOW_TOKENS = 32_000
 
+        private const val LIVE_FREE_RAM_SAFETY_FACTOR = 0.95
+
         // Ceiling for a local context when nothing in this conversation
         // needs the user's full configured window — see effectiveContextTokens().
         private const val SMALL_CONTEXT_TOKENS = 2048
@@ -1863,6 +2131,11 @@ class AppContainer private constructor(private val context: Context) {
         // A local model's own output length, capped independently of
         // settings.maxResponseTokens — see its call site in buildOrchestrator().
         private const val LOCAL_MAX_OUTPUT_TOKENS = 512
+
+        // A translated phrase's own output length — see its call site in
+        // buildTranslationOrchestrator(). Deliberately far below LOCAL_MAX_OUTPUT_TOKENS:
+        // that ceiling is sized for a chat reply, not a single translation.
+        private const val TRANSLATION_MAX_OUTPUT_TOKENS = 200
 
         // Not a real ceiling, just "large enough that a single conversation's
         // worth of memory items is never left behind" — see
@@ -1956,19 +2229,71 @@ class AppContainer private constructor(private val context: Context) {
             return info.availMem
         }
 
-        fun profileOf(context: Context, ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION): DeviceProfile {
+        /**
+         * Everything else [ActivityManager.MemoryInfo] carries beyond
+         * [currentAvailableRamBytes]'s single number — real device report:
+         * Settings' own Running services screen showed far more free RAM
+         * than [currentAvailableRamBytes] did on the same device moments
+         * later, and the only way to tell "this API is genuinely less
+         * precise for a non-privileged app on this OS version" apart from
+         * "the two screens define 'available' differently" is [lowMemory]:
+         * if Android itself doesn't consider the device low on memory right
+         * now despite a low [ActivityManager.MemoryInfo.availMem] reading,
+         * that reading is the one not to be trusted.
+         */
+        fun currentMemoryDiagnostics(context: Context): String {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
+            return "ActivityManager: availMem=${info.availMem / 1_000_000}MB totalMem=${info.totalMem / 1_000_000}MB " +
+                "threshold=${info.threshold / 1_000_000}MB lowMemory=${info.lowMemory}"
+        }
+
+        /**
+         * [ownResidentBytes] is what this app's own local models hold right
+         * now — counted as available, since loading a different model evicts
+         * them first. Free RAM is the higher of ActivityManager's reading and
+         * the kernel's MemAvailable (see [readMemAvailableBytes]), and with
+         * that more precise reading most of it is trusted
+         * ([LIVE_FREE_RAM_SAFETY_FACTOR]) — real device report: Qwen 9B
+         * (~7.4 GB estimated) refused and warned about with 8.1-8.5 GB free,
+         * because only 60% of free RAM ever counted.
+         */
+        fun profileOf(
+            context: Context,
+            ramBudgetFraction: Double = DeviceProfile.BASE_RAM_FRACTION,
+            ownResidentBytes: Long = 0L,
+        ): DeviceProfile {
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
+            val free = maxOf(info.availMem, readMemAvailableBytes() ?: 0L)
             return DeviceProfile(
                 totalRamBytes = info.totalMem,
-                availableRamBytes = info.availMem,
+                availableRamBytes = (free + ownResidentBytes).coerceIn(0L, info.totalMem),
                 availableStorageBytes = context.filesDir.freeSpace,
                 cpuCores = Runtime.getRuntime().availableProcessors(),
                 androidApiLevel = Build.VERSION.SDK_INT,
                 // Only what this build can actually execute on this device:
                 // llama.cpp appears once its native library loads for this ABI.
+                //
+                // AICORE belongs here for the same reason REMOTE_OPENAI does
+                // — real availability is only knowable by actually asking it
+                // (see AiCoreRuntime), not something DeviceProfile can gate
+                // on ahead of time, same as a cloud endpoint's reachability
+                // isn't. Missing until a real device report: AICore-only
+                // chat happened to always work anyway because every tested
+                // device had at least one other provider enabled alongside
+                // it, so AICore's candidate was always wrapped in a
+                // FALLBACK_CHAIN binding (which IS in this set) rather than
+                // standing alone — the single-candidate translation
+                // orchestrator that used to exist deliberately never wrapped
+                // a candidate that way, which is what first exposed this:
+                // picking Gemini Nano for translation made SuitabilityScorer reject
+                // its own candidate as NO_SUPPORTED_RUNTIME before
+                // AiCoreRuntime ever got a chance to say whether it was
+                // actually available.
                 supportedRuntimes = buildSet {
                     add(RuntimeKind.REMOTE_OPENAI)
+                    add(RuntimeKind.AICORE)
                     add(RuntimeKind.STUB)
                     add(RuntimeKind.FALLBACK_CHAIN)
                     if (LlamaBridge.isAvailable) add(RuntimeKind.LLAMA_CPP)
@@ -1977,6 +2302,7 @@ class AppContainer private constructor(private val context: Context) {
                 hasGpuDelegate = false,
                 performanceIndex = 1.0,
                 ramBudgetFraction = ramBudgetFraction,
+                freeRamSafetyFactor = LIVE_FREE_RAM_SAFETY_FACTOR,
             )
         }
     }

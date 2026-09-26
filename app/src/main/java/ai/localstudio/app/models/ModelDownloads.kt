@@ -1,5 +1,6 @@
 package ai.localstudio.app.models
 
+import ai.localstudio.core.registry.ArtifactResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -10,6 +11,16 @@ import kotlinx.coroutines.launch
 
 sealed interface DownloadState {
     data object Idle : DownloadState
+
+    /**
+     * Not currently downloading, but a `.part` file with [partialBytes]
+     * already in it sits on disk — [ModelDownloads.start] resumes it via
+     * HTTP Range rather than starting over. Real device report: after a
+     * process kill (or a deliberate pause) mid-download, the Models screen
+     * showed a plain "Download" button with no sign that ~5GB was already
+     * on disk, indistinguishable from a model never touched at all.
+     */
+    data class Paused(val partialBytes: Long) : DownloadState
     data class Resolving(val repoId: String) : DownloadState
     data class Running(val progress: DownloadProgress, val source: String) : DownloadState
     data class Failed(val message: String) : DownloadState
@@ -33,8 +44,17 @@ class ModelDownloads(
      * Android services or notifications.
      */
     private val onDownloadStarted: () -> Unit = {},
-    /** Best-effort mmproj download failures go here rather than surfacing as the model's own DownloadState.Failed — see [downloadMmproj]. */
-    private val appLogForMmproj: ((String) -> Unit)? = null,
+    /**
+     * Real device report: a custom model's download failed (a malformed repo
+     * id — see [ai.localstudio.app.ModelsActivity.normalizeRepoInput]'s own
+     * doc comment) with nothing about it anywhere in the app's own log — this
+     * class published the failure only as a [DownloadState] the Models
+     * screen's own row happened to be showing at the time, the same as every
+     * other subsystem's `appLog.record(tag, message)` calls, and every real
+     * download's start/failure/success now goes through it too, not just a
+     * projector's best-effort one (see [downloadMmproj]'s own use of it).
+     */
+    private val log: (tag: String, message: String) -> Unit = { _, _ -> },
 ) {
 
     private val states = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
@@ -57,8 +77,11 @@ class ModelDownloads(
      */
     private val mmprojBackfillCooldownUntil = mutableMapOf<String, Long>()
 
-    fun stateOf(seed: LocalModelSeed): DownloadState =
-        states.value[seed.id] ?: if (store.isInstalled(seed)) DownloadState.Installed else DownloadState.Idle
+    fun stateOf(seed: LocalModelSeed): DownloadState = states.value[seed.id] ?: when {
+        store.isInstalled(seed) -> DownloadState.Installed
+        store.partialSize(seed) > 0 -> DownloadState.Paused(store.partialSize(seed))
+        else -> DownloadState.Idle
+    }
 
     fun start(seed: LocalModelSeed) {
         if (jobs[seed.id]?.isActive == true) return
@@ -94,12 +117,20 @@ class ModelDownloads(
         val downloader = ModelDownloader()
         downloaders[seed.id] = downloader
         jobs[seed.id] = scope.launch {
+            log("MODEL_DOWNLOAD", "${seed.id}: resolving from ${seed.repoIds}")
             publish(seed, DownloadState.Resolving(seed.repoIds.first()))
             try {
-                val (source, resolved) = HuggingFaceResolver.resolveAny(seed.repoIds, tokenProvider())
+                val (source, resolved) = HuggingFaceResolver.resolveAny(
+                    seed.repoIds,
+                    tokenProvider(),
+                    seed.quantPriority ?: ArtifactResolver.DEFAULT_QUANT_PRIORITY,
+                )
+                log("MODEL_DOWNLOAD", "${seed.id}: resolved via $source -> ${resolved.fileName} (${gb(resolved.sizeBytes)})")
                 val free = store.freeSpaceBytes()
                 if (resolved.sizeBytes > 0 && resolved.sizeBytes + SLACK_BYTES > free) {
-                    publish(seed, DownloadState.Failed("Not enough space: need ${gb(resolved.sizeBytes)}, ${gb(free)} free"))
+                    val message = "Not enough space: need ${gb(resolved.sizeBytes)}, ${gb(free)} free"
+                    log("MODEL_DOWNLOAD", "${seed.id}: FAILED: $message")
+                    publish(seed, DownloadState.Failed(message))
                     return@launch
                 }
 
@@ -125,19 +156,18 @@ class ModelDownloads(
                 val installedSize = installedFile.length()
                 if (resolved.sizeBytes > 0 && installedSize != resolved.sizeBytes) {
                     installedFile.delete()
-                    publish(
-                        seed,
-                        DownloadState.Failed(
-                            "File corrupted: got $installedSize bytes, expected ${resolved.sizeBytes}",
-                        ),
-                    )
+                    val message = "File corrupted: got $installedSize bytes, expected ${resolved.sizeBytes}"
+                    log("MODEL_DOWNLOAD", "${seed.id}: FAILED: $message")
+                    publish(seed, DownloadState.Failed(message))
                     return@launch
                 }
 
                 if (seed.mmprojFileName != null) downloadMmproj(seed, downloader)
 
+                log("MODEL_DOWNLOAD", "${seed.id}: installed")
                 publish(seed, DownloadState.Installed)
             } catch (e: Exception) {
+                log("MODEL_DOWNLOAD", "${seed.id}: FAILED: ${e.javaClass.simpleName}: ${e.message}")
                 publish(seed, DownloadState.Failed(e.message ?: e.toString()))
             } finally {
                 downloaders.remove(seed.id)
@@ -157,7 +187,7 @@ class ModelDownloads(
         val fileName = seed.mmprojFileName ?: return
         val resolved = HuggingFaceResolver.resolveExact(seed.repoIds, fileName, tokenProvider())
         if (resolved == null) {
-            appLogForMmproj?.invoke("$fileName not found in any of ${seed.repoIds}")
+            log("MMPROJ_DOWNLOAD", "$fileName not found in any of ${seed.repoIds}")
             return
         }
         val (source, file) = resolved
@@ -172,15 +202,19 @@ class ModelDownloads(
             // A corrupt or half-downloaded projector must not look installed —
             // ModelStore.hasMmproj checks file presence, not validity beyond size.
             store.mmprojFileFor(seed).delete()
-            appLogForMmproj?.invoke("mmproj download failed for ${seed.id}: ${it.message}")
+            log("MMPROJ_DOWNLOAD", "mmproj download failed for ${seed.id}: ${it.message}")
         }
     }
 
     fun cancel(seed: LocalModelSeed) {
         downloaders[seed.id]?.cancel()
         jobs[seed.id]?.cancel()
-        // The partial file is kept on purpose: the next attempt resumes from it.
-        publish(seed, DownloadState.Idle)
+        // The partial file is kept on purpose: the next attempt resumes from
+        // it — published as DownloadState.Paused, not a blanket Idle, so the
+        // Models screen can say so immediately rather than only after a
+        // restart (see stateOf's own fallback for the same file).
+        val partial = store.partialSize(seed)
+        publish(seed, if (partial > 0) DownloadState.Paused(partial) else DownloadState.Idle)
     }
 
     fun delete(seed: LocalModelSeed) {

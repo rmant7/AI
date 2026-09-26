@@ -1,0 +1,1672 @@
+{
+  "languages": [
+    {
+      "code": "en",
+      "name": "English"
+    },
+    {
+      "code": "ru",
+      "name": "Russian"
+    },
+    {
+      "code": "es",
+      "name": "Spanish"
+    },
+    {
+      "code": "fr",
+      "name": "French"
+    },
+    {
+      "code": "de",
+      "name": "German"
+    },
+    {
+      "code": "it",
+      "name": "Italian"
+    },
+    {
+      "code": "pt",
+      "name": "Portuguese"
+    },
+    {
+      "code": "pl",
+      "name": "Polish"
+    },
+    {
+      "code": "nl",
+      "name": "Dutch"
+    },
+    {
+      "code": "vi",
+      "name": "Vietnamese"
+    },
+    {
+      "code": "tr",
+      "name": "Turkish"
+    },
+    {
+      "code": "sv",
+      "name": "Swedish"
+    },
+    {
+      "code": "id",
+      "name": "Indonesian"
+    },
+    {
+      "code": "ro",
+      "name": "Romanian"
+    },
+    {
+      "code": "cs",
+      "name": "Czech"
+    },
+    {
+      "code": "zh",
+      "name": "Mandarin Chinese"
+    },
+    {
+      "code": "hu",
+      "name": "Hungarian"
+    },
+    {
+      "code": "ja",
+      "name": "Japanese"
+    },
+    {
+      "code": "th",
+      "name": "Thai"
+    },
+    {
+      "code": "fi",
+      "name": "Finnish"
+    },
+    {
+      "code": "fa",
+      "name": "Persian"
+    },
+    {
+      "code": "uk",
+      "name": "Ukrainian"
+    },
+    {
+      "code": "da",
+      "name": "Danish"
+    },
+    {
+      "code": "el",
+      "name": "Greek"
+    },
+    {
+      "code": "no",
+      "name": "Norwegian"
+    },
+    {
+      "code": "bg",
+      "name": "Bulgarian"
+    },
+    {
+      "code": "sk",
+      "name": "Slovak"
+    },
+    {
+      "code": "ko",
+      "name": "Korean"
+    },
+    {
+      "code": "ar",
+      "name": "Arabic"
+    },
+    {
+      "code": "lt",
+      "name": "Lithuanian"
+    },
+    {
+      "code": "ca",
+      "name": "Catalan"
+    },
+    {
+      "code": "sl",
+      "name": "Slovenian"
+    },
+    {
+      "code": "he",
+      "name": "Hebrew"
+    },
+    {
+      "code": "et",
+      "name": "Estonian"
+    },
+    {
+      "code": "lv",
+      "name": "Latvian"
+    },
+    {
+      "code": "hi",
+      "name": "Hindi"
+    },
+    {
+      "code": "sq",
+      "name": "Albanian"
+    },
+    {
+      "code": "ms",
+      "name": "Malay"
+    },
+    {
+      "code": "az",
+      "name": "Azerbaijani"
+    },
+    {
+      "code": "sr",
+      "name": "Serbian"
+    },
+    {
+      "code": "ta",
+      "name": "Tamil"
+    },
+    {
+      "code": "hr",
+      "name": "Croatian"
+    },
+    {
+      "code": "kk",
+      "name": "Kazakh"
+    },
+    {
+      "code": "is",
+      "name": "Icelandic"
+    },
+    {
+      "code": "ml",
+      "name": "Malayalam"
+    },
+    {
+      "code": "mr",
+      "name": "Marathi"
+    },
+    {
+      "code": "te",
+      "name": "Telugu"
+    },
+    {
+      "code": "af",
+      "name": "Afrikaans"
+    },
+    {
+      "code": "gl",
+      "name": "Galician"
+    },
+    {
+      "code": "fil",
+      "name": "Filipino"
+    },
+    {
+      "code": "be",
+      "name": "Belarusian"
+    },
+    {
+      "code": "mk",
+      "name": "Macedonian"
+    },
+    {
+      "code": "eu",
+      "name": "Basque"
+    },
+    {
+      "code": "bn",
+      "name": "Bengali"
+    },
+    {
+      "code": "ka",
+      "name": "Georgian"
+    },
+    {
+      "code": "mn",
+      "name": "Mongolian"
+    },
+    {
+      "code": "bs",
+      "name": "Bosnian"
+    },
+    {
+      "code": "uz",
+      "name": "Uzbek"
+    },
+    {
+      "code": "ur",
+      "name": "Urdu"
+    },
+    {
+      "code": "sw",
+      "name": "Swahili"
+    },
+    {
+      "code": "yue",
+      "name": "Cantonese"
+    },
+    {
+      "code": "ne",
+      "name": "Nepali"
+    },
+    {
+      "code": "kn",
+      "name": "Kannada"
+    },
+    {
+      "code": "kaa",
+      "name": "Kara-Kalpak"
+    },
+    {
+      "code": "gu",
+      "name": "Gujarati"
+    },
+    {
+      "code": "si",
+      "name": "Sinhala"
+    },
+    {
+      "code": "cy",
+      "name": "Welsh"
+    },
+    {
+      "code": "eo",
+      "name": "Esperanto"
+    },
+    {
+      "code": "la",
+      "name": "Latin"
+    },
+    {
+      "code": "hy",
+      "name": "Armenian"
+    },
+    {
+      "code": "ky",
+      "name": "Kyrghyz"
+    },
+    {
+      "code": "tg",
+      "name": "Tajik"
+    },
+    {
+      "code": "ga",
+      "name": "Irish"
+    },
+    {
+      "code": "mt",
+      "name": "Maltese"
+    },
+    {
+      "code": "my",
+      "name": "Myanmar (Burmese)"
+    },
+    {
+      "code": "km",
+      "name": "Khmer"
+    },
+    {
+      "code": "tt",
+      "name": "Tatar"
+    },
+    {
+      "code": "so",
+      "name": "Somali"
+    },
+    {
+      "code": "ku",
+      "name": "Kurdish (Kurmanji)"
+    },
+    {
+      "code": "ps",
+      "name": "Pashto"
+    },
+    {
+      "code": "pa",
+      "name": "Punjabi"
+    },
+    {
+      "code": "rw",
+      "name": "Kinyarwanda"
+    },
+    {
+      "code": "lo",
+      "name": "Lao"
+    },
+    {
+      "code": "ha",
+      "name": "Hausa"
+    },
+    {
+      "code": "dv",
+      "name": "Dhivehi"
+    },
+    {
+      "code": "fy",
+      "name": "W. Frisian"
+    },
+    {
+      "code": "lb",
+      "name": "Luxembourgish"
+    },
+    {
+      "code": "ckb",
+      "name": "Kurdish (Sorani)"
+    },
+    {
+      "code": "mg",
+      "name": "Malagasy"
+    },
+    {
+      "code": "gd",
+      "name": "Scottish Gaelic"
+    },
+    {
+      "code": "am",
+      "name": "Amharic"
+    },
+    {
+      "code": "ug",
+      "name": "Uyghur"
+    },
+    {
+      "code": "ht",
+      "name": "Haitian Creole"
+    },
+    {
+      "code": "grc",
+      "name": "Ancient Greek"
+    },
+    {
+      "code": "hmn",
+      "name": "Hmong"
+    },
+    {
+      "code": "sd",
+      "name": "Sindhi"
+    },
+    {
+      "code": "jv",
+      "name": "Javanese"
+    },
+    {
+      "code": "mi",
+      "name": "Maori"
+    },
+    {
+      "code": "tk",
+      "name": "Turkmen"
+    },
+    {
+      "code": "ceb",
+      "name": "Cebuano"
+    },
+    {
+      "code": "yi",
+      "name": "Yiddish"
+    },
+    {
+      "code": "ba",
+      "name": "Bashkir"
+    },
+    {
+      "code": "fo",
+      "name": "Faroese"
+    },
+    {
+      "code": "or",
+      "name": "Odia (Oriya)"
+    },
+    {
+      "code": "xh",
+      "name": "Xhosa"
+    },
+    {
+      "code": "su",
+      "name": "Sundanese"
+    },
+    {
+      "code": "kl",
+      "name": "Kalaallisut"
+    },
+    {
+      "code": "ny",
+      "name": "Chichewa"
+    },
+    {
+      "code": "sm",
+      "name": "Samoan"
+    },
+    {
+      "code": "sn",
+      "name": "Shona"
+    },
+    {
+      "code": "co",
+      "name": "Corsican"
+    },
+    {
+      "code": "zu",
+      "name": "Zulu"
+    },
+    {
+      "code": "ig",
+      "name": "Igbo"
+    },
+    {
+      "code": "yo",
+      "name": "Yoruba"
+    },
+    {
+      "code": "pap",
+      "name": "Papiamento"
+    },
+    {
+      "code": "st",
+      "name": "Sesotho"
+    },
+    {
+      "code": "haw",
+      "name": "Hawaiian"
+    },
+    {
+      "code": "as",
+      "name": "Assamese"
+    },
+    {
+      "code": "oc",
+      "name": "Occitan"
+    },
+    {
+      "code": "cv",
+      "name": "Chuvash"
+    },
+    {
+      "code": "lus",
+      "name": "Mizo"
+    },
+    {
+      "code": "tet",
+      "name": "Tetum"
+    },
+    {
+      "code": "gsw",
+      "name": "Swiss German"
+    },
+    {
+      "code": "sah",
+      "name": "Yakut"
+    },
+    {
+      "code": "br",
+      "name": "Breton"
+    },
+    {
+      "code": "rm",
+      "name": "Romansh"
+    },
+    {
+      "code": "sa",
+      "name": "Sanskrit"
+    },
+    {
+      "code": "bo",
+      "name": "Tibetan"
+    },
+    {
+      "code": "om",
+      "name": "Oromo"
+    },
+    {
+      "code": "se",
+      "name": "N. Sami"
+    },
+    {
+      "code": "ce",
+      "name": "Chechen"
+    },
+    {
+      "code": "cnh",
+      "name": "Hakha Chin"
+    },
+    {
+      "code": "ilo",
+      "name": "Ilocano"
+    },
+    {
+      "code": "hil",
+      "name": "Hiligaynon"
+    },
+    {
+      "code": "udm",
+      "name": "Udmurt"
+    },
+    {
+      "code": "os",
+      "name": "Ossetian"
+    },
+    {
+      "code": "lg",
+      "name": "Luganda"
+    },
+    {
+      "code": "ti",
+      "name": "Tigrinya"
+    },
+    {
+      "code": "vec",
+      "name": "Venetian"
+    },
+    {
+      "code": "ts",
+      "name": "Tsonga"
+    },
+    {
+      "code": "tyv",
+      "name": "Tuvinian"
+    },
+    {
+      "code": "kbd",
+      "name": "Kabardian"
+    },
+    {
+      "code": "ee",
+      "name": "Ewe"
+    },
+    {
+      "code": "iba",
+      "name": "Iban"
+    },
+    {
+      "code": "av",
+      "name": "Avar"
+    },
+    {
+      "code": "kha",
+      "name": "Khasi"
+    },
+    {
+      "code": "to",
+      "name": "Tonga (Tonga Islands)"
+    },
+    {
+      "code": "tn",
+      "name": "Tswana"
+    },
+    {
+      "code": "nso",
+      "name": "Sepedi"
+    },
+    {
+      "code": "fj",
+      "name": "Fijian"
+    },
+    {
+      "code": "zza",
+      "name": "Zaza"
+    },
+    {
+      "code": "ak",
+      "name": "Twi"
+    },
+    {
+      "code": "ada",
+      "name": "Adangme"
+    },
+    {
+      "code": "otq",
+      "name": "Querétaro Otomi"
+    },
+    {
+      "code": "dz",
+      "name": "Dzongkha"
+    },
+    {
+      "code": "bua",
+      "name": "Buryat"
+    },
+    {
+      "code": "cfm",
+      "name": "Falam Chin"
+    },
+    {
+      "code": "ln",
+      "name": "Lingala"
+    },
+    {
+      "code": "chm",
+      "name": "Meadow Mari"
+    },
+    {
+      "code": "gn",
+      "name": "Guarani"
+    },
+    {
+      "code": "krc",
+      "name": "Karachay-Balkar"
+    },
+    {
+      "code": "wa",
+      "name": "Walloon"
+    },
+    {
+      "code": "hif",
+      "name": "Fiji Hindi"
+    },
+    {
+      "code": "yua",
+      "name": "Yucateco"
+    },
+    {
+      "code": "srn",
+      "name": "Sranan Tongo"
+    },
+    {
+      "code": "war",
+      "name": "Waray (Philippines)"
+    },
+    {
+      "code": "rom",
+      "name": "Romani"
+    },
+    {
+      "code": "bik",
+      "name": "Central Bikol"
+    },
+    {
+      "code": "pam",
+      "name": "Pampanga"
+    },
+    {
+      "code": "sg",
+      "name": "Sango"
+    },
+    {
+      "code": "lu",
+      "name": "Luba-Katanga"
+    },
+    {
+      "code": "ady",
+      "name": "Adyghe"
+    },
+    {
+      "code": "kbp",
+      "name": "Kabiyeh"
+    },
+    {
+      "code": "syr",
+      "name": "Syriac"
+    },
+    {
+      "code": "ltg",
+      "name": "Latgalian"
+    },
+    {
+      "code": "myv",
+      "name": "Erzya"
+    },
+    {
+      "code": "iso",
+      "name": "Isoko"
+    },
+    {
+      "code": "kac",
+      "name": "Kachin"
+    },
+    {
+      "code": "bho",
+      "name": "Bhojpuri"
+    },
+    {
+      "code": "ay",
+      "name": "Aymara"
+    },
+    {
+      "code": "kum",
+      "name": "Kumyk"
+    },
+    {
+      "code": "qu",
+      "name": "Quechua"
+    },
+    {
+      "code": "za",
+      "name": "Zhuang"
+    },
+    {
+      "code": "pag",
+      "name": "Pangasinan"
+    },
+    {
+      "code": "ngu",
+      "name": "Guerrero Nahuatl"
+    },
+    {
+      "code": "ve",
+      "name": "Venda"
+    },
+    {
+      "code": "pck",
+      "name": "Paite Chin"
+    },
+    {
+      "code": "zap",
+      "name": "Zapotec"
+    },
+    {
+      "code": "tyz",
+      "name": "Tày"
+    },
+    {
+      "code": "hui",
+      "name": "Huli"
+    },
+    {
+      "code": "bbc",
+      "name": "Batak Toba"
+    },
+    {
+      "code": "tzo",
+      "name": "Tzotzil"
+    },
+    {
+      "code": "tiv",
+      "name": "Tiv"
+    },
+    {
+      "code": "ksd",
+      "name": "Kuanua"
+    },
+    {
+      "code": "gom",
+      "name": "Goan Konkani"
+    },
+    {
+      "code": "min",
+      "name": "Minangkabau"
+    },
+    {
+      "code": "ang",
+      "name": "Old English"
+    },
+    {
+      "code": "nhe",
+      "name": "E. Huasteca Nahuatl"
+    },
+    {
+      "code": "bgp",
+      "name": "E. Baluchi"
+    },
+    {
+      "code": "nzi",
+      "name": "Nzima"
+    },
+    {
+      "code": "nnb",
+      "name": "Nande"
+    },
+    {
+      "code": "nv",
+      "name": "Navajo"
+    },
+    {
+      "code": "bci",
+      "name": "Baoulé"
+    },
+    {
+      "code": "kv",
+      "name": "Komi"
+    },
+    {
+      "code": "new",
+      "name": "Newari"
+    },
+    {
+      "code": "mps",
+      "name": "Dadibi"
+    },
+    {
+      "code": "alt",
+      "name": "S. Altai"
+    },
+    {
+      "code": "meu",
+      "name": "Motu"
+    },
+    {
+      "code": "bew",
+      "name": "Betawi"
+    },
+    {
+      "code": "fon",
+      "name": "Fon"
+    },
+    {
+      "code": "iu",
+      "name": "Inuktitut"
+    },
+    {
+      "code": "abt",
+      "name": "Ambulas"
+    },
+    {
+      "code": "mgh",
+      "name": "Makhuwa-Meetto"
+    },
+    {
+      "code": "mnw",
+      "name": "Mon"
+    },
+    {
+      "code": "tvl",
+      "name": "Tuvalu"
+    },
+    {
+      "code": "dov",
+      "name": "Dombe"
+    },
+    {
+      "code": "tlh",
+      "name": "Klingon"
+    },
+    {
+      "code": "ho",
+      "name": "Hiri Motu"
+    },
+    {
+      "code": "kw",
+      "name": "Cornish"
+    },
+    {
+      "code": "mrj",
+      "name": "Hill Mari"
+    },
+    {
+      "code": "meo",
+      "name": "Kedah Malay"
+    },
+    {
+      "code": "crh",
+      "name": "Crimean Tatar"
+    },
+    {
+      "code": "mbt",
+      "name": "Matigsalug Manobo"
+    },
+    {
+      "code": "emp",
+      "name": "N. Emberá"
+    },
+    {
+      "code": "ace",
+      "name": "Achinese"
+    },
+    {
+      "code": "ium",
+      "name": "Iu Mien"
+    },
+    {
+      "code": "mam",
+      "name": "Mam"
+    },
+    {
+      "code": "gym",
+      "name": "Ngäbere"
+    },
+    {
+      "code": "mai",
+      "name": "Maithili"
+    },
+    {
+      "code": "crs",
+      "name": "Seselwa Creole French"
+    },
+    {
+      "code": "pon",
+      "name": "Pohnpeian"
+    },
+    {
+      "code": "ubu",
+      "name": "Umbu-Ungu"
+    },
+    {
+      "code": "fip",
+      "name": "Fipa"
+    },
+    {
+      "code": "quc",
+      "name": "K'iche'"
+    },
+    {
+      "code": "gv",
+      "name": "Manx"
+    },
+    {
+      "code": "kj",
+      "name": "Kuanyama"
+    },
+    {
+      "code": "btx",
+      "name": "Batak Karo"
+    },
+    {
+      "code": "ape",
+      "name": "Bukiyip"
+    },
+    {
+      "code": "chk",
+      "name": "Chuukese"
+    },
+    {
+      "code": "rcf",
+      "name": "Réunion Creole French"
+    },
+    {
+      "code": "shn",
+      "name": "Shan"
+    },
+    {
+      "code": "tzh",
+      "name": "Tzeltal"
+    },
+    {
+      "code": "mdf",
+      "name": "Moksha"
+    },
+    {
+      "code": "ppk",
+      "name": "Uma"
+    },
+    {
+      "code": "ss",
+      "name": "Swati"
+    },
+    {
+      "code": "gag",
+      "name": "Gagauz"
+    },
+    {
+      "code": "cab",
+      "name": "Garifuna"
+    },
+    {
+      "code": "kri",
+      "name": "Krio"
+    },
+    {
+      "code": "seh",
+      "name": "Sena"
+    },
+    {
+      "code": "ibb",
+      "name": "Ibibio"
+    },
+    {
+      "code": "tbz",
+      "name": "Ditammari"
+    },
+    {
+      "code": "bru",
+      "name": "E. Bru"
+    },
+    {
+      "code": "enq",
+      "name": "Enga"
+    },
+    {
+      "code": "ach",
+      "name": "Acoli"
+    },
+    {
+      "code": "cuk",
+      "name": "San Blas Kuna"
+    },
+    {
+      "code": "kmb",
+      "name": "Kimbundu"
+    },
+    {
+      "code": "wo",
+      "name": "Wolof"
+    },
+    {
+      "code": "kek",
+      "name": "Kekchí"
+    },
+    {
+      "code": "qub",
+      "name": "Huallaga Huánuco Quechua"
+    },
+    {
+      "code": "tab",
+      "name": "Tabassaran"
+    },
+    {
+      "code": "bts",
+      "name": "Batak Simalungun"
+    },
+    {
+      "code": "kos",
+      "name": "Kosraean"
+    },
+    {
+      "code": "rwo",
+      "name": "Rawa"
+    },
+    {
+      "code": "cak",
+      "name": "Kaqchikel"
+    },
+    {
+      "code": "tuc",
+      "name": "Mutu"
+    },
+    {
+      "code": "bum",
+      "name": "Bulu"
+    },
+    {
+      "code": "cjk",
+      "name": "Chokwe"
+    },
+    {
+      "code": "gil",
+      "name": "Gilbertese"
+    },
+    {
+      "code": "stq",
+      "name": "Saterfriesisch"
+    },
+    {
+      "code": "tsg",
+      "name": "Tausug"
+    },
+    {
+      "code": "quh",
+      "name": "S. Bolivian Quechua"
+    },
+    {
+      "code": "mak",
+      "name": "Makasar"
+    },
+    {
+      "code": "arn",
+      "name": "Mapudungun"
+    },
+    {
+      "code": "ban",
+      "name": "Balinese"
+    },
+    {
+      "code": "jiv",
+      "name": "Shuar"
+    },
+    {
+      "code": "sja",
+      "name": "Epena"
+    },
+    {
+      "code": "yap",
+      "name": "Yapese"
+    },
+    {
+      "code": "tcy",
+      "name": "Tulu"
+    },
+    {
+      "code": "toj",
+      "name": "Tojolabal"
+    },
+    {
+      "code": "twu",
+      "name": "Termanu"
+    },
+    {
+      "code": "xal",
+      "name": "Kalmyk"
+    },
+    {
+      "code": "amu",
+      "name": "Guerrero Amuzgo"
+    },
+    {
+      "code": "rmc",
+      "name": "Carpathian Romani"
+    },
+    {
+      "code": "hus",
+      "name": "Huastec"
+    },
+    {
+      "code": "nia",
+      "name": "Nias"
+    },
+    {
+      "code": "kjh",
+      "name": "Khakas"
+    },
+    {
+      "code": "bm",
+      "name": "Bambara"
+    },
+    {
+      "code": "guh",
+      "name": "Guahibo"
+    },
+    {
+      "code": "mas",
+      "name": "Masai"
+    },
+    {
+      "code": "acf",
+      "name": "St Lucian Creole French"
+    },
+    {
+      "code": "dtp",
+      "name": "Kadazan Dusun"
+    },
+    {
+      "code": "ksw",
+      "name": "S'gaw Karen"
+    },
+    {
+      "code": "bzj",
+      "name": "Belize Kriol English"
+    },
+    {
+      "code": "din",
+      "name": "Dinka"
+    },
+    {
+      "code": "zne",
+      "name": "Zande"
+    },
+    {
+      "code": "mad",
+      "name": "Madurese"
+    },
+    {
+      "code": "msi",
+      "name": "Sabah Malay"
+    },
+    {
+      "code": "mag",
+      "name": "Magahi"
+    },
+    {
+      "code": "mkn",
+      "name": "Kupang Malay"
+    },
+    {
+      "code": "kg",
+      "name": "Kongo"
+    },
+    {
+      "code": "lhu",
+      "name": "Lahu"
+    },
+    {
+      "code": "ch",
+      "name": "Chamorro"
+    },
+    {
+      "code": "qvi",
+      "name": "Imbabura H. Quichua"
+    },
+    {
+      "code": "mh",
+      "name": "Marshallese"
+    },
+    {
+      "code": "djk",
+      "name": "E. Maroon Creole"
+    },
+    {
+      "code": "sus",
+      "name": "Susu"
+    },
+    {
+      "code": "mfe",
+      "name": "Morisien"
+    },
+    {
+      "code": "srm",
+      "name": "Saramaccan"
+    },
+    {
+      "code": "dyu",
+      "name": "Dyula"
+    },
+    {
+      "code": "ctu",
+      "name": "Chol"
+    },
+    {
+      "code": "gui",
+      "name": "E. Bolivian Guaraní"
+    },
+    {
+      "code": "pau",
+      "name": "Palauan"
+    },
+    {
+      "code": "inb",
+      "name": "Inga"
+    },
+    {
+      "code": "bi",
+      "name": "Bislama"
+    },
+    {
+      "code": "mni",
+      "name": "Meiteilon (Manipuri)"
+    },
+    {
+      "code": "guc",
+      "name": "Wayuu"
+    },
+    {
+      "code": "jam",
+      "name": "Jamaican Creole English"
+    },
+    {
+      "code": "wal",
+      "name": "Wolaytta"
+    },
+    {
+      "code": "jac",
+      "name": "Popti'"
+    },
+    {
+      "code": "bas",
+      "name": "Basa (Cameroon)"
+    },
+    {
+      "code": "gor",
+      "name": "Gorontalo"
+    },
+    {
+      "code": "skr",
+      "name": "Saraiki"
+    },
+    {
+      "code": "nyu",
+      "name": "Nyungwe"
+    },
+    {
+      "code": "noa",
+      "name": "Woun Meu"
+    },
+    {
+      "code": "sda",
+      "name": "Toraja-Sa'dan"
+    },
+    {
+      "code": "gub",
+      "name": "Guajajára"
+    },
+    {
+      "code": "nog",
+      "name": "Nogai"
+    },
+    {
+      "code": "cni",
+      "name": "Asháninka"
+    },
+    {
+      "code": "teo",
+      "name": "Teso"
+    },
+    {
+      "code": "tdx",
+      "name": "Tandroy-Mahafaly Malagasy"
+    },
+    {
+      "code": "sxn",
+      "name": "Sangir"
+    },
+    {
+      "code": "rki",
+      "name": "Rakhine"
+    },
+    {
+      "code": "nr",
+      "name": "South Ndebele"
+    },
+    {
+      "code": "frp",
+      "name": "Arpitan"
+    },
+    {
+      "code": "alz",
+      "name": "Alur"
+    },
+    {
+      "code": "taj",
+      "name": "E. Tamang"
+    },
+    {
+      "code": "lrc",
+      "name": "N. Luri"
+    },
+    {
+      "code": "cce",
+      "name": "Chopi"
+    },
+    {
+      "code": "rn",
+      "name": "Rundi"
+    },
+    {
+      "code": "jvn",
+      "name": "Caribbean Javanese"
+    },
+    {
+      "code": "hvn",
+      "name": "Sabu"
+    },
+    {
+      "code": "nij",
+      "name": "Ngaju"
+    },
+    {
+      "code": "dwr",
+      "name": "Dawro"
+    },
+    {
+      "code": "izz",
+      "name": "Izii"
+    },
+    {
+      "code": "msm",
+      "name": "Agusan Manobo"
+    },
+    {
+      "code": "bus",
+      "name": "Bokobaru"
+    },
+    {
+      "code": "ktu",
+      "name": "Kituba (DRC)"
+    },
+    {
+      "code": "chr",
+      "name": "Cherokee"
+    },
+    {
+      "code": "maz",
+      "name": "Central Mazahua"
+    },
+    {
+      "code": "tzj",
+      "name": "Tz'utujil"
+    },
+    {
+      "code": "suz",
+      "name": "Sunwar"
+    },
+    {
+      "code": "knj",
+      "name": "W. Kanjobal"
+    },
+    {
+      "code": "bim",
+      "name": "Bimoba"
+    },
+    {
+      "code": "gvl",
+      "name": "Gulay"
+    },
+    {
+      "code": "bqc",
+      "name": "Boko (Benin)"
+    },
+    {
+      "code": "tca",
+      "name": "Ticuna"
+    },
+    {
+      "code": "pis",
+      "name": "Pijin"
+    },
+    {
+      "code": "prk",
+      "name": "Parauk"
+    },
+    {
+      "code": "laj",
+      "name": "Lango (Uganda)"
+    },
+    {
+      "code": "mel",
+      "name": "Central Melanau"
+    },
+    {
+      "code": "qxr",
+      "name": "Cañar H. Quichua"
+    },
+    {
+      "code": "niq",
+      "name": "Nandi"
+    },
+    {
+      "code": "ahk",
+      "name": "Akha"
+    },
+    {
+      "code": "shp",
+      "name": "Shipibo-Conibo"
+    },
+    {
+      "code": "hne",
+      "name": "Chhattisgarhi"
+    },
+    {
+      "code": "spp",
+      "name": "Supyyire Senoufo"
+    },
+    {
+      "code": "koi",
+      "name": "Komi-Permyak"
+    },
+    {
+      "code": "krj",
+      "name": "Kinaray-A"
+    },
+    {
+      "code": "quf",
+      "name": "Lambayeque Quechua"
+    },
+    {
+      "code": "luz",
+      "name": "S. Luri"
+    },
+    {
+      "code": "agr",
+      "name": "Aguaruna"
+    },
+    {
+      "code": "tsc",
+      "name": "Tswa"
+    },
+    {
+      "code": "mqy",
+      "name": "Manggarai"
+    },
+    {
+      "code": "gof",
+      "name": "Gofa"
+    },
+    {
+      "code": "gbm",
+      "name": "Garhwali"
+    },
+    {
+      "code": "miq",
+      "name": "Mískito"
+    },
+    {
+      "code": "dje",
+      "name": "Zarma"
+    },
+    {
+      "code": "awa",
+      "name": "Awadhi"
+    },
+    {
+      "code": "bjj",
+      "name": "Kanauji"
+    },
+    {
+      "code": "qvz",
+      "name": "N. Pastaza Quichua"
+    },
+    {
+      "code": "sjp",
+      "name": "Surjapuri"
+    },
+    {
+      "code": "tll",
+      "name": "Tetela"
+    },
+    {
+      "code": "raj",
+      "name": "Rajasthani"
+    },
+    {
+      "code": "kjg",
+      "name": "Khmu"
+    },
+    {
+      "code": "bgz",
+      "name": "Banggai"
+    },
+    {
+      "code": "quy",
+      "name": "Ayacucho Quechua"
+    },
+    {
+      "code": "cbk",
+      "name": "Chavacano"
+    },
+    {
+      "code": "akb",
+      "name": "Batak Angkola"
+    },
+    {
+      "code": "oj",
+      "name": "Ojibwa"
+    },
+    {
+      "code": "ify",
+      "name": "Keley-I Kallahan"
+    },
+    {
+      "code": "mey",
+      "name": "Hassaniyya"
+    },
+    {
+      "code": "ks",
+      "name": "Kashimiri"
+    },
+    {
+      "code": "cac",
+      "name": "Chuj"
+    },
+    {
+      "code": "brx",
+      "name": "Bodo (India)"
+    },
+    {
+      "code": "qup",
+      "name": "S. Pastaza Quechua"
+    },
+    {
+      "code": "syl",
+      "name": "Sylheti"
+    },
+    {
+      "code": "jax",
+      "name": "Jambi Malay"
+    },
+    {
+      "code": "ff",
+      "name": "Fulfulde"
+    },
+    {
+      "code": "ber",
+      "name": "Tamazight (Tfng)"
+    },
+    {
+      "code": "tks",
+      "name": "Takestani"
+    },
+    {
+      "code": "trp",
+      "name": "Kok Borok"
+    },
+    {
+      "code": "mrw",
+      "name": "Maranao"
+    },
+    {
+      "code": "adh",
+      "name": "Adhola"
+    },
+    {
+      "code": "smt",
+      "name": "Simte"
+    },
+    {
+      "code": "srr",
+      "name": "Serer"
+    },
+    {
+      "code": "ffm",
+      "name": "Maasina Fulfulde"
+    },
+    {
+      "code": "qvc",
+      "name": "Cajamarca Quechua"
+    },
+    {
+      "code": "mtr",
+      "name": "Mewari"
+    },
+    {
+      "code": "ann",
+      "name": "Obolo"
+    },
+    {
+      "code": "kaa-Latn",
+      "name": "Kara-Kalpak (Latn)"
+    },
+    {
+      "code": "aa",
+      "name": "Afar"
+    },
+    {
+      "code": "noe",
+      "name": "Nimadi"
+    },
+    {
+      "code": "nut",
+      "name": "Nung (Viet Nam)"
+    },
+    {
+      "code": "gyn",
+      "name": "Guyanese Creole English"
+    },
+    {
+      "code": "kwi",
+      "name": "Awa-Cuaiquer"
+    },
+    {
+      "code": "xmm",
+      "name": "Manado Malay"
+    },
+    {
+      "code": "msb",
+      "name": "Masbatenyo"
+    }
+  ]
+}

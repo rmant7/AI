@@ -151,6 +151,10 @@ class InsufficientMemoryException(
     val budgetBytes: Long,
     val residentBytes: Long,
 ) : Exception(
-    "Cannot load model requiring $requestedBytes bytes: budget $budgetBytes, " +
-        "$residentBytes bytes resident and not evictable",
-)
+    "Insufficient RAM: this model needs ~${gb(requestedBytes)}, only ~${gb(budgetBytes)} is " +
+        "safely available" + if (residentBytes > 0) " (${gb(residentBytes)} already resident, not evictable)" else "",
+) {
+    private companion object {
+        fun gb(bytes: Long): String = "%.1f GB".format(bytes / 1_000_000_000.0)
+    }
+}

@@ -41,6 +41,107 @@ import java.util.concurrent.atomic.AtomicReference
 private const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 
 /**
+ * Same reasoning as [MMPROJ_RAM_SAFETY_FACTOR], for the main GGUF itself —
+ * a real device report: a 5.2GB model's load started with only 3.3GB free,
+ * ran the whole process out of memory, and got killed by Android's OOM
+ * killer partway through [LlamaBridge.nativeLoad] — not a catchable
+ * exception, since the process was gone before any Kotlin code downstream
+ * could run. [SuitabilityScorer]'s own admission check runs against a
+ * *static*, total-RAM-derived budget upstream of this call and had already
+ * let this candidate through; it has no way to see momentary pressure from
+ * whatever else happens to be resident right now. Lower than the mmproj
+ * factor (1.3 vs 1.4) since the main model's KV cache and compute buffers
+ * are proportionally smaller relative to its own weights than an image
+ * projector's activation buffers are relative to its — a real device's
+ * post-load free-RAM logs bore this out (an ~1.86GB model settling around
+ * ~2.3-2.4GB actually held).
+ */
+private const val MAIN_MODEL_RAM_SAFETY_FACTOR = 1.3
+
+/**
+ * The kernel's own answer to "how much could a new allocation actually get
+ * without swapping heavily" — unlike a plain MemFree/Cached split, already
+ * accounts for how much of Cached/Slab is genuinely reclaimable right now.
+ * Exactly the right number for [LlamaBridge.nativeLoad]'s own memory model:
+ * `llama_jni.cpp` loads a GGUF with `LLAMA_LOAD_MODE_MMAP`, so the weights
+ * are file-backed pages the kernel can evict and re-page on demand, not
+ * anonymous heap that needs genuinely free RAM up front.
+ *
+ * Real device report: Settings -> Running services, split two ways —
+ * "cached processes" read ~4-5GB free (matching [android.app.ActivityManager]
+ * closely) while "running processes" read ~10GB free, with not one process
+ * in the cached list over ~200MB. The ~5-6GB gap between those two views is
+ * reclaimable page cache, not memory any process is actually holding — the
+ * same category MemAvailable is built to count and
+ * [android.app.ActivityManager.MemoryInfo.availMem] is not. See
+ * [MAIN_MODEL_RAM_SAFETY_FACTOR]'s own doc comment for how this changes the
+ * pre-flight refusal below.
+ */
+internal fun readMemAvailableBytes(): Long? = runCatching {
+    File("/proc/meminfo").useLines { lines ->
+        lines.firstOrNull { it.startsWith("MemAvailable:") }
+            ?.removePrefix("MemAvailable:")?.trim()?.removeSuffix("kB")?.trim()?.toLongOrNull()
+            ?.let { it * 1024 }
+    }
+}.getOrNull()
+
+/**
+ * The kernel's own memory accounting, straight from the same source
+ * Android's Settings app reads for its Running services screen — unlike
+ * [android.app.ActivityManager.MemoryInfo.availMem], not (as far as this
+ * app can tell) subject to the reduced precision a non-privileged app's
+ * [android.app.ActivityManager.getMemoryInfo] call is known to get.
+ * Best-effort: some devices' SELinux policy denies a regular app read
+ * access to `/proc/meminfo` outright, in which case this returns null and
+ * callers fall back to whatever [android.app.ActivityManager] already gave
+ * them.
+ *
+ * Every field a real device report asked for, not just MemAvailable: a
+ * single number rules ActivityManager's own precision in or out, but
+ * Cached/SReclaimable/Buffers (what the kernel considers reclaimable, vs
+ * what Settings' own more liberal estimate might count) and SwapTotal/
+ * SwapFree are what actually explains *why* two "available" figures
+ * disagree, once they do.
+ */
+private fun readProcMeminfo(): String? = runCatching {
+    val wanted = listOf(
+        "MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached", "SwapCached", "SReclaimable", "SUnreclaim",
+        "Shmem", "AnonPages", "Mapped", "Slab", "SwapTotal", "SwapFree",
+    )
+    val values = File("/proc/meminfo").useLines { lines ->
+        lines.mapNotNull { line ->
+            val name = wanted.firstOrNull { line.startsWith("$it:") } ?: return@mapNotNull null
+            val kb = line.removePrefix("$name:").trim().removeSuffix("kB").trim().toLongOrNull()
+                ?: return@mapNotNull null
+            name to kb / 1024
+        }.toMap()
+    }
+    if (values.isEmpty()) null else wanted.mapNotNull { name -> values[name]?.let { "$name=${it}MB" } }.joinToString(" ")
+}.getOrNull()
+
+/**
+ * This process's own memory footprint at the moment of a refusal — a real
+ * device report asked for this specifically: whether the app's *own*
+ * resident set (semantic memory not actually freed, a previous model's
+ * allocation lingering, ...) already accounts for some of the gap between
+ * what [readProcMeminfo] and [android.app.ActivityManager] each report,
+ * rather than something external. Same best-effort shape as
+ * [readProcMeminfo].
+ */
+private fun readProcSelfStatus(): String? = runCatching {
+    val wanted = listOf("VmRSS", "VmSize", "RssAnon", "RssFile", "RssShmem")
+    val values = File("/proc/self/status").useLines { lines ->
+        lines.mapNotNull { line ->
+            val name = wanted.firstOrNull { line.startsWith("$it:") } ?: return@mapNotNull null
+            val kb = line.removePrefix("$name:").trim().removeSuffix("kB").trim().toLongOrNull()
+                ?: return@mapNotNull null
+            name to kb / 1024
+        }.toMap()
+    }
+    if (values.isEmpty()) null else wanted.mapNotNull { name -> values[name]?.let { "$name=${it}MB" } }.joinToString(" ")
+}.getOrNull()
+
+/**
  * On-device inference. The same [ModelRuntime] contract as the remote runtime,
  * which is what lets the router, pipelines, context engine and memory stay
  * untouched: only the registration changes.
@@ -72,9 +173,31 @@ class LlamaCppRuntime(
      * so tests and any other caller don't need a real device.
      */
     private val availableRamBytes: () -> Long = { Long.MAX_VALUE },
+    /**
+     * Everything else [android.app.ActivityManager.MemoryInfo] carries
+     * beyond the single number [availableRamBytes] reads — totalMem,
+     * threshold, lowMemory — read fresh alongside [availableRamBytes]
+     * whenever the pre-flight RAM refusal below actually fires. Defaults to
+     * empty so tests and any other caller don't need a real device.
+     */
+    private val memoryDiagnostics: () -> String = { "" },
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
+
+    /**
+     * The higher of [availableRamBytes] (ActivityManager) and
+     * [readMemAvailableBytes] (the kernel's own MemAvailable) — see
+     * [readMemAvailableBytes]'s own doc comment for why ActivityManager
+     * alone under-counts headroom this app's mmap-based load can actually
+     * use. `maxOf`, not a straight replacement: [readMemAvailableBytes] can
+     * read null (SELinux-restricted devices), and even where it reads a
+     * real number, trusting whichever source is more generous is strictly
+     * safer than trusting whichever happens to run first — this can only
+     * ever let through a load [availableRamBytes] alone would have refused,
+     * never the reverse.
+     */
+    private fun effectiveHeadroomBytes(): Long = maxOf(availableRamBytes(), readMemAvailableBytes() ?: 0L)
 
     override fun canRun(model: ModelDescriptor, binding: RuntimeBinding): Boolean =
         binding.runtime == RuntimeKind.LLAMA_CPP &&
@@ -89,6 +212,40 @@ class LlamaCppRuntime(
         if (!file.isFile) {
             throw ModelLoadException("Model file is missing: ${binding.artifact}")
         }
+        run {
+            val fileBytes = file.length()
+            val headroom = effectiveHeadroomBytes()
+            val wantBytes = (fileBytes * MAIN_MODEL_RAM_SAFETY_FACTOR).toLong()
+            if (fileBytes > 0 && headroom < wantBytes) {
+                // Explicit product decision, not a bug: this used to throw
+                // ModelLoadException here and never attempt the native load
+                // at all. A real device report pushed back on that —
+                // refusing pre-emptively means every "not enough RAM" report
+                // is this heuristic's own guess (file size * 1.3 against a
+                // headroom estimate that has itself been wrong twice this
+                // same day), never a confirmed fact. Logged, then let
+                // through: if the device really can't do it, Android's own
+                // OOM killer firing produces a REASON_LOW_MEMORY exit this
+                // app already captures on next launch (AppLog.
+                // recordProcessExitIfNotable) — real evidence instead of a
+                // second-hand estimate, at the cost of losing the current
+                // turn if the guess turns out right. Once that evidence
+                // exists either way, the actual next step this was blocking
+                // (splitting a load into a required text stage and a
+                // skippable mmproj stage) is already how mmproj itself
+                // works below — this main-model load has no such split of
+                // its own to fall back to.
+                log(
+                    "LOCAL_LOAD",
+                    "${file.name}: LOW ON RAM — only ${headroom / 1_000_000}MB free " +
+                        "(max of ActivityManager.availMem and /proc/meminfo MemAvailable), " +
+                        "want ~${wantBytes / 1_000_000}MB — attempting anyway" +
+                        " — ${memoryDiagnostics()}" +
+                        (readProcMeminfo()?.let { " — /proc/meminfo: $it" } ?: " — /proc/meminfo unreadable") +
+                        (readProcSelfStatus()?.let { " — /proc/self/status: $it" } ?: " — /proc/self/status unreadable"),
+                )
+            }
+        }
 
         val bridge = LlamaBridge()
         val loadStart = System.currentTimeMillis()
@@ -98,7 +255,7 @@ class LlamaCppRuntime(
         // predicts is otherwise invisible here until someone asks "was
         // something else holding memory at the time" and has no log line to
         // check.
-        log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads, free RAM: ${availableRamBytes() / (1024 * 1024)} MB)")
+        log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads, free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)")
 
         // nativeLoad() is a single blocking JNI call — llama_model_load_from_file()
         // and llama_init_from_model() have no cancellation hook of their own,
@@ -139,7 +296,7 @@ class LlamaCppRuntime(
             log("LOCAL_LOAD", "${file.name}: FAILED after ${loadMs}ms")
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
-        log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${availableRamBytes() / (1024 * 1024)} MB)")
+        log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)")
 
         // Best-effort, and only if a projector was actually downloaded for
         // this model (see ModelStore.hasMmproj) — a model with none behaves
@@ -171,7 +328,15 @@ class LlamaCppRuntime(
             }
         } ?: false
 
-        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, log)
+        // Read once here rather than on every generate() call — it's a read
+        // of static model metadata (llama_model_has_encoder), unchanging for
+        // the life of this handle, same reasoning as caching hasVision above.
+        val hasEncoder = LlamaBridge.nativeOpMutex.withLock {
+            runCatching { bridge.nativeHasEncoder(handle) }.getOrDefault(false)
+        }
+        if (hasEncoder) log("LOCAL_LOAD", "${file.name}: encoder-decoder model — routing generate() through nativeGenerateT5")
+
+        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, hasEncoder, log)
     }
 }
 
@@ -182,6 +347,8 @@ private class LlamaTextModel(
     private val handle: Long,
     /** Whether [LlamaBridge.nativeLoadMmproj] succeeded for this handle — see [generate]. */
     private val hasVision: Boolean,
+    /** Whether this handle is an encoder-decoder (T5-family) model — see [generate]. */
+    private val hasEncoder: Boolean,
     private val log: (tag: String, message: String) -> Unit,
 ) : TextModelHandle {
 
@@ -234,8 +401,37 @@ private class LlamaTextModel(
             runCatching {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
             }
-            val produced = LlamaBridge.nativeOpMutex.withLock {
-                if (image != null) {
+            // A real device report: this whole launch body used to have
+            // nothing catching a thrown exception (as opposed to the
+            // negative-return-code failure path just below, which was
+            // already handled) — bridge.nativeGenerateT5 throwing anything
+            // (an OutOfMemoryError allocating a large buffer is the obvious
+            // candidate on a memory-constrained device) had nothing to stop
+            // it propagating out of this coroutine and killing the whole
+            // process, logged by Android as a plain "unhandled exception"
+            // with no indication which exception or where. Caught and
+            // logged here instead: one translation fails cleanly, and the
+            // exception's own message/stack finally reaches the same
+            // user-copyable log everything else in this app does.
+            val produced = try {
+                LlamaBridge.nativeOpMutex.withLock {
+                    if (hasEncoder) {
+                    // T5-family (MADLAD-400): request.prompt is already the
+                    // model's own expected input (`<2xx> source text`, built
+                    // by TranslationActivity) — there is no chat template, no
+                    // system prompt, and no vision support for this
+                    // architecture, so none of that applies here.
+                    bridge.nativeGenerateT5(
+                        handle = handle,
+                        sourceText = request.prompt,
+                        maxTokens = request.maxTokens,
+                        temperature = request.temperature.toFloat(),
+                        topP = request.topP.toFloat(),
+                        topK = request.topK,
+                        repeatPenalty = request.repeatPenalty.toFloat(),
+                        callback = sink,
+                    )
+                } else if (image != null) {
                     // ImageRef.uri is always a "data:<mime>;base64,<payload>" string
                     // here, never a content:// or file path — ChatActivity.attachImage()
                     // builds it that way specifically because core/openai are plain JVM
@@ -272,6 +468,19 @@ private class LlamaTextModel(
                         callback = sink,
                     )
                 }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                completed.set(true)
+                val elapsedMs = System.currentTimeMillis() - start
+                log(
+                    "LOCAL_GENERATE",
+                    "$modelId: THREW ${e::class.java.simpleName}: ${e.message} after ${elapsedMs}ms, " +
+                        "$tokenCount tokens\n${e.stackTraceToString().take(4000)}",
+                )
+                close(e)
+                return@launch
             }
             completed.set(true)
             val elapsedMs = System.currentTimeMillis() - start

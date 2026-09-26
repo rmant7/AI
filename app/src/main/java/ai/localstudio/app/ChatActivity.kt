@@ -25,6 +25,7 @@ import ai.localstudio.app.history.ChatHistoryStore
 import ai.localstudio.app.history.Conversation
 import ai.localstudio.app.history.toMessage
 import ai.localstudio.app.history.toStored
+import ai.localstudio.app.llama.GenerationKeepAliveService
 import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.engine.UserRequest
@@ -185,20 +186,21 @@ class ChatActivity : AppCompatActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        // Chat-specific first — these act on *this conversation's* content,
+        // unlike everything UtilityMenu adds below.
         menu.add(0, MENU_MEMORY, 0, memoryTitle()).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
-        menu.add(0, MENU_MODELS, 1, R.string.menu_models)
-        menu.add(0, MENU_FILES, 2, R.string.menu_files)
-        menu.add(0, MENU_SETTINGS, 3, R.string.menu_settings)
-        menu.add(0, MENU_HISTORY, 4, R.string.menu_history)
-        menu.add(0, MENU_SHARE_CHAT, 5, R.string.menu_share_chat)
-        menu.add(0, MENU_CLEAR, 6, R.string.menu_clear)
-        // Last on purpose, not grouped with History/Share/Clear above it —
-        // those are all about *this chat's* content, while the log and the
-        // whisper.cpp test screen are both diagnostic tools unrelated to any
-        // one conversation.
-        menu.add(0, MENU_LOG, 7, R.string.menu_log)
-        menu.add(0, MENU_TRANSCRIBE, 8, R.string.menu_transcribe)
-        menu.add(0, MENU_BENCHMARK, 9, R.string.menu_benchmark)
+        menu.add(0, MENU_HISTORY, 0, R.string.menu_history)
+        menu.add(0, MENU_SHARE_CHAT, 0, R.string.menu_share_chat)
+        menu.add(0, MENU_CLEAR, 0, R.string.menu_clear)
+        // The same shared entries every other utility screen offers, in the
+        // same order, Log last — kept in exactly one place (UtilityMenu) so
+        // this menu can no longer drift out of sync with theirs. It used to:
+        // Log sat right after Share/Clear here, well before Transcribe/
+        // Benchmark/Translation/Phrasebook, because each of those got added
+        // by hand in this file independently of UtilityMenu's own list.
+        // History is skipped here specifically — see UtilityMenu.inflate's
+        // own doc comment on why this screen keeps its own.
+        UtilityMenu.inflate(this, menu, skip = setOf(HistoryActivity::class.java))
         return true
     }
 
@@ -208,21 +210,6 @@ class ChatActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        MENU_SETTINGS -> {
-            startActivity(Intent(this, SettingsActivity::class.java))
-            true
-        }
-
-        MENU_MODELS -> {
-            startActivity(Intent(this, ModelsActivity::class.java))
-            true
-        }
-
-        MENU_FILES -> {
-            startActivity(Intent(this, FilesActivity::class.java))
-            true
-        }
-
         MENU_MEMORY -> {
             startActivity(Intent(this, MemoryActivity::class.java))
             true
@@ -233,32 +220,23 @@ class ChatActivity : AppCompatActivity() {
             true
         }
 
-        MENU_HISTORY -> {
-            showHistory()
-            true
-        }
-
-        MENU_LOG -> {
-            startActivity(Intent(this, LogActivity::class.java))
-            true
-        }
-
-        MENU_TRANSCRIBE -> {
-            startActivity(Intent(this, TranscribeActivity::class.java))
-            true
-        }
-
-        MENU_BENCHMARK -> {
-            startActivity(Intent(this, BenchmarkActivity::class.java))
-            true
-        }
-
         MENU_SHARE_CHAT -> {
             shareChat()
             true
         }
 
-        else -> super.onOptionsItemSelected(item)
+        // Kept local rather than routed through UtilityMenu.handle(): that
+        // does a plain startActivity, and showHistory() needs the result
+        // HistoryActivity sends back (which conversation got picked, or
+        // deleted) to actually act on it — see openHistory's own doc
+        // comment. Skipped from UtilityMenu.inflate() above for exactly
+        // this reason.
+        MENU_HISTORY -> {
+            showHistory()
+            true
+        }
+
+        else -> UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
     }
 
     /** Shares the whole visible conversation as plain text — one message per paragraph, in order. */
@@ -510,26 +488,39 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    // A hang anywhere below this — native, network, wherever
-                    // — must not be silent forever. Cancelling here at least
-                    // frees the UI to try again instead of the send button
-                    // staying disabled with nothing to explain why.
-                    kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
-                        container.orchestrator().handle(
-                            UserRequest(
-                                conversationId = conversationId,
-                                text = text,
-                                attachment = attachment,
-                                memoryEnabled = container.settings.memoryEnabled,
-                                history = history,
-                                attachedDocuments = attachedDocuments,
-                            ),
-                            onPartialText = { partial.value = it },
-                        )
+            val orchestrator = container.orchestrator()
+            // Real device report: generation collapsed to 1.8 tok/s and
+            // translation never finished at all right after the app fell out
+            // of the foreground LRU bucket (screen off or backgrounded) —
+            // Android throttles CPU hard for a process in that state, which
+            // no in-process thread priority can undo. Only for a local route:
+            // a cloud call is network-bound, not CPU-bound, and unaffected.
+            val keepAlive = container.isLocalOnlyRoute
+            if (keepAlive) GenerationKeepAliveService.begin(this@ChatActivity)
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        // A hang anywhere below this — native, network, wherever
+                        // — must not be silent forever. Cancelling here at least
+                        // frees the UI to try again instead of the send button
+                        // staying disabled with nothing to explain why.
+                        kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
+                            orchestrator.handle(
+                                UserRequest(
+                                    conversationId = conversationId,
+                                    text = text,
+                                    attachment = attachment,
+                                    memoryEnabled = container.settings.memoryEnabled,
+                                    history = history,
+                                    attachedDocuments = attachedDocuments,
+                                ),
+                                onPartialText = { partial.value = it },
+                            )
+                        }
                     }
                 }
+            } finally {
+                if (keepAlive) GenerationKeepAliveService.end(this@ChatActivity)
             }
             renderJob?.cancel()
             isGenerating = false
@@ -627,6 +618,11 @@ class ChatActivity : AppCompatActivity() {
         sources: List<AppContainer.CompareSource>,
     ) {
         generationJob = lifecycleScope.launch {
+            // Same reasoning as send()'s own keepAlive — one shared flag for
+            // the whole batch, since a local source and a cloud one can run
+            // side by side here and only the local one needs it.
+            val keepAlive = sources.any { it.isLocal }
+            if (keepAlive) GenerationKeepAliveService.begin(this@ChatActivity)
             try {
                 // A placeholder per source, all added up front on Main before
                 // any async work starts (so no two sources ever race to
@@ -642,7 +638,7 @@ class ChatActivity : AppCompatActivity() {
                 }
                 binding.messages.scrollToPosition(adapter.itemCount - 1)
 
-                val jobs = sources.mapIndexed { index, (label, orchestrator, isLocal) ->
+                val jobs = sources.mapIndexed { index, (label, orchestrator, isLocal, hideOnFailure) ->
                     val placeholderIndex = placeholderIndexes[index]
                     async(Dispatchers.IO) {
                         val partial = MutableStateFlow<String?>(null)
@@ -709,6 +705,7 @@ class ChatActivity : AppCompatActivity() {
                         // source instead of being swallowed and rendered as
                         // just another error — the exact bug just fixed in
                         // FallbackTextRuntime for the sequential fallback path.
+                        var failed = false
                         val rendered = try {
                             val answer = kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
                                 orchestrator.handle(
@@ -725,11 +722,13 @@ class ChatActivity : AppCompatActivity() {
                             }
                             answer.text.ifBlank { getString(R.string.chat_empty_answer) }
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                            failed = true
                             container.appLog.record("GENERATION_ERROR", "$label: timeout after ${GENERATION_TIMEOUT_MS}ms")
                             withPartial(partial.value, getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000))
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Exception) {
+                            failed = true
                             container.appLog.record("GENERATION_ERROR", "$label: ${e.javaClass.simpleName}: ${e.message}")
                             withPartial(partial.value, getString(R.string.chat_compare_generic_error, e.message ?: e.toString()))
                         } finally {
@@ -740,9 +739,19 @@ class ChatActivity : AppCompatActivity() {
                             // still stop either way.
                             renderJob?.cancel()
                         }
+                        // hideOnFailure (Gemini Nano, see CompareSource's doc
+                        // comment) means a failed bubble is noise, not a
+                        // result — so the placeholder is left untouched here
+                        // (never shown with error text) and dropped in the
+                        // batch pass below, once every source has settled and
+                        // removing it can't shift another still-running
+                        // source's own placeholderIndex out from under it.
+                        val hide = failed && hideOnFailure
                         withContext(Dispatchers.Main) {
-                            adapter.update(placeholderIndex, Message.assistant(body = "**$label:**\n$rendered", details = null).copy(timestamp = startedAt))
-                            binding.messages.scrollToPosition(adapter.itemCount - 1)
+                            if (!hide) {
+                                adapter.update(placeholderIndex, Message.assistant(body = "**$label:**\n$rendered", details = null).copy(timestamp = startedAt))
+                                binding.messages.scrollToPosition(adapter.itemCount - 1)
+                            }
                             // Persisted the moment THIS source finishes, not
                             // only once every source has: a native crash in
                             // one candidate (llama.cpp, most often the local
@@ -758,15 +767,27 @@ class ChatActivity : AppCompatActivity() {
                             // shown on screen before the crash.
                             persist()
                         }
+                        hide
                     }
                 }
-                jobs.awaitAll()
+                val hideFlags = jobs.awaitAll()
+                if (hideFlags.any { it }) {
+                    withContext(Dispatchers.Main) {
+                        // Highest index first so removing one doesn't shift
+                        // the position of another not-yet-removed one.
+                        placeholderIndexes.indices.reversed().forEach { i ->
+                            if (hideFlags[i]) adapter.remove(placeholderIndexes[i])
+                        }
+                        persist()
+                    }
+                }
             } finally {
                 isGenerating = false
                 generationJob = null
                 setBusy(false)
                 stoppedByUser = false
                 persist()
+                if (keepAlive) GenerationKeepAliveService.end(this@ChatActivity)
             }
         }
         isGenerating = true
@@ -1166,16 +1187,12 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private companion object {
+        // Chat-specific only — every navigation item shared with the rest of
+        // the app now comes from UtilityMenu, which owns its own ids.
         const val MENU_MEMORY = 1
-        const val MENU_MODELS = 2
-        const val MENU_FILES = 3
-        const val MENU_SETTINGS = 4
         const val MENU_HISTORY = 5
-        const val MENU_LOG = 6
         const val MENU_SHARE_CHAT = 7
         const val MENU_CLEAR = 8
-        const val MENU_TRANSCRIBE = 9
-        const val MENU_BENCHMARK = 10
 
         // Was temporarily raised to 30 minutes to measure real on-device
         // timing for heavier local models before picking a production value
