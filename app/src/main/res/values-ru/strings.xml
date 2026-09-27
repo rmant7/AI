@@ -225,6 +225,9 @@
     <string name="models_custom_add">Добавить</string>
     <string name="models_custom_input_hint">owner/repo с GGUF-файлом</string>
     <string name="models_custom_bad_format">Нужен формат owner/repo</string>
+    <string name="model_assign_here">Использовать здесь</string>
+    <string name="models_unassigned_header">Модели без раздела</string>
+    <string name="models_unassigned_note">Добавлены до разделения чата и перевода или найдены на диске. Нажмите «Использовать здесь» в том разделе, к которому модель относится.</string>
     <string name="models_orphans_title">Неизвестные файлы</string>
     <string name="models_orphans_subtitle">Найдено файлов: %1$d, общий размер ~%2$s. Текущая версия приложения их не использует — вероятно, остались от другой версии или ветки разработки.</string>
     <string name="models_orphans_delete">Удалить (%1$s)</string>

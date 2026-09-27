@@ -71,6 +71,7 @@ import ai.localstudio.app.llama.readMemAvailableBytes
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
+import ai.localstudio.app.models.ModelPurpose
 import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.app.models.ModelDownloads
 import ai.localstudio.app.models.ModelStore
@@ -200,6 +201,9 @@ class AppContainer private constructor(private val context: Context) {
 
     /** See [HeavyOperations] — chat/translation generation and voice transcription wrap themselves in this. */
     val heavyOperations = HeavyOperations()
+
+    /** The Translation screen's results, kept past that screen's own lifetime — see [TranslationSession]. */
+    val translationSession = TranslationSession(context)
 
     /**
      * The last AICore [FeatureStatus] seen this run — null until the first
@@ -1313,7 +1317,97 @@ class AppContainer private constructor(private val context: Context) {
      * whichever screen is asking. See [Settings.customModelRepoIds]'s own
      * doc comment for the real-device bug this replaces.
      */
-    fun customSeeds(): List<LocalModelSeed> = settings.customModelRepoIds.map { LocalModels.custom(it) }
+    fun customSeeds(purpose: ModelPurpose): List<LocalModelSeed> = when (purpose) {
+        ModelPurpose.CHAT -> settings.customChatRepoIds.map { LocalModels.custom(it) }
+        ModelPurpose.TRANSLATION -> settings.customTranslationRepoIds.map { LocalModels.customTranslation(it) }
+    }
+
+    /**
+     * Custom models whose purpose is unknown: added before the chat /
+     * translation split, or recovered from a file on disk no setting points
+     * to. Not used anywhere until the user assigns one on the Models screen
+     * ([assignCustomModel]) — guessing chat vs. translation from a repo name
+     * is exactly the mix-up this split exists to stop.
+     */
+    fun unassignedCustomSeeds(): List<LocalModelSeed> = settings.customModelRepoIds.map { LocalModels.custom(it) }
+
+    /** Every custom seed in any state — what counts as "known" when looking for orphaned files. */
+    fun allCustomSeeds(): List<LocalModelSeed> =
+        customSeeds(ModelPurpose.CHAT) + customSeeds(ModelPurpose.TRANSLATION) + unassignedCustomSeeds()
+
+    fun addCustomModel(repoId: String, purpose: ModelPurpose): LocalModelSeed = when (purpose) {
+        ModelPurpose.CHAT -> {
+            settings.customChatRepoIds += repoId
+            LocalModels.custom(repoId)
+        }
+        ModelPurpose.TRANSLATION -> {
+            settings.customTranslationRepoIds += repoId
+            LocalModels.customTranslation(repoId)
+        }
+    }.also { settings.customModelRepoIds -= repoId }
+
+    /** Moves an unassigned custom model into [purpose]'s list; its file (if any) stays as it is. */
+    fun assignCustomModel(repoId: String, purpose: ModelPurpose) {
+        addCustomModel(repoId, purpose)
+        appLog.record("MODELS", "$repoId: assigned to ${purpose.name.lowercase()}")
+    }
+
+    /**
+     * Forgets [repoId] for [purpose] (null = the unassigned list). The file
+     * is deleted only once no list refers to it any more — the same repo
+     * added on both tabs shares one download.
+     */
+    fun removeCustomModel(repoId: String, purpose: ModelPurpose?) {
+        when (purpose) {
+            ModelPurpose.CHAT -> settings.customChatRepoIds -= repoId
+            ModelPurpose.TRANSLATION -> settings.customTranslationRepoIds -= repoId
+            null -> settings.customModelRepoIds -= repoId
+        }
+        val stillUsed = repoId in settings.customChatRepoIds ||
+            repoId in settings.customTranslationRepoIds ||
+            repoId in settings.customModelRepoIds
+        if (!stillUsed) downloads.delete(LocalModels.custom(repoId))
+    }
+
+    /**
+     * Once: a pre-split custom entry that is currently selected for chat or
+     * translation goes to that list, so the selection keeps working; the
+     * rest stay unassigned for the user to place. Every launch: a
+     * `custom-*.gguf` file no list knows (a download from a build that
+     * didn't persist custom models at all — real device report: shown as an
+     * unknown file under chat) is recovered into the unassigned list rather
+     * than offered only for deletion.
+     */
+    private fun migrateCustomModels() {
+        if (!settings.customModelsMigrated) {
+            for (repo in settings.customModelRepoIds) {
+                val id = LocalModels.custom(repo).id
+                if (settings.chatModelFor(CloudProviders.LOCAL.id) == id) addCustomModel(repo, ModelPurpose.CHAT)
+                if (settings.translationModel == id) addCustomModel(repo, ModelPurpose.TRANSLATION)
+            }
+            settings.customModelsMigrated = true
+        }
+        val known = (LocalModels.SEEDS + TranslationModels.SEEDS + allCustomSeeds()).map { modelStore.fileFor(it).name }.toSet()
+        modelStore.directory().listFiles().orEmpty()
+            .filter { it.isFile && it.name !in known }
+            .mapNotNull { LocalModels.repoIdFromCustomFileName(it.name) }
+            .forEach { repo ->
+                settings.customModelRepoIds += repo
+                appLog.record("MODELS", "$repo: found on disk with no list entry — recovered as unassigned")
+            }
+    }
+
+    /** Local models chat may use: the chat catalog and custom chat models — never a translation-only model. */
+    private fun chatSeeds(): List<LocalModelSeed> = LocalModels.SEEDS + customSeeds(ModelPurpose.CHAT)
+
+    /**
+     * Local models translation may use: the translation catalog, the chat
+     * catalog (general instruct models, prompted for the task) and custom
+     * translation models. Custom *chat* models are not included — nothing
+     * says an arbitrary repo can translate.
+     */
+    private fun translationSeeds(): List<LocalModelSeed> =
+        TranslationModels.SEEDS + LocalModels.SEEDS + customSeeds(ModelPurpose.TRANSLATION)
 
     /**
      * Seeds that are on disk right now, newest state each time it is asked —
@@ -1323,8 +1417,10 @@ class AppContainer private constructor(private val context: Context) {
      * three are fetched and stored the same way and [localRegistry] needs to
      * resolve any of them by id.
      */
-    fun installedSeeds(): List<LocalModelSeed> =
-        (LocalModels.SEEDS + TranslationModels.SEEDS + customSeeds()).filter { modelStore.isInstalled(it) }
+    fun installedSeeds(purpose: ModelPurpose): List<LocalModelSeed> =
+        (if (purpose == ModelPurpose.CHAT) chatSeeds() else translationSeeds())
+            .distinctBy { it.id }
+            .filter { modelStore.isInstalled(it) }
 
     val experimentalEmbeddingDownloads = ExperimentalEmbeddingDownloads(
         experimentalEmbeddingStore,
@@ -1695,7 +1791,7 @@ class AppContainer private constructor(private val context: Context) {
         // "no local model" — see aicoreUnsupported.
         val chosenId = settings.translationModel.takeUnless { it == CloudProviders.AICORE.id && aicoreUnsupported }.orEmpty()
         if (chosenId == CloudProviders.AICORE.id) return null
-        val registry = localRegistry()
+        val registry = localRegistry(ModelPurpose.TRANSLATION)
         val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
             ?: effectiveLocalSelection(registry)
             ?: return null
@@ -2209,8 +2305,8 @@ class AppContainer private constructor(private val context: Context) {
      * artifact is the file path, and its size is the file's real size, so the
      * scorer and the runtime agree about what exists.
      */
-    private fun localRegistry(): ModelRegistry = ModelRegistry(
-        installedSeeds().map { seed ->
+    private fun localRegistry(purpose: ModelPurpose = ModelPurpose.CHAT): ModelRegistry = ModelRegistry(
+        installedSeeds(purpose).map { seed ->
             // Best-effort backfill for a model that was already installed
             // before it declared a projector, or whose projector fetch
             // failed the first time — see ModelDownloads.start()'s own
@@ -2340,6 +2436,7 @@ class AppContainer private constructor(private val context: Context) {
     // Must stay the last initializer in this class — see constructionComplete.
     init {
         constructionComplete.complete(Unit)
+        migrateCustomModels()
         refreshAicoreStatus()
         watchAicoreOnResume()
     }

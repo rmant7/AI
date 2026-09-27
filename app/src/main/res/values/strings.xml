@@ -223,6 +223,9 @@
     <string name="models_custom_add">Add</string>
     <string name="models_custom_input_hint">owner/repo with a GGUF file</string>
     <string name="models_custom_bad_format">Expected the format owner/repo</string>
+    <string name="model_assign_here">Use here</string>
+    <string name="models_unassigned_header">Models without a section</string>
+    <string name="models_unassigned_note">Added before chat and translation were separated, or found on disk. Tap \"Use here\" on the tab where the model belongs.</string>
     <string name="models_orphans_title">Unknown files</string>
     <string name="models_orphans_subtitle">Found %1$d files, ~%2$s total. The current app version doesn\'t use them — likely left over from another version or development branch.</string>
     <string name="models_orphans_delete">Delete (%1$s)</string>

@@ -28,6 +28,7 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.models.DownloadState
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
+import ai.localstudio.app.models.ModelPurpose
 import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.app.vosk.VoskDownloadState
 import ai.localstudio.app.vosk.VoskModelSeed
@@ -75,14 +76,13 @@ class ModelsActivity : AppCompatActivity() {
     private val adapter = RowAdapter()
 
     /**
-     * Sourced from [AppContainer.customSeeds] ([Settings.customModelRepoIds]),
-     * not a field of its own — see that setting's own doc comment for the
-     * real-device bug (a model added via "Custom model from Hugging Face"
-     * vanishing, and every trace of it misidentified as an orphaned file,
-     * the moment this Activity was recreated) a plain in-memory list here
-     * used to cause.
+     * Where "Custom model from Hugging Face" puts a model: the tab it was
+     * added from. Real device report: one shared list showed a translation
+     * model added on the Translation tab under chat, and not under
+     * translation at all.
      */
-    private val customSeeds: List<LocalModelSeed> get() = container.customSeeds()
+    private val customPurpose: ModelPurpose
+        get() = if (category == Category.TRANSLATION) ModelPurpose.TRANSLATION else ModelPurpose.CHAT
     private var category = Category.TEXT
 
     // A denial here does not block downloads — it only means the foreground
@@ -186,7 +186,7 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun onTextSecondary(seed: LocalModelSeed) {
         if (seed.isCustom) {
-            removeCustomSeed(seed)
+            removeCustomSeed(seed, ModelPurpose.CHAT)
             return
         }
         when (val state = container.downloads.stateOf(seed)) {
@@ -297,7 +297,7 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun onTranslationSecondary(seed: LocalModelSeed) {
         if (seed.isCustom) {
-            removeCustomSeed(seed)
+            removeCustomSeed(seed, ModelPurpose.TRANSLATION)
             return
         }
         when (val state = container.downloads.stateOf(seed)) {
@@ -318,7 +318,7 @@ class ModelsActivity : AppCompatActivity() {
      * catalog seed's own secondary button only ever offered "Details" for a
      * [DownloadState.Failed] row.
      */
-    private fun removeCustomSeed(seed: LocalModelSeed) {
+    private fun removeCustomSeed(seed: LocalModelSeed, purpose: ModelPurpose?) {
         // Selection first, list second: nothing — this screen's next render,
         // or a translation/chat turn racing it — may ever see a selection
         // pointing at a model id that no longer exists. A dangling one
@@ -328,16 +328,15 @@ class ModelsActivity : AppCompatActivity() {
         // from a different model than the one I picked". Blank means "auto"
         // for both settings, same as a fresh install.
         val settings = container.settings
-        if (settings.translationModel == seed.id) {
+        if (purpose == ModelPurpose.TRANSLATION && settings.translationModel == seed.id) {
             settings.translationModel = ""
             container.appLog.record("MODELS", "${seed.id}: removed while selected for translation — selection reset to auto")
         }
-        if (settings.chatModelFor(CloudProviders.LOCAL.id) == seed.id) {
+        if (purpose == ModelPurpose.CHAT && settings.chatModelFor(CloudProviders.LOCAL.id) == seed.id) {
             settings.setChatModelFor(CloudProviders.LOCAL.id, "")
             container.appLog.record("MODELS", "${seed.id}: removed while selected for chat — selection reset to default")
         }
-        container.downloads.delete(seed)
-        settings.customModelRepoIds -= seed.repoIds.first()
+        container.removeCustomModel(seed.repoIds.first(), purpose)
         render()
     }
 
@@ -441,7 +440,7 @@ class ModelsActivity : AppCompatActivity() {
         // would still refuse to load once the RAM budget was turned down,
         // scattered through the list with no way to tell which ones were
         // actually pickable without opening each in turn.
-        val sortedSeeds = (LocalModels.SEEDS + customSeeds).sortedWith(
+        val sortedSeeds = (LocalModels.SEEDS + container.customSeeds(ModelPurpose.CHAT)).sortedWith(
             compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
                 .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
         )
@@ -532,7 +531,7 @@ class ModelsActivity : AppCompatActivity() {
         // or versions never touches app-private storage on its own, so
         // without this such a file just sits there, invisible and
         // undeletable through the app, for as long as it stays installed.
-        val orphans = container.modelStore.orphanedFiles(LocalModels.SEEDS + TranslationModels.SEEDS + customSeeds)
+        val orphans = container.modelStore.orphanedFiles(LocalModels.SEEDS + TranslationModels.SEEDS + container.allCustomSeeds())
         if (orphans.isNotEmpty()) {
             val totalBytes = orphans.sumOf { it.length() }
             add(
@@ -552,6 +551,7 @@ class ModelsActivity : AppCompatActivity() {
             )
         }
 
+        addUnassignedRows(ModelPurpose.CHAT)
         add(Row.Custom)
     }
 
@@ -573,6 +573,8 @@ class ModelsActivity : AppCompatActivity() {
         // size progression otherwise.
         TranslationModels.SEEDS.sortedByDescending { container.isModelResident(it.id) }
             .forEach { seed -> add(translationModelRow(seed, device)) }
+        // The user's own translation models, added on this tab — see customPurpose.
+        container.customSeeds(ModelPurpose.TRANSLATION).forEach { seed -> add(translationModelRow(seed, device)) }
 
         add(Row.Header(getString(R.string.models_translation_aicore_header)))
         add(Row.Note(getString(R.string.models_translation_aicore_note)))
@@ -580,12 +582,46 @@ class ModelsActivity : AppCompatActivity() {
 
         add(Row.Note(getString(R.string.models_translation_note)))
         add(Row.Header(getString(R.string.models_local_header)))
-        (LocalModels.SEEDS + customSeeds).sortedWith(
+        LocalModels.SEEDS.sortedWith(
             compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
                 .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
         ).forEach { seed -> add(translationModelRow(seed, device)) }
 
+        addUnassignedRows(ModelPurpose.TRANSLATION)
         add(Row.Custom)
+    }
+
+    /**
+     * Custom models with no recorded purpose ([AppContainer.unassignedCustomSeeds]),
+     * shown on both tabs with "Use here" — the user says where each one
+     * belongs instead of the app guessing from a repo name.
+     */
+    private fun MutableList<Row>.addUnassignedRows(purpose: ModelPurpose) {
+        val unassigned = container.unassignedCustomSeeds()
+        if (unassigned.isEmpty()) return
+        add(Row.Header(getString(R.string.models_unassigned_header)))
+        add(Row.Note(getString(R.string.models_unassigned_note)))
+        unassigned.forEach { seed ->
+            val state = container.downloads.stateOf(seed)
+            add(
+                Row.Model(
+                    title = seed.title,
+                    subtitle = seed.repoIds.first(),
+                    selected = false,
+                    status = textStatus(state, container.modelStore.installedSize(seed)),
+                    progress = null,
+                    indeterminate = false,
+                    primaryLabel = getString(R.string.model_assign_here),
+                    primaryEnabled = true,
+                    secondaryLabel = getString(R.string.model_remove),
+                    onPrimary = {
+                        container.assignCustomModel(seed.repoIds.first(), purpose)
+                        render()
+                    },
+                    onSecondary = { removeCustomSeed(seed, null) },
+                ),
+            )
+        }
     }
 
     /**
@@ -940,8 +976,7 @@ class ModelsActivity : AppCompatActivity() {
             .setPositiveButton(R.string.model_download) { _, _ ->
                 val repo = normalizeRepoInput(input.text?.toString().orEmpty())
                 if (repo != null) {
-                    val seed = LocalModels.custom(repo)
-                    container.settings.customModelRepoIds += repo
+                    val seed = container.addCustomModel(repo, customPurpose)
                     NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
                     render()
                 } else {

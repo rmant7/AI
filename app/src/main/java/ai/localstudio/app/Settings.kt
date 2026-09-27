@@ -118,13 +118,37 @@ class Settings(context: Context) {
      * model selected for use silently fell through to whatever came next in
      * the fallback chain instead of actually being used.
      */
+    //
+    // Since the chat/translation split: only entries added before it, whose
+    // purpose was never recorded — see [AppContainer.migrateCustomModels].
+    // New additions go to [customChatRepoIds] or [customTranslationRepoIds].
     var customModelRepoIds: Set<String>
-        get() = prefs.getString(KEY_CUSTOM_MODEL_REPOS, null)
-            ?.split(',')
-            ?.filter { it.isNotBlank() }
-            ?.toSet()
-            ?: emptySet()
-        set(value) = prefs.edit().putString(KEY_CUSTOM_MODEL_REPOS, value.joinToString(",")).apply()
+        get() = repoSet(KEY_CUSTOM_MODEL_REPOS)
+        set(value) = putRepoSet(KEY_CUSTOM_MODEL_REPOS, value)
+
+    /**
+     * Custom models added from the Models screen's Text tab — offered for
+     * chat only. Real device report: one shared list showed a model added on
+     * the Translation tab under chat instead, and not under translation.
+     */
+    var customChatRepoIds: Set<String>
+        get() = repoSet(KEY_CUSTOM_CHAT_REPOS)
+        set(value) = putRepoSet(KEY_CUSTOM_CHAT_REPOS, value)
+
+    /** Custom models added from the Translation tab — offered for translation only. */
+    var customTranslationRepoIds: Set<String>
+        get() = repoSet(KEY_CUSTOM_TRANSLATION_REPOS)
+        set(value) = putRepoSet(KEY_CUSTOM_TRANSLATION_REPOS, value)
+
+    var customModelsMigrated: Boolean
+        get() = prefs.getBoolean(KEY_CUSTOM_MODELS_MIGRATED, false)
+        set(value) = prefs.edit().putBoolean(KEY_CUSTOM_MODELS_MIGRATED, value).apply()
+
+    private fun repoSet(key: String): Set<String> =
+        prefs.getString(key, null)?.split(',')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+
+    private fun putRepoSet(key: String, value: Set<String>) =
+        prefs.edit().putString(key, value.joinToString(",")).apply()
 
     /**
      * What's currently typed on the Translation screen — persisted on every
@@ -336,6 +360,9 @@ class Settings(context: Context) {
         const val KEY_VOSK_MODEL = "voskModelId"
         const val KEY_TRANSLATION_MODEL = "translationModel"
         const val KEY_CUSTOM_MODEL_REPOS = "customModelRepoIds"
+        const val KEY_CUSTOM_CHAT_REPOS = "customChatRepoIds"
+        const val KEY_CUSTOM_TRANSLATION_REPOS = "customTranslationRepoIds"
+        const val KEY_CUSTOM_MODELS_MIGRATED = "customModelsMigrated"
         const val KEY_TRANSLATION_DRAFT = "translationDraftText"
         const val KEY_TRANSLATION_SOURCE_LANG = "translationSourceLang"
         const val KEY_TRANSLATION_TARGET_LANG = "translationTargetLang"

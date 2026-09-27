@@ -94,7 +94,6 @@ class TranslationActivity : AppCompatActivity() {
      * still matches on it, just not shown.
      */
     private lateinit var displayNames: Map<String, String>
-    private var translateJob: kotlinx.coroutines.Job? = null
 
     private var selectedSource: MadladLanguage? = null
     private var selectedTarget: MadladLanguage? = null
@@ -205,6 +204,9 @@ class TranslationActivity : AppCompatActivity() {
         tts = TextToSpeech(this) { status -> ttsReady = status == TextToSpeech.SUCCESS }
 
         updateCaveat()
+
+        lifecycleScope.launch { container.translationSession.results.collect { renderResults(it) } }
+        lifecycleScope.launch { container.translationSession.busy.collect { setBusy(it) } }
     }
 
     override fun onResume() {
@@ -377,14 +379,24 @@ class TranslationActivity : AppCompatActivity() {
             return
         }
 
-        translateJob?.cancel()
-        setBusy(true)
-        binding.translationResultsContainer.removeAllViews()
+        val session = container.translationSession
+        session.job?.cancel()
         // Length only, never the text itself — this log is meant to be
         // copyable and shareable from LogActivity (see AppLog's own doc
         // comment), and a translation request is exactly the kind of
         // content a user would not expect to see in a bug report.
         container.appLog.record("TRANSLATE", "${source.code} -> ${target.code}, ${text.length} chars, ${sources.size} source(s)")
+
+        // Everything the batch needs from this Activity is taken now: it
+        // runs in the session's own scope, not lifecycleScope, so leaving
+        // this screen mid-translation neither cancels it nor loses what it
+        // produces (see TranslationSession). Prompts, strings and the
+        // application context only — never this Activity itself.
+        val prompts = sources.map { buildPrompt(it, source, target, text) }
+        val app = applicationContext
+        val appLog = container.appLog
+        val heavyOperations = container.heavyOperations
+        val batch = session.begin(sources.map { it.label })
 
         // Same reasoning as ChatActivity.sendCompare()'s own keepAlive: a
         // device report showed a local translate() call never finishing
@@ -392,22 +404,17 @@ class TranslationActivity : AppCompatActivity() {
         // flag for the whole batch — only the local source (if any) needs
         // it, a cloud/AICore source is network-bound, not CPU-bound.
         val keepAlive = sources.any { it.isLocal }
-        translateJob = lifecycleScope.launch {
-            if (keepAlive) GenerationKeepAliveService.begin(this@TranslationActivity)
+        session.job = session.scope.launch {
+            if (keepAlive) GenerationKeepAliveService.begin(app)
             try {
-                // Every card added up front on Main, before any async work
-                // starts — same reasoning as ChatActivity.sendCompare(): no
-                // two sources race to mutate translationResultsContainer.
-                val cards = sources.map { addResultCard(it.label) }
                 val jobs = sources.mapIndexed { index, translationSource ->
                     async(Dispatchers.IO) {
-                        val prompt = buildPrompt(translationSource, source, target, text)
                         val result = runCatching {
                             // Budget counts only this source's own work: time
                             // queued behind AICore/another local model on the
                             // device-memory gate is excluded (see
                             // withOperationTimeout), bounded by the deadline.
-                            container.heavyOperations.track { withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
+                            heavyOperations.track { withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
                                 translationSource.orchestrator.handle(
                                     UserRequest(
                                         // Unique per request and never saved to
@@ -415,7 +422,7 @@ class TranslationActivity : AppCompatActivity() {
                                         // a conversation, so there is no earlier
                                         // turn for a shared id to collide with.
                                         conversationId = "translate-" + System.currentTimeMillis() + "-" + index,
-                                        text = prompt,
+                                        text = prompts[index],
                                         memoryEnabled = false,
                                     ),
                                 )
@@ -423,13 +430,11 @@ class TranslationActivity : AppCompatActivity() {
                         }
                         withContext(Dispatchers.Main) {
                             result.onSuccess { answer ->
-                                container.appLog.record(
-                                    "TRANSLATE",
-                                    "${translationSource.label}: done, ${answer.text.length} chars back",
-                                )
-                                cards[index].resultText.text = cleanTranslation(answer.text)
+                                appLog.record("TRANSLATE", "${translationSource.label}: done, ${answer.text.length} chars back")
+                                session.finish(index, cleanTranslation(answer.text))
                             }.onFailure { error ->
-                                container.appLog.record(
+                                if (error is kotlinx.coroutines.CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+                                appLog.record(
                                     "TRANSLATE",
                                     "${translationSource.label}: FAILED: ${error.javaClass.simpleName}: ${error.message}",
                                 )
@@ -442,15 +447,18 @@ class TranslationActivity : AppCompatActivity() {
                                 // installed on this device, AICore's service
                                 // not bound, whatever else.
                                 if (translationSource.hideOnFailure) {
-                                    binding.translationResultsContainer.removeView(cards[index].root)
+                                    session.hide(index)
                                 } else {
-                                    cards[index].resultText.text = if (error is OperationTimeoutException) {
-                                        getString(R.string.chat_compare_timeout_error, error.limitMs / 1000)
-                                    } else if (error is kotlinx.coroutines.TimeoutCancellationException) {
-                                        getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
-                                    } else {
-                                        getString(R.string.chat_compare_generic_error, error.message ?: error.toString())
-                                    }
+                                    session.finish(
+                                        index,
+                                        if (error is OperationTimeoutException) {
+                                            app.getString(R.string.chat_compare_timeout_error, error.limitMs / 1000)
+                                        } else if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                                            app.getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
+                                        } else {
+                                            app.getString(R.string.chat_compare_generic_error, error.message ?: error.toString())
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -458,9 +466,28 @@ class TranslationActivity : AppCompatActivity() {
                 }
                 jobs.awaitAll()
             } finally {
-                setBusy(false)
-                if (keepAlive) GenerationKeepAliveService.end(this@TranslationActivity)
+                session.end(batch)
+                if (keepAlive) GenerationKeepAliveService.end(app)
             }
+        }
+    }
+
+    /**
+     * Rebuilds the result cards from [TranslationSession.results] — the
+     * only place cards are created, so coming back to this screen (or a
+     * recreated Activity) shows exactly what the session holds.
+     */
+    private fun renderResults(results: List<TranslationSession.Result>) {
+        val visible = results.filter { !it.hidden }
+        val cards = binding.translationResultsContainer
+        if (cards.childCount != visible.size) {
+            cards.removeAllViews()
+            visible.forEach { addResultCard(it.label) }
+        }
+        visible.forEachIndexed { i, result ->
+            val card = ItemTranslationResultBinding.bind(cards.getChildAt(i))
+            card.resultLabel.text = result.label
+            card.resultText.text = result.text ?: "…"
         }
     }
 
@@ -534,36 +561,6 @@ class TranslationActivity : AppCompatActivity() {
             "Reply with only the translation itself, nothing else — no quotes, no notes, no explanation.\n\n" +
             "```\n$text\n```"
 
-    /**
-     * Strips three things: wrapping quotes/backticks a model sometimes adds
-     * despite the prompt asking it not to; a
-     * [ai.localstudio.core.runtime.FallbackTextRuntime] attribution footer
-     * (defensively, should this screen ever end up wired to a
-     * multi-candidate orchestrator again), which always starts with this
-     * exact "\n\n---\n" delimiter
-     * ([ai.localstudio.core.runtime.FallbackTextRuntime.attributionFooter]);
-     * and a literal turn-marker token leaking into the text. That last one
-     * is a real device report: gemma-4-e4b's official chat template
-     * sometimes fails to apply (see [ai.localstudio.app.llama.LlamaCppRuntime]'s
-     * own doc comments on that), and native llama.cpp code decides whether a
-     * sampled token means "stop" ([llama_vocab_is_eog] in llama_jni.cpp) —
-     * for this GGUF, that check doesn't recognize `<end_of_turn>` as one, so
-     * it comes out as ordinary text instead of ending generation. Root cause
-     * is native and shared with every other chat turn this app generates,
-     * not specific to translation; this is the narrow, low-risk half of the
-     * fix that actually matters here — a clean copy-paste result — without
-     * touching that shared native path.
-     */
-    private fun cleanTranslation(raw: String): String {
-        var text = raw.substringBefore("\n\n---\n").trim()
-        for (marker in TURN_MARKERS) text = text.substringBefore(marker).trim()
-        if (text.startsWith("```") && text.endsWith("```")) text = text.removePrefix("```").removeSuffix("```").trim()
-        if (text.length >= 2 && text.first() == text.last() && text.first() in "\"'«»") {
-            text = text.substring(1, text.length - 1).trim()
-        }
-        return text
-    }
-
     private fun setBusy(busy: Boolean) {
         binding.translateButton.isEnabled = !busy
         binding.translationProgress.visibility = if (busy) View.VISIBLE else View.GONE
@@ -587,6 +584,36 @@ class TranslationActivity : AppCompatActivity() {
         // recognize (see cleanTranslation's own doc comment) — covers every
         // chat-template family this app's catalog actually includes
         // (Gemma, Qwen/ChatML, Llama), not just the one seen on-device so far.
-        val TURN_MARKERS = listOf("<end_of_turn>", "<|im_end|>", "<|eot_id|>", "<|end|>")
+        val TURN_MARKERS = listOf("<end_of_turn>", "<turn|>", "<|im_end|>", "<|eot_id|>", "<|end|>")
+
+        /**
+         * Strips three things: wrapping quotes/backticks a model sometimes adds
+         * despite the prompt asking it not to; a
+         * [ai.localstudio.core.runtime.FallbackTextRuntime] attribution footer
+         * (defensively, should this screen ever end up wired to a
+         * multi-candidate orchestrator again), which always starts with this
+         * exact "\n\n---\n" delimiter
+         * ([ai.localstudio.core.runtime.FallbackTextRuntime.attributionFooter]);
+         * and a literal turn-marker token leaking into the text. That last one
+         * is a real device report: gemma-4-e4b's official chat template
+         * sometimes fails to apply (see [ai.localstudio.app.llama.LlamaCppRuntime]'s
+         * own doc comments on that), and native llama.cpp code decides whether a
+         * sampled token means "stop" ([llama_vocab_is_eog] in llama_jni.cpp) —
+         * for this GGUF, that check doesn't recognize `<end_of_turn>` as one, so
+         * it comes out as ordinary text instead of ending generation. Root cause
+         * is native and shared with every other chat turn this app generates,
+         * not specific to translation; this is the narrow, low-risk half of the
+         * fix that actually matters here — a clean copy-paste result — without
+         * touching that shared native path.
+         */
+        fun cleanTranslation(raw: String): String {
+            var text = raw.substringBefore("\n\n---\n").trim()
+            for (marker in TURN_MARKERS) text = text.substringBefore(marker).trim()
+            if (text.startsWith("```") && text.endsWith("```")) text = text.removePrefix("```").removeSuffix("```").trim()
+            if (text.length >= 2 && text.first() == text.last() && text.first() in "\"'«»") {
+                text = text.substring(1, text.length - 1).trim()
+            }
+            return text
+        }
     }
 }

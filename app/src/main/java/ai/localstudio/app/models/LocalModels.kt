@@ -92,6 +92,9 @@ data class LocalModelSeed(
     fun resolvedNote(context: android.content.Context): String = noteRes?.let { context.getString(it) } ?: note
 }
 
+/** Which Models tab a custom model was added from — and so the only place it is offered. */
+enum class ModelPurpose { CHAT, TRANSLATION }
+
 object LocalModels {
 
     val SEEDS = listOf(
@@ -274,6 +277,33 @@ object LocalModels {
         approxSizeBytes = 0,
         isCustom = true,
     )
+
+    /**
+     * A custom model added from the Translation tab. Same id (so the same
+     * file on disk) as [custom] for that repo; TEXT_GENERATION stays because
+     * a translation turn is routed as a plain text turn (see
+     * [TranslationModels.SEEDS]' own comment on MADLAD's capabilities).
+     */
+    fun customTranslation(repoId: String): LocalModelSeed = custom(repoId).copy(
+        paramsLabel = "custom translation model",
+        capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+    )
+
+    /**
+     * The repo id a [custom] seed's downloaded file was named after, or null
+     * for any other file. Lossy by construction — the id was lowercased and
+     * its '/' turned into '_' — so this splits at the first '_' (Hugging
+     * Face account names have none) and returns the lowercased form; the
+     * seed rebuilt from it maps back to the exact same file name.
+     */
+    fun repoIdFromCustomFileName(fileName: String): String? {
+        if (!fileName.startsWith("custom-") || !fileName.endsWith(".gguf")) return null
+        if (fileName.endsWith(".mmproj.gguf")) return null
+        val body = fileName.removePrefix("custom-").removeSuffix(".gguf")
+        val owner = body.substringBefore('_', "")
+        val repo = body.substringAfter('_', "")
+        return if (owner.isNotEmpty() && repo.isNotEmpty()) "$owner/$repo" else null
+    }
 
     fun byId(id: String): LocalModelSeed? = SEEDS.firstOrNull { it.id == id }
 }
