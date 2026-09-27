@@ -241,14 +241,43 @@ std::string genericInstructScaffold(const std::string &system, const std::string
  * conversation" failure this exists to avoid: the model has no way to tell
  * which part of that wall of text is the live question versus quoted
  * history, so it answers as if none of it were there. Gemma's own markers
- * are simple, stable across its releases, and require no jinja execution
- * at all — this is what the model actually saw during training, applied
- * directly instead of through a template engine that has already failed
- * once on this exact GGUF.
+ * are simple and require no jinja execution at all — this is what the
+ * model actually saw during training, applied directly instead of through
+ * a template engine that has already failed once on this exact GGUF.
+ *
+ * Gemma 1–3 only. Gemma 4 changed its markers — see [gemma4Scaffold]; this
+ * scaffold was being applied to it, which is wrong.
  */
 std::string gemmaScaffold(const std::string &system, const std::string &user) {
     const std::string merged = system.empty() ? user : system + "\n\n" + user;
     return "<start_of_turn>user\n" + merged + "<end_of_turn>\n<start_of_turn>model\n";
+}
+
+/**
+ * Gemma 4 dropped Gemma 1–3's `<start_of_turn>`/`<end_of_turn>` for
+ * `<|turn>role` … `<turn|>` (llama.cpp's own common/chat.cpp,
+ * common_chat_params_init_gemma4, at the tag this build pins) and gained a
+ * real system role. llama_chat_apply_template — the legacy, non-jinja
+ * formatter this file uses — has no Gemma 4 entry at that tag, so every
+ * Gemma 4 turn lands here. Handing it [gemmaScaffold] instead fed it
+ * markers it was never trained on, tokenized as plain text (real device
+ * log: gemma-4-e4b-it-q4, "present but FAILED to apply", every turn).
+ */
+std::string gemma4Scaffold(const std::string &system, const std::string &user) {
+    std::string out;
+    if (!system.empty()) out += "<|turn>system\n" + system + "<turn|>\n";
+    out += "<|turn>user\n" + user + "<turn|>\n<|turn>model\n";
+    return out;
+}
+
+bool looksLikeGemma4Template(const char *tmpl) {
+    return tmpl != nullptr && std::string(tmpl).find("<|turn>") != std::string::npos;
+}
+
+bool isGemma4Architecture(llama_model *model) {
+    char buf[64];
+    const int32_t len = llama_model_meta_val_str(model, "general.architecture", buf, sizeof(buf));
+    return len > 0 && std::string(buf, len).rfind("gemma4", 0) == 0;
 }
 
 /**
@@ -295,6 +324,10 @@ bool isGemmaArchitecture(llama_model *model) {
 std::string applyChatTemplate(Session *session, const std::string &system, const std::string &user) {
     llama_model *model = session->model;
     const char *tmpl = llama_model_chat_template(model, nullptr);
+    if (tmpl == nullptr && isGemma4Architecture(model)) {
+        session->lastTemplateInfo = "MISSING in GGUF — Gemma 4 architecture, using its <|turn> markers";
+        return gemma4Scaffold(system, user);
+    }
     if (tmpl == nullptr) {
         // Not a warning to shrug at: without the model's own turn markers
         // the answer quality drop is severe and looks like the model being
@@ -303,6 +336,14 @@ std::string applyChatTemplate(Session *session, const std::string &system, const
         session->lastTemplateInfo = "MISSING in GGUF — falling back to a generic instruct scaffold";
         LOGE("no chat template in this GGUF; using the generic instruct scaffold");
         return genericInstructScaffold(system, user);
+    }
+
+    // Checked before the legacy formatter, not after it fails: it has no
+    // Gemma 4 entry, and a heuristic match on some other marker the jinja
+    // source quotes would format the turn wrong without failing.
+    if (looksLikeGemma4Template(tmpl) || isGemma4Architecture(model)) {
+        session->lastTemplateInfo = "Gemma 4 <|turn> markers (not in llama.cpp's built-in formatter)";
+        return gemma4Scaffold(system, user);
     }
 
     std::vector<llama_chat_message> messages;
