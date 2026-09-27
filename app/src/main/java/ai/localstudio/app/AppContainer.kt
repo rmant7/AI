@@ -1618,10 +1618,18 @@ class AppContainer private constructor(private val context: Context) {
             CompareSource(label, orchestrator, isLocalOnly, hideOnFailure = provider.id == CloudProviders.AICORE.id)
         }
 
-    /** Providers actually enabled for use, in fallback order — see [Settings.enabledProviderIds]. */
+    /**
+     * Providers actually enabled for use, in fallback order — see
+     * [Settings.enabledProviderIds]. Gemini Nano drops out once AICore has
+     * said this device can't run it ([aicoreUnsupported]), even if still
+     * checked: real device log (status=0) had it in every chat route and
+     * every Compare batch, failing each time. It's part of [orchestrator]'s
+     * signature, so the router rebuilds on the next message after the
+     * status arrives.
+     */
     private fun enabledProviders(): List<CloudProvider> {
         val ids = settings.enabledProviderIds
-        return CloudProviders.ALL.filter { it.id in ids }
+        return CloudProviders.ALL.filter { it.id in ids && !(it.id == CloudProviders.AICORE.id && aicoreUnsupported) }
     }
 
     /**
@@ -2253,8 +2261,8 @@ class AppContainer private constructor(private val context: Context) {
      * attempted in. [CloudProviders.LOCAL] is the one entry in
      * [enabledProviders] that can be "on" with nothing to show for it this
      * way (a fresh install, or the installed model deleted) — every other
-     * provider here either has a fixed endpoint or (AICore) always
-     * contributes a candidate and only fails once actually attempted, so
+     * provider here either has a fixed endpoint or (AICore) is already
+     * filtered out there when unsupported, so
      * only LOCAL needs this check.
      */
     val runtimeLabel: String
