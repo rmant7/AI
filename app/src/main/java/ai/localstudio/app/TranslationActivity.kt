@@ -548,9 +548,37 @@ class TranslationActivity : AppCompatActivity() {
     private fun buildPrompt(translationSource: AppContainer.CompareSource, source: MadladLanguage, target: MadladLanguage, text: String): String =
         if (translationSource.isLocal && TranslationModels.SEEDS.any { it.id == container.settings.translationModel && it.isT5EncoderDecoder }) {
             "<2${target.code}> $text"
+        } else if (translationSource.isLocal && translationSource.label.contains("omnitranslate", ignoreCase = true)) {
+            buildOmniTranslatePrompt(target, text)
         } else {
             buildChatPrompt(source, target, text)
         }
+
+    /**
+     * OmniTranslate's own format — `Translate to <iso639-3>_<Script>: text`
+     * (its model card's example uses `ron_Latn`), target only. Real device
+     * report: given [buildChatPrompt]'s English instruction it decided on its
+     * own the task was "EN->sul_Latn" and answered in Spanish. The model card
+     * also says an ISO code works much better than a language name, so the
+     * name is only the fallback when no code can be derived.
+     */
+    private fun buildOmniTranslatePrompt(target: MadladLanguage, text: String): String =
+        "Translate to ${isoScriptCode(target.code) ?: target.name}: $text"
+
+    /**
+     * `ru` → `rus_Cyrl`, `crs` → `crs_Latn`: the ISO 639-3 code from
+     * [java.util.Locale] and the script from ICU's CLDR likely-subtags data —
+     * both shipped with Android, nothing hand-typed (see [MadladLanguages]' own
+     * doc comment on why fabricated codes are worse than none). Null when ICU
+     * has no script for the language. Macrolanguages come out as their
+     * macrolanguage code (`ara`, `zho`), not FLORES' specific variety (`arb`).
+     */
+    private fun isoScriptCode(code: String): String? = runCatching {
+        val likely = android.icu.util.ULocale.addLikelySubtags(android.icu.util.ULocale(code.replace('-', '_')))
+        val iso3 = likely.toLocale().isO3Language
+        val script = likely.script
+        if (iso3.isNullOrEmpty() || script.isNullOrEmpty()) null else "${iso3}_$script"
+    }.getOrNull()
 
     private fun buildChatPrompt(source: MadladLanguage, target: MadladLanguage, text: String): String =
         "You are a translation engine. Translate the text between triple backticks " +
