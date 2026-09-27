@@ -31,10 +31,18 @@ import kotlinx.coroutines.sync.withLock
  * of them holds real weights/inference memory at a time — every other
  * candidate (a network call) has no device memory footprint to protect
  * against and is never wrapped in this.
+ *
+ * The gate serializes generation, not residency: a local model stays
+ * resident (idle, evictable) after its own turn ends. [beforeGenerate] runs
+ * with the gate already held, after [load] has succeeded — i.e. once it's
+ * known this candidate really is about to generate — and is where a caller
+ * whose memory [RuntimeManager] can't see (AICore) frees an idle local
+ * model first when there isn't room for both.
  */
 class DeviceMemoryGatedRuntime(
     private val inner: ModelRuntime,
     private val gate: Mutex,
+    private val beforeGenerate: suspend () -> Unit = {},
 ) : ModelRuntime {
     override val kind: RuntimeKind get() = inner.kind
 
@@ -44,19 +52,21 @@ class DeviceMemoryGatedRuntime(
         val loaded = inner.load(model, binding)
         val handle = loaded as? TextModelHandle
             ?: throw ModelLoadException("${model.id} did not load as a text model — DeviceMemoryGatedRuntime only supports text runtimes")
-        return GatedTextHandle(handle, gate)
+        return GatedTextHandle(handle, gate, beforeGenerate)
     }
 }
 
 private class GatedTextHandle(
     private val inner: TextModelHandle,
     private val gate: Mutex,
+    private val beforeGenerate: suspend () -> Unit,
 ) : TextModelHandle {
     override val modelId: String get() = inner.modelId
     override val ramBytes: Long get() = inner.ramBytes
 
     override fun generate(request: GenerationRequest): Flow<String> = flow {
         gate.withLock {
+            beforeGenerate()
             emitAll(inner.generate(request))
         }
     }

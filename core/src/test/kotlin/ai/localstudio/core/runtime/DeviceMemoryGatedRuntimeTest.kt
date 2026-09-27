@@ -98,6 +98,52 @@ class DeviceMemoryGatedRuntimeTest {
     }
 
     @Test
+    fun `beforeGenerate runs under the gate, after a successful load, before generation`() = runBlocking {
+        val gate = Mutex()
+        val events = mutableListOf<String>()
+        val inner = object : ModelRuntime {
+            override val kind = RuntimeKind.AICORE
+            override fun canRun(model: ModelDescriptor, binding: RuntimeBinding) = true
+            override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel {
+                events += "load"
+                return object : TextModelHandle {
+                    override val modelId = model.id
+                    override val ramBytes = 0L
+                    override fun generate(request: GenerationRequest): Flow<String> = flow {
+                        events += "generate"
+                        emit("hi")
+                    }
+                    override fun requestCancel() = Unit
+                    override fun close() = Unit
+                }
+            }
+        }
+        val llm = model("llm", bindings = listOf(binding(runtime = RuntimeKind.AICORE)))
+        val runtime = DeviceMemoryGatedRuntime(inner, gate, beforeGenerate = { events += "before:locked=${gate.isLocked}" })
+
+        val handle = runtime.load(llm, llm.bindings.first()) as TextModelHandle
+        handle.generate(GenerationRequest(prompt = "a")).toList()
+
+        assertEquals(listOf("load", "before:locked=true", "generate"), events)
+    }
+
+    @Test
+    fun `beforeGenerate is never reached when load fails`() = runBlocking {
+        var called = false
+        val inner = object : ModelRuntime {
+            override val kind = RuntimeKind.AICORE
+            override fun canRun(model: ModelDescriptor, binding: RuntimeBinding) = true
+            override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel =
+                throw ModelLoadException("not available on this device")
+        }
+        val llm = model("llm", bindings = listOf(binding(runtime = RuntimeKind.AICORE)))
+        val runtime = DeviceMemoryGatedRuntime(inner, Mutex(), beforeGenerate = { called = true })
+
+        kotlin.test.assertFailsWith<ModelLoadException> { runtime.load(llm, llm.bindings.first()) }
+        assertFalse(called)
+    }
+
+    @Test
     fun `requestCancel and close delegate to the underlying handle`() = runBlocking {
         var cancelled = false
         var closed = false

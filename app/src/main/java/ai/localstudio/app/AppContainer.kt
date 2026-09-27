@@ -1777,10 +1777,54 @@ class AppContainer private constructor(private val context: Context) {
         val model = servedModel("gemini-nano-aicore", RuntimeKind.AICORE, Capability.TEXT_GENERATION, Capability.REASONING)
         return FallbackCandidate(
             label = context.getString(CloudProviders.AICORE.titleRes),
-            runtime = DeviceMemoryGatedRuntime(AiCoreRuntime(log = appLog::record), deviceMemoryGate),
+            runtime = DeviceMemoryGatedRuntime(
+                inner = AiCoreRuntime(log = appLog::record),
+                gate = deviceMemoryGate,
+                beforeGenerate = { makeRoomForAicore() },
+            ),
             model = model,
             binding = model.bindings.first(),
         )
+    }
+
+    /**
+     * Runs with [deviceMemoryGate] held, right before AICore generates — so
+     * no local generation is in flight and anything [sharedRuntimeManager]
+     * holds is idle. The gate alone serializes generation but not
+     * residency: MADLAD-400 7B (~5.3 GB measured) stays resident after its
+     * own translation, and AICore's own memory — in a system service this
+     * app can't measure — would otherwise ramp up right next to it, the
+     * same combination that OOM-killed the process when both ran at once.
+     *
+     * Evicts only when free RAM is below [AICORE_RAM_RESERVE_BYTES], not
+     * unconditionally: in Compare-mode translation both run on every
+     * request, and evicting every time would mean a full reload (~10 s load
+     * + ~9 s encode for MADLAD) on each translation. The reserve is a
+     * deliberately conservative safety margin, not an estimate of AICore's
+     * footprint — every decision is logged (AICORE_RAM) so it can be tuned
+     * from real device logs.
+     */
+    private suspend fun makeRoomForAicore() {
+        val residentBytes = sharedRuntimeManager.residentBytes
+        val freeBytes = currentFreeRamBytes(context)
+        val mb = { bytes: Long -> bytes / (1024 * 1024) }
+        when {
+            residentBytes <= 0L ->
+                appLog.record("AICORE_RAM", "free ${mb(freeBytes)} MB, no local model resident")
+            freeBytes >= AICORE_RAM_RESERVE_BYTES ->
+                appLog.record(
+                    "AICORE_RAM",
+                    "free ${mb(freeBytes)} MB >= reserve ${mb(AICORE_RAM_RESERVE_BYTES)} MB — keeping local model(s) resident (${mb(residentBytes)} MB)",
+                )
+            else -> {
+                appLog.record(
+                    "AICORE_RAM",
+                    "free ${mb(freeBytes)} MB < reserve ${mb(AICORE_RAM_RESERVE_BYTES)} MB — evicting idle local model(s) (${mb(residentBytes)} MB) first",
+                )
+                sharedRuntimeManager.evictIdle()
+                appLog.record("AICORE_RAM", "after eviction: free ${mb(currentFreeRamBytes(context))} MB")
+            }
+        }
     }
 
     /**
@@ -2219,6 +2263,15 @@ class AppContainer private constructor(private val context: Context) {
         // that showed real symptoms.
         private const val SEMANTIC_BACKFILL_MIN_FREE_RAM_BYTES = 2_000L * 1024 * 1024
 
+        /**
+         * Free RAM below which an idle local model is evicted before AICore
+         * generates — see [makeRoomForAicore]. A conservative safety margin,
+         * not a measurement: AICore runs in a system service whose memory
+         * this app has no way to read. Meant to be retuned from the
+         * AICORE_RAM log lines, not treated as a known quantity.
+         */
+        private const val AICORE_RAM_RESERVE_BYTES = 4_096L * 1024 * 1024
+
         @Volatile
         private var instance: AppContainer? = null
 
@@ -2242,6 +2295,14 @@ class AppContainer private constructor(private val context: Context) {
             val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
             return info.availMem
         }
+
+        /**
+         * Genuinely free RAM right now: the higher of ActivityManager's
+         * reading and the kernel's MemAvailable — the same "free" [profileOf]
+         * uses, minus its credit for this app's own resident models.
+         */
+        fun currentFreeRamBytes(context: Context): Long =
+            maxOf(currentAvailableRamBytes(context), readMemAvailableBytes() ?: 0L)
 
         /**
          * Everything else [ActivityManager.MemoryInfo] carries beyond
