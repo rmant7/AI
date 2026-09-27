@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -181,7 +182,91 @@ bool endsOnCompleteUtf8(const std::string &s) {
         if ((byte & 0xC0) != 0x80) return utf8SequenceLength(byte) == back;
         back++;
     }
-    return true; // four continuation bytes with no lead byte: give up buffering, emit as-is
+    // No lead byte turned up in the bytes actually available. Genuinely
+    // four continuation bytes with no lead byte among them (back > 4) is
+    // unrecoverable — give up and let toModifiedUtf8 below deal with it.
+    // A *short* buffer that ran out before reaching four (back > s.size(),
+    // s.size() < 4) is not the same thing: the lead byte may simply not
+    // have arrived yet in a later token, and the original version of this
+    // function returned true here too — treating "not enough bytes to
+    // tell" the same as "confirmed unrecoverable" — which forced an early
+    // flush mid-codepoint on every short buffer, not just malformed ones.
+    return (int) s.size() >= 4;
+}
+
+/**
+ * Re-encodes `s` (raw bytes straight from the tokenizer, assumed complete
+ * per [endsOnCompleteUtf8]) into JNI's Modified UTF-8 before it reaches
+ * NewStringUTF, which aborts the whole process — not a catchable exception
+ * — on anything else. [endsOnCompleteUtf8] only rules out the common case,
+ * a valid multi-byte codepoint split across two BPE token pieces; it says
+ * nothing about a codepoint that is not valid UTF-8 at all, which a
+ * byte-fallback token from a small, undertrained multilingual model
+ * (OmniTranslate generating Hebrew, a real device crash: `NewStringUTF`
+ * rejected a lone 0xB9 continuation byte with no lead byte ever buffered
+ * for it) can and does produce. Any byte that doesn't decode to a valid,
+ * in-range, non-surrogate codepoint becomes U+FFFD; a NUL byte and any
+ * codepoint above the BMP get Modified UTF-8's own encoding (0xC0 0x80,
+ * and a CESU-8 surrogate pair) rather than plain UTF-8's, since that is
+ * what NewStringUTF actually expects.
+ */
+std::string toModifiedUtf8(const std::string &s) {
+    std::string out;
+    out.reserve(s.size());
+    size_t i = 0;
+    const size_t n = s.size();
+    while (i < n) {
+        const auto lead = (unsigned char) s[i];
+        uint32_t cp;
+        int len;
+        if ((lead & 0x80) == 0x00) {
+            cp = lead;
+            len = 1;
+        } else if ((lead & 0xE0) == 0xC0) {
+            cp = lead & 0x1F;
+            len = 2;
+        } else if ((lead & 0xF0) == 0xE0) {
+            cp = lead & 0x0F;
+            len = 3;
+        } else if ((lead & 0xF8) == 0xF0) {
+            cp = lead & 0x07;
+            len = 4;
+        } else {
+            out += "\xEF\xBF\xBD"; // U+FFFD: lead byte itself is invalid
+            i++;
+            continue;
+        }
+        bool ok = i + (size_t) len <= n;
+        for (int k = 1; ok && k < len; k++) {
+            const auto cont = (unsigned char) s[i + (size_t) k];
+            if ((cont & 0xC0) != 0x80) { ok = false; break; }
+            cp = (cp << 6) | (cont & 0x3F);
+        }
+        static constexpr uint32_t MIN_FOR_LEN[5] = {0, 0, 0x80, 0x800, 0x10000};
+        if (!ok || cp < MIN_FOR_LEN[len] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+            out += "\xEF\xBF\xBD"; // U+FFFD: malformed, overlong, or a lone surrogate
+            i++;
+            continue;
+        }
+        if (cp == 0) {
+            out += "\xC0\x80"; // Modified UTF-8's own NUL encoding
+        } else if (cp <= 0xFFFF) {
+            out.append(s, i, (size_t) len); // already valid 1-3 byte UTF-8, identical in Modified UTF-8
+        } else {
+            // Above the BMP: CESU-8 — a UTF-16 surrogate pair, each
+            // surrogate encoded as its own 3-byte sequence.
+            const uint32_t v = cp - 0x10000;
+            const uint32_t hi = 0xD800 + (v >> 10);
+            const uint32_t lo = 0xDC00 + (v & 0x3FF);
+            for (const uint32_t su : {hi, lo}) {
+                out += (char) (0xE0 | (su >> 12));
+                out += (char) (0x80 | ((su >> 6) & 0x3F));
+                out += (char) (0x80 | (su & 0x3F));
+            }
+        }
+        i += (size_t) len;
+    }
+    return out;
 }
 
 std::string pieceOf(const llama_vocab *vocab, llama_token token) {
@@ -429,7 +514,7 @@ DecodeLoopResult runDecodeLoop(
 
         pendingUtf8 += pieceOf(session->vocab, token);
         if (!pendingUtf8.empty() && endsOnCompleteUtf8(pendingUtf8)) {
-            jstring value = env->NewStringUTF(pendingUtf8.c_str());
+            jstring value = env->NewStringUTF(toModifiedUtf8(pendingUtf8).c_str());
             env->CallVoidMethod(callback, onToken, value);
             env->DeleteLocalRef(value);
             pendingUtf8.clear();
