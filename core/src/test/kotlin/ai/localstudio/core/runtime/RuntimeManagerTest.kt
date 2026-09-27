@@ -253,4 +253,24 @@ class RuntimeManagerTest {
 
         assertEquals(listOf("beforeAdmission", "budget", "load"), events)
     }
+
+    @Test
+    fun `admission uses requiredBytesFor, read fresh on every acquisition`() = runBlocking {
+        var measured: Long? = null
+        val manager = RuntimeManager(
+            budgetBytes = { 7 * GB },
+            runtimes = mapOf(RuntimeKind.LLAMA_CPP to runtime),
+            clock = { ++now },
+            exclusive = true,
+            requiredBytesFor = { binding, _ -> measured ?: binding.effectiveRequiredRamBytes },
+        )
+        // No explicit requirement: the binding falls back to file size × 1.3 = 7.8 GB.
+        val madlad = model("madlad", bindings = listOf(RuntimeBinding(RuntimeKind.LLAMA_CPP, "madlad.gguf", fileSizeBytes = 6 * GB)))
+
+        assertFailsWith<InsufficientMemoryException> { manager.withModel(madlad, madlad.bindings.first()) { } }
+
+        measured = 6 * GB + GB / 3
+        manager.withModel(madlad, madlad.bindings.first()) { }
+        assertEquals(listOf("madlad"), runtime.loads)
+    }
 }

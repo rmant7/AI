@@ -62,6 +62,8 @@ import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.llama.LlamaCppMemoryEmbedder
 import ai.localstudio.app.log.AppLog
 import ai.localstudio.app.llama.LlamaCppRuntime
+import ai.localstudio.app.llama.MeasuredRamStore
+import ai.localstudio.app.llama.RamMeasuringRuntime
 import ai.localstudio.app.llama.readMemAvailableBytes
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
@@ -152,6 +154,9 @@ class AppContainer private constructor(private val context: Context) {
      * tens of milliseconds later, never throwing) is untouched — this is
      * only the outer gate deciding whether to attempt the load at all.
      */
+    /** Real per-model RAM costs measured on this device — see [RamMeasuringRuntime]. */
+    private val measuredRam = MeasuredRamStore(context)
+
     private val sharedRuntimeManager = RuntimeManager(
         budgetBytes = { device.liveRamBytes },
         runtimes = emptyMap(),
@@ -165,6 +170,12 @@ class AppContainer private constructor(private val context: Context) {
                 appLog.record("RAM_MANAGER", "waiting for an abandoned native load/free to finish before admitting the next model")
                 LlamaCppRuntime.awaitPendingNativeWork()
             }
+        },
+        // Admission against what this model actually cost on this device
+        // (variant = the context size it's loaded with), once measured;
+        // the file-size × 1.3 guess only until the first real run.
+        requiredBytesFor = { binding, variant ->
+            measuredRam.measurementFor(binding.artifact, variant as? Int)?.requiredBytes ?: binding.effectiveRequiredRamBytes
         },
     )
 
@@ -1706,11 +1717,16 @@ class AppContainer private constructor(private val context: Context) {
         val contextTokens = effectiveContextTokens()
         return DeviceMemoryGatedRuntime(
             inner = SharedRuntime(
-                inner = LlamaCppRuntime(
+                inner = RamMeasuringRuntime(
+                    inner = LlamaCppRuntime(
+                        contextTokens = contextTokens,
+                        log = appLog::record,
+                        availableRamBytes = { currentAvailableRamBytes(context) },
+                        memoryDiagnostics = { currentMemoryDiagnostics(context) },
+                    ),
                     contextTokens = contextTokens,
+                    store = measuredRam,
                     log = appLog::record,
-                    availableRamBytes = { currentAvailableRamBytes(context) },
-                    memoryDiagnostics = { currentMemoryDiagnostics(context) },
                 ),
                 manager = sharedRuntimeManager,
                 variant = contextTokens,
@@ -2080,8 +2096,10 @@ class AppContainer private constructor(private val context: Context) {
                             runtime = RuntimeKind.LLAMA_CPP,
                             artifact = file.absolutePath,
                             fileSizeBytes = file.length().coerceAtLeast(1),
-                            // Left unmeasured on purpose: effectiveRequiredRamBytes
-                            // then errs high, which is the safe direction here.
+                            // Left null here: a real measurement (MeasuredRamStore)
+                            // is applied live at admission time through
+                            // sharedRuntimeManager's requiredBytesFor, so a cached
+                            // orchestrator's binding never goes stale.
                             requiredRamBytes = null,
                             mmprojArtifact = modelStore.mmprojFileFor(seed).absolutePath
                                 .takeIf { modelStore.hasMmproj(seed) },

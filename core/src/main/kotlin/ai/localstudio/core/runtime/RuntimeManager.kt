@@ -47,6 +47,13 @@ data class ResidentModel(
  * load on a detached worker), so a model still physically loading or being
  * freed in the background is never mistaken for free memory by the next
  * admission check.
+ *
+ * [requiredBytesFor] is what a load is admitted against, asked fresh on every
+ * acquisition — by default the binding's own estimate, but a caller with
+ * real measurements (see [ai.localstudio.core.registry.RamMeasurement])
+ * supplies them here, so a measurement taken a minute ago applies to the
+ * very next load instead of waiting for whoever built the binding to
+ * rebuild it.
  */
 class RuntimeManager(
     private val budgetBytes: () -> Long,
@@ -56,6 +63,7 @@ class RuntimeManager(
     private val exclusive: Boolean = false,
     private val log: (String) -> Unit = {},
     private val beforeAdmission: suspend () -> Unit = {},
+    private val requiredBytesFor: (binding: RuntimeBinding, variant: Any?) -> Long = { binding, _ -> binding.effectiveRequiredRamBytes },
 ) {
     constructor(
         budgetBytes: Long,
@@ -132,7 +140,7 @@ class RuntimeManager(
             throw ModelLoadException("Runtime ${binding.runtime.id} cannot run ${model.id}")
         }
         beforeAdmission()
-        val requiredBytes = binding.effectiveRequiredRamBytes
+        val requiredBytes = requiredBytesFor(binding, variant)
         val budget = budgetBytes()
         if (exclusive) evictAllIdle()
         if (requiredBytes > budget) {

@@ -120,6 +120,19 @@ private fun readProcMeminfo(): String? = runCatching {
 }.getOrNull()
 
 /**
+ * This process's resident set size (VmRSS) in bytes — anonymous memory plus
+ * every file-backed page actually paged in, so memory-mapped model weights
+ * count as soon as they're touched. Null when /proc/self/status can't be read.
+ */
+internal fun readSelfRssBytes(): Long? = runCatching {
+    File("/proc/self/status").useLines { lines ->
+        lines.firstOrNull { it.startsWith("VmRSS:") }
+            ?.removePrefix("VmRSS:")?.trim()?.removeSuffix("kB")?.trim()?.toLongOrNull()
+            ?.let { it * 1024 }
+    }
+}.getOrNull()
+
+/**
  * This process's own memory footprint at the moment of a refusal — a real
  * device report asked for this specifically: whether the app's *own*
  * resident set (semantic memory not actually freed, a previous model's
