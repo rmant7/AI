@@ -192,6 +192,7 @@ class ChatActivity : AppCompatActivity() {
         // unlike everything UtilityMenu adds below.
         menu.add(0, MENU_MEMORY, 0, memoryTitle()).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(0, MENU_HISTORY, 0, R.string.menu_history)
+        menu.add(0, MENU_FILES, 0, R.string.menu_files)
         menu.add(0, MENU_SHARE_CHAT, 0, R.string.menu_share_chat)
         menu.add(0, MENU_CLEAR, 0, R.string.menu_clear)
         // The same shared entries every other utility screen offers, in the
@@ -235,6 +236,20 @@ class ChatActivity : AppCompatActivity() {
         // this reason.
         MENU_HISTORY -> {
             showHistory()
+            true
+        }
+
+        // A conversation's own attached files — see FilesActivity's own doc
+        // comment on why this lives only here, not in UtilityMenu's shared
+        // list: every other screen offering it read as a general file
+        // manager it isn't. Same CLEAR_TOP/SINGLE_TOP navigation as
+        // UtilityMenu.handle, for the same reason (see its own doc comment).
+        MENU_FILES -> {
+            startActivity(
+                Intent(this, FilesActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+            )
             true
         }
 
@@ -1204,6 +1219,7 @@ class ChatActivity : AppCompatActivity() {
         // the app now comes from UtilityMenu, which owns its own ids.
         const val MENU_MEMORY = 1
         const val MENU_HISTORY = 5
+        const val MENU_FILES = 6
         const val MENU_SHARE_CHAT = 7
         const val MENU_CLEAR = 8
 
