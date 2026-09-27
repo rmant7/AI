@@ -34,8 +34,9 @@ class AIErrorClassifierTest {
     }
 
     @Test
-    fun `400 and 422 classify as INVALID_REQUEST`() {
+    fun `400, 413 and 422 classify as INVALID_REQUEST`() {
         assertEquals(AIErrorCode.INVALID_REQUEST, classify(FakeHttpError(400, "", "bad request")).code)
+        assertEquals(AIErrorCode.INVALID_REQUEST, classify(FakeHttpError(413, "", "request too large")).code)
         assertEquals(AIErrorCode.INVALID_REQUEST, classify(FakeHttpError(422, "", "unprocessable")).code)
     }
 

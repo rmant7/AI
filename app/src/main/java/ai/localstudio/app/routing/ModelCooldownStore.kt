@@ -38,18 +38,18 @@ private data class CooldownList(val entries: List<CooldownEntry> = emptyList())
  * enough after the last one that it reads as a fresh problem rather than a
  * continuation of the same outage.
  */
-class ModelCooldownStore(context: Context) {
+class ModelCooldownStore(context: Context) : ai.localstudio.core.errors.ModelCooldownPolicy {
 
     private val file = File(context.filesDir, "model-cooldowns.json")
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun isOnCooldown(providerId: String, modelName: String): Boolean =
+    override fun isOnCooldown(providerId: String, modelName: String): Boolean =
         cooldownUntil(providerId, modelName) > System.currentTimeMillis()
 
     fun cooldownUntil(providerId: String, modelName: String): Long =
         readAll().firstOrNull { it.providerId == providerId && it.modelName == modelName }?.untilEpochMs ?: 0L
 
-    fun markOverloaded(providerId: String, modelName: String) {
+    override fun markOverloaded(providerId: String, modelName: String) {
         val now = System.currentTimeMillis()
         val existing = readAll().firstOrNull { it.providerId == providerId && it.modelName == modelName }
         // A failure arriving well after the previous cooldown already lifted
@@ -65,7 +65,7 @@ class ModelCooldownStore(context: Context) {
     }
 
     /** How long the cooldown [markOverloaded] just wrote actually runs — for logging. */
-    fun currentCooldownMs(providerId: String, modelName: String): Long =
+    override fun currentCooldownMs(providerId: String, modelName: String): Long =
         readAll().firstOrNull { it.providerId == providerId && it.modelName == modelName }
             ?.let { it.untilEpochMs - it.lastFailureAtMs } ?: 0L
 

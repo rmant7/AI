@@ -102,21 +102,6 @@ class OpenAiException(override val status: Int, override val body: String) : Exc
 }
 
 /**
- * Groq's own free-tier rate-limit message spells out the wait itself —
- * "...Please try again in 15.84s." — and OpenAiException's message already
- * surfaces that sentence via [OpenAiException.describe]. The daily-quota
- * distinction (a 429 naming TPD/RPD/"per day" gets no retry hint at all,
- * even if it also quotes a few-second wait — that number is about the
- * provider's internal bucket math, not when the day actually rolls over)
- * and the retry hint itself now live in [ai.localstudio.core.errors.AIErrorClassifier],
- * shared with every other provider's 429 — this just reads its verdict
- * back out through [AIError.retryAfterMs] rather than re-parsing the
- * message here.
- */
-private fun retryAfterMs(e: OpenAiException): Long? =
-    ai.localstudio.core.errors.AIErrorClassifier.classify(e).retryAfterMs
-
-/**
  * Runs models on an OpenAI-compatible endpoint — Ollama, llama-server, or any
  * other server speaking the same API.
  *
@@ -287,11 +272,17 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                     }
                     break
                 } catch (e: OpenAiException) {
-                    // 429 is what both a per-minute rate limit and a daily
-                    // quota show up as on every provider this app targets —
-                    // rotate to the pool's next key and try again rather than
-                    // failing a turn that a second key would have answered.
-                    if (rotator != null && keyEntry != null && e.status == 429 && !emittedAny) {
+                    // RATE_LIMIT (a per-minute burst) and QUOTA (an
+                    // exhausted daily allowance) both show up as HTTP 429 —
+                    // ai.localstudio.core.errors.FallbackPolicy.shouldRotateKey
+                    // says both are worth rotating to the pool's next key
+                    // for, since a different key may have its own separate
+                    // quota, rather than failing a turn a second key would
+                    // have answered.
+                    val classified = ai.localstudio.core.errors.AIErrorClassifier.classify(e)
+                    if (rotator != null && keyEntry != null &&
+                        ai.localstudio.core.errors.FallbackPolicy.shouldRotateKey(classified.code) && !emittedAny
+                    ) {
                         // The blanket 24h default is right for an actual daily
                         // quota, but Groq's free tier hands out the same HTTP
                         // 429 for an ordinary per-minute burst — its own error
@@ -299,9 +290,10 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                         // 15.84s.") — and blacklisting the only bundled key
                         // for a full day over a transient burst defeats the
                         // point of bundling one at all. When the provider's
-                        // own message names a wait, that becomes the cooldown
-                        // instead of the default.
-                        val cooldownMs = retryAfterMs(e) ?: ApiKeyRotator.DEFAULT_COOLDOWN_MS
+                        // own message names a wait ([classified]'s own
+                        // AIError.retryAfterMs, null for a daily quota), that
+                        // becomes the cooldown instead of the default.
+                        val cooldownMs = classified.retryAfterMs ?: ApiKeyRotator.DEFAULT_COOLDOWN_MS
                         rotator.markExhausted(keyEntry.id, cooldownMs)
                         continue
                     }

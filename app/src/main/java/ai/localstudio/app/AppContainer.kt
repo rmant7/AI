@@ -103,7 +103,6 @@ import ai.localstudio.app.whisper.WhisperStore
 import ai.localstudio.whisper.WhisperBridge
 import ai.localstudio.openai.GigaChatTokenProvider
 import ai.localstudio.openai.OpenAiConfig
-import ai.localstudio.openai.OpenAiException
 import ai.localstudio.openai.OpenAiRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -2222,9 +2221,16 @@ class AppContainer private constructor(private val context: Context) {
                 // field existed — see CloudProvider.visionModels' own doc
                 // comment for which providers have an actual confirmed list.
                 supportsImages = provider.visionModels?.contains(modelName) ?: true,
+                // AIErrorClassifier/FallbackPolicy, not a raw `error is
+                // OpenAiException && error.status == …` check: the same
+                // decision (cool this model down vs. skip this provider's
+                // other models for the turn) then applies to any provider's
+                // failure — GigaChat's own OAuth exception included — not
+                // just an OpenAI-compatible endpoint's, see docs/17.
                 onFailure = { error ->
-                    when {
-                        error is OpenAiException && error.status == 503 -> {
+                    val classified = ai.localstudio.core.errors.AIErrorClassifier.classify(error)
+                    when (ai.localstudio.core.errors.FallbackPolicy.actionFor(classified.code)) {
+                        ai.localstudio.core.errors.FallbackAction.COOLDOWN_MODEL -> {
                             modelCooldowns.markOverloaded(provider.id, modelName)
                             // Otherwise the next message reuses the cached
                             // orchestrator — built before this model went on
@@ -2234,22 +2240,25 @@ class AppContainer private constructor(private val context: Context) {
                             val cooldownMs = modelCooldowns.currentCooldownMs(provider.id, modelName)
                             appLog.record(
                                 "MODEL_COOLDOWN",
-                                "$providerTitle ($modelName): HTTP 503, skipping for ${cooldownMs / 60_000} min",
+                                "$providerTitle ($modelName): HTTP ${classified.providerStatus}, skipping for ${cooldownMs / 60_000} min",
                             )
                         }
                         // Distinct from the 429/daily-limit path entirely —
                         // this is not a quota problem key rotation or a
                         // cooldown can route around, it means THIS request
-                        // (with this conversation's current prompt size) is
-                        // too big for this provider's free tier, full stop.
-                        error is OpenAiException && error.status == 413 -> {
+                        // (with this conversation's current prompt size, or
+                        // shape) is rejected outright, and every sibling
+                        // model on the same provider will reject the
+                        // identical request too.
+                        ai.localstudio.core.errors.FallbackAction.SKIP_PROVIDER_THIS_TURN -> {
                             requestTooLargeForProvider.set(true)
                             appLog.record(
                                 "GENERATION_ERROR",
-                                "$providerTitle ($modelName): HTTP 413, request too large — " +
+                                "$providerTitle ($modelName): HTTP ${classified.providerStatus}, request rejected — " +
                                     "skipping the rest of this provider's models for this turn",
                             )
                         }
+                        ai.localstudio.core.errors.FallbackAction.NONE -> {}
                     }
                 },
             )

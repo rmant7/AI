@@ -55,7 +55,13 @@ object AIErrorClassifier {
         val code = when (status) {
             401, 403 -> AIErrorCode.AUTHENTICATION
             404 -> AIErrorCode.NOT_FOUND
-            400, 422 -> AIErrorCode.INVALID_REQUEST
+            // 413 (request too large): retrying the exact same prompt
+            // unchanged fails the same way, same as a malformed body does —
+            // and every sibling model on the same provider almost certainly
+            // shares the same context-length limit, so a caller iterating
+            // candidates is right to skip the rest of that provider's
+            // models for this turn on any INVALID_REQUEST, not just a 413.
+            400, 413, 422 -> AIErrorCode.INVALID_REQUEST
             429 -> if (looksLikeDailyQuota(message)) AIErrorCode.QUOTA else AIErrorCode.RATE_LIMIT
             in 500..599 -> AIErrorCode.UNAVAILABLE
             else -> AIErrorCode.UNKNOWN
