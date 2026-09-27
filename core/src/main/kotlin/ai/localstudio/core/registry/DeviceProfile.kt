@@ -106,6 +106,27 @@ data class DeviceProfile(
         artifactSizeBytes <= 0 || artifactSizeBytes * ESTIMATE_NUMERATOR / ESTIMATE_DENOMINATOR <= usableRamBytes
 
     /**
+     * The same estimate as [fitsBudget], against [liveRamBytes] instead of
+     * [usableRamBytes] — "would this actually load right now", not "does it
+     * clear the configured policy ceiling". Real device report: switching
+     * the Translation screen's model through three different MADLAD-400 10B
+     * quantisations in a row, each one accepted by [fitsBudget] with no
+     * warning at all (a 16 GB device with the RAM budget raised puts
+     * [usableRamBytes] near 13 GB), and every single one then failed to
+     * actually load a few seconds later — [ai.localstudio.core.runtime.RuntimeManager]'s
+     * own admission check (wired to [liveRamBytes] deliberately, see that
+     * property's own doc comment) correctly refused all three against the
+     * ~7-9 GB genuinely free at the time. The two checks disagreeing by
+     * design is fine; a switch that silently accepts something guaranteed
+     * to fail moments later, with nothing to tell the user beforehand, is
+     * not — this exists so a caller like [ai.localstudio.app.ModelsActivity]'s
+     * own switch-confirmation dialog can warn using the same live number
+     * the real gate will actually enforce, not just the generous one.
+     */
+    fun fitsLiveMemory(artifactSizeBytes: Long): Boolean =
+        artifactSizeBytes <= 0 || artifactSizeBytes * ESTIMATE_NUMERATOR / ESTIMATE_DENOMINATOR <= liveRamBytes
+
+    /**
      * Pre-download verdict: how a model of this artifact size sits against
      * this device, both in absolute terms (*total* RAM — a 2 GB model reads
      * as lightweight on any phone worth running it on) and against the

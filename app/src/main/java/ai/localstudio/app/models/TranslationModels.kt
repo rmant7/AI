@@ -159,5 +159,25 @@ object TranslationModels {
             approxSizeBytes = 2_450_000_000,
             capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
         ),
+        // OmniTranslate: Qwen3 0.6B fine-tuned for 500+ languages — decoder-only,
+        // not a T5 encoder-decoder, gets buildOmniTranslatePrompt's own format
+        // via TranslationActivity.buildPrompt's isLocal+label-contains match
+        // (this id's label always contains "omnitranslate", case-insensitively).
+        // Promoted from a user-added custom model on request — repoId and the
+        // resolved on-device file name (custom-mradermacher_omnitranslate-1.1-gguf)
+        // both confirmed from a real device's own download log, not a guess.
+        LocalModelSeed(
+            id = "omnitranslate-1-1",
+            title = "OmniTranslate 1.1",
+            repoIds = listOf("mradermacher/OmniTranslate-1.1-GGUF"),
+            paramsLabel = "0.6B · Qwen3 · decoder-only",
+            noteRes = R.string.note_omnitranslate_1_1,
+            // 0.6B at Q4_K_M-first — a rough estimate for this size class,
+            // same caveat as TranslateGemma's own: HuggingFaceResolver
+            // resolves the real file and its real size live at download
+            // time regardless.
+            approxSizeBytes = 500_000_000,
+            capabilities = setOf(Capability.TRANSLATION, Capability.TEXT_GENERATION),
+        ),
     )
 }

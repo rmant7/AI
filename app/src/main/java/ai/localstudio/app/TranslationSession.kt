@@ -60,6 +60,28 @@ class TranslationSession(context: Context) {
         if (batchId == batch) _busy.value = false
     }
 
+    /**
+     * Stops waiting for this batch's still-pending sources instead of
+     * riding out whichever one is slowest. Real device report: a source
+     * that takes 30+ seconds (a local model queued behind another load, a
+     * rate-limited cloud call) left every other, already-finished result
+     * sitting on screen but blocked starting a *new* translation until that
+     * one either answered or hit [ai.localstudio.app.TranslationActivity]'s
+     * own timeout — the button is disabled for the whole batch, not
+     * per-source, and there was no way to give up on one turn early.
+     * Cancelling [job] propagates into `runCompare`'s own per-candidate
+     * coroutines and reaches [end] through the `finally` block that always
+     * calls it, so [busy] clears the normal way. Whatever already has an
+     * answer is untouched; whatever is still `null` gets [placeholderText]
+     * instead of hanging on "…" forever with no way to tell it apart from
+     * still being in progress.
+     */
+    fun cancel(placeholderText: String) {
+        job?.cancel()
+        _results.update { list -> list.map { if (it.text == null) it.copy(text = placeholderText) else it } }
+        save()
+    }
+
     private fun change(index: Int, transform: (Result) -> Result) {
         _results.update { list -> list.mapIndexed { i, r -> if (i == index) transform(r) else r } }
         save()

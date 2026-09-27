@@ -179,8 +179,12 @@ class TranslationActivity : AppCompatActivity() {
         }
 
         binding.translateButton.setOnClickListener {
-            hideKeyboard()
-            translate()
+            if (container.translationSession.busy.value) {
+                container.translationSession.cancel(getString(R.string.translation_stopped))
+            } else {
+                hideKeyboard()
+                translate()
+            }
         }
         binding.translationModelRow.setOnClickListener {
             startActivity(ModelsActivity.intent(this, ModelsActivity.Category.TRANSLATION))
@@ -595,8 +599,14 @@ class TranslationActivity : AppCompatActivity() {
             "Reply with only the translation itself, nothing else — no quotes, no notes, no explanation.\n\n" +
             "```\n$text\n```"
 
+    /**
+     * The same button doubles as Stop while busy rather than just disabling
+     * — see [TranslationSession.cancel]'s own doc comment on why a slow
+     * source used to block starting a new translation with no way out.
+     */
     private fun setBusy(busy: Boolean) {
-        binding.translateButton.isEnabled = !busy
+        binding.translateButton.isEnabled = true
+        binding.translateButton.text = getString(if (busy) R.string.translation_stop else R.string.translation_translate)
         binding.translationProgress.visibility = if (busy) View.VISIBLE else View.GONE
     }
 

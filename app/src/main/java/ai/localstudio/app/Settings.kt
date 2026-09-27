@@ -157,6 +157,23 @@ class Settings(context: Context) {
     private fun repoSet(key: String): Set<String> =
         prefs.getString(key, null)?.split(',')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
 
+    /**
+     * Catalog seed ids ([LocalModelSeed.id], [LocalModels.SEEDS] or
+     * [ai.localstudio.app.models.TranslationModels.SEEDS]) the user has
+     * hidden from [ModelsActivity]'s list — real device feedback: the
+     * catalog is too long to scroll past on a phone that cannot fit most of
+     * it in RAM anyway, and unlike a custom model a catalog seed had no way
+     * to be removed from view at all, only its downloaded file deleted.
+     * Hiding only ever affects this list's own rendering — an already
+     * installed/selected hidden seed keeps working exactly as before, it is
+     * simply not offered again once dismissed. Reusing [repoSet]/[putRepoSet]:
+     * same shape (a comma-joined id set), no reason for a third
+     * implementation of the same storage pattern.
+     */
+    var hiddenModelIds: Set<String>
+        get() = repoSet(KEY_HIDDEN_MODEL_IDS)
+        set(value) = putRepoSet(KEY_HIDDEN_MODEL_IDS, value)
+
     private fun putRepoSet(key: String, value: Set<String>) =
         prefs.edit().putString(key, value.joinToString(",")).apply()
 
@@ -374,6 +391,7 @@ class Settings(context: Context) {
         const val KEY_CUSTOM_TRANSLATION_REPOS = "customTranslationRepoIds"
         const val KEY_CUSTOM_MODELS_MIGRATED = "customModelsMigrated"
         const val KEY_CUSTOM_WHISPER_URLS = "customWhisperUrls"
+        const val KEY_HIDDEN_MODEL_IDS = "hiddenModelIds"
         const val KEY_TRANSLATION_DRAFT = "translationDraftText"
         const val KEY_TRANSLATION_SOURCE_LANG = "translationSourceLang"
         const val KEY_TRANSLATION_TARGET_LANG = "translationTargetLang"

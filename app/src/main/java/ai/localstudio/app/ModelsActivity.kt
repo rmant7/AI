@@ -183,11 +183,55 @@ class ModelsActivity : AppCompatActivity() {
         }
         when (val state = container.downloads.stateOf(seed)) {
             is DownloadState.Failed -> showDetails(seed.title, state.message)
+            DownloadState.Idle -> hideModel(seed)
             else -> {
                 container.downloads.delete(seed)
                 render()
             }
         }
+    }
+
+    /**
+     * Dismisses a catalog seed from every list that offers it
+     * ([Settings.hiddenModelIds] is shared between the Text and Translation
+     * tabs — [LocalModels.SEEDS] appears on both). Real device feedback: the
+     * catalog is too long to scroll past on a phone that can't fit most of
+     * it anyway, and unlike a custom model a catalog seed had no way to be
+     * removed from view at all — only [DownloadState.Idle] offers this,
+     * never something already downloaded or mid-download, so hiding can
+     * never make an installed or in-progress model disappear out from under
+     * the user. [restoreHiddenModels] undoes this, all at once.
+     */
+    private fun hideModel(seed: LocalModelSeed) {
+        container.settings.hiddenModelIds = container.settings.hiddenModelIds + seed.id
+        container.appLog.record("MODELS", "${seed.id}: hidden from the catalog list")
+        render()
+    }
+
+    private fun restoreHiddenModels() {
+        container.settings.hiddenModelIds = emptySet()
+        render()
+    }
+
+    /** Shared by [textRows] and [translationRows] — one hidden set, restored all at once. */
+    private fun MutableList<Row>.addHiddenModelsRow() {
+        val hiddenCount = container.settings.hiddenModelIds.size
+        if (hiddenCount == 0) return
+        add(
+            Row.Model(
+                title = getString(R.string.models_hidden_title),
+                subtitle = getString(R.string.models_hidden_subtitle, hiddenCount),
+                selected = false,
+                status = null,
+                progress = null,
+                indeterminate = false,
+                primaryLabel = getString(R.string.models_hidden_restore),
+                primaryEnabled = true,
+                secondaryLabel = null,
+                onPrimary = { restoreHiddenModels() },
+                onSecondary = {},
+            ),
+        )
     }
 
     /**
@@ -201,7 +245,7 @@ class ModelsActivity : AppCompatActivity() {
      * would have picked a smaller model had they known.
      */
     private fun useLocally(seed: LocalModelSeed) {
-        if (!container.device.fitsBudget(seed.approxSizeBytes)) {
+        if (needsRamWarning(seed.approxSizeBytes)) {
             AlertDialog.Builder(this)
                 .setTitle(seed.title)
                 .setMessage(ramWarningMessage(seed.approxSizeBytes))
@@ -213,10 +257,37 @@ class ModelsActivity : AppCompatActivity() {
         switchToLocal(seed)
     }
 
+    /**
+     * Two different questions, both worth warning about before a switch that
+     * fails silently: does this clear the configured RAM budget at all
+     * ([DeviceProfile.fitsBudget], a stable policy ceiling), and — real
+     * device report — could it actually load *right now*
+     * ([DeviceProfile.fitsLiveMemory], live free memory). A model can pass
+     * the first and fail the second: switching through three different
+     * MADLAD-400 10B quantisations in a row, none of them warned about here,
+     * every one then rejected seconds later by the load-time admission
+     * check that already uses live memory deliberately (see
+     * [DeviceProfile.fitsLiveMemory]'s own doc comment) — with nothing in
+     * between to tell the user beforehand.
+     */
+    private fun needsRamWarning(approxSizeBytes: Long): Boolean =
+        !container.device.fitsBudget(approxSizeBytes) || !container.device.fitsLiveMemory(approxSizeBytes)
+
     private fun ramWarningMessage(approxSizeBytes: Long): String {
+        val device = container.device
         val estimate = approxSizeBytes * DeviceProfile.ESTIMATE_NUMERATOR / DeviceProfile.ESTIMATE_DENOMINATOR
-        return getString(R.string.model_ram_warning) + "\n\n" +
-            getString(R.string.model_ram_warning_numbers, size(estimate), size(container.device.usableRamBytes))
+        // fitsBudget can still be true here (that's exactly needsRamWarning's
+        // second case) — the headline and the number quoted both need to
+        // match whichever check actually failed, or the message reads as
+        // contradicting itself ("exceeds your budget" next to a budget
+        // figure comfortably above the estimate).
+        return if (!device.fitsBudget(approxSizeBytes)) {
+            getString(R.string.model_ram_warning) + "\n\n" +
+                getString(R.string.model_ram_warning_numbers, size(estimate), size(device.usableRamBytes))
+        } else {
+            getString(R.string.model_ram_warning_live) + "\n\n" +
+                getString(R.string.model_ram_warning_numbers, size(estimate), size(device.liveRamBytes))
+        }
     }
 
     private fun switchToLocal(seed: LocalModelSeed) {
@@ -244,7 +315,8 @@ class ModelsActivity : AppCompatActivity() {
             "MODEL_SWITCH",
             "$purpose: $title — size=" +
                 (if (approxSizeBytes > 0) size(approxSizeBytes) else "n/a") +
-                " fitsBudget=${device.fitsBudget(approxSizeBytes)} usableRamBudget=${size(device.usableRamBytes)} — " +
+                " fitsBudget=${device.fitsBudget(approxSizeBytes)} usableRamBudget=${size(device.usableRamBytes)}" +
+                " fitsLiveMemory=${device.fitsLiveMemory(approxSizeBytes)} liveRamBudget=${size(device.liveRamBytes)} — " +
                 AppContainer.currentMemoryDiagnostics(this),
         )
     }
@@ -273,7 +345,7 @@ class ModelsActivity : AppCompatActivity() {
 
     /** Same confirm-before-switching gate [useLocally] has — see [logModelSwitch]'s own comment. */
     private fun useForTranslationLocal(seed: LocalModelSeed) {
-        if (!container.device.fitsBudget(seed.approxSizeBytes)) {
+        if (needsRamWarning(seed.approxSizeBytes)) {
             AlertDialog.Builder(this)
                 .setTitle(seed.title)
                 .setMessage(ramWarningMessage(seed.approxSizeBytes))
@@ -294,6 +366,7 @@ class ModelsActivity : AppCompatActivity() {
         }
         when (val state = container.downloads.stateOf(seed)) {
             is DownloadState.Failed -> showDetails(seed.title, state.message)
+            DownloadState.Idle -> hideModel(seed)
             else -> {
                 container.downloads.delete(seed)
                 render()
@@ -425,9 +498,11 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun textRows(device: DeviceProfile): List<Row> = buildList {
         if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
+        addHiddenModelsRow()
         add(Row.Header(getString(R.string.models_local_header)))
 
         val freshness = container.catalogFreshness.cached()
+        val hidden = container.settings.hiddenModelIds
 
         // Already-resident models first (an actual answer, right now, with
         // no load to wait through or risk failing), then models that merely
@@ -437,10 +512,15 @@ class ModelsActivity : AppCompatActivity() {
         // would still refuse to load once the RAM budget was turned down,
         // scattered through the list with no way to tell which ones were
         // actually pickable without opening each in turn.
-        val sortedSeeds = (LocalModels.SEEDS + container.customSeeds(ModelPurpose.CHAT)).sortedWith(
-            compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
-                .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
-        )
+        //
+        // A custom seed is never filtered by hidden here — it has its own
+        // Remove action (see hideModel's own doc comment), and its id space
+        // (custom-...) doesn't overlap a catalog id's anyway.
+        val sortedSeeds = (LocalModels.SEEDS.filter { it.id !in hidden } + container.customSeeds(ModelPurpose.CHAT))
+            .sortedWith(
+                compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
+                    .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
+            )
         sortedSeeds.forEach { seed ->
             val state = container.downloads.stateOf(seed)
             val fitsBudget = device.fitsBudget(seed.approxSizeBytes)
@@ -502,7 +582,10 @@ class ModelsActivity : AppCompatActivity() {
                     },
                     primaryEnabled = !(state is DownloadState.Installed && selected),
                     // isCustom: always removable, in every state — see
-                    // removeCustomSeed's own doc comment.
+                    // removeCustomSeed's own doc comment. A catalog seed
+                    // offers Hide only when Idle — see hideModel's own doc
+                    // comment on why never for something downloaded or
+                    // mid-download.
                     secondaryLabel = if (seed.isCustom) {
                         getString(R.string.model_remove)
                     } else {
@@ -510,6 +593,7 @@ class ModelsActivity : AppCompatActivity() {
                             is DownloadState.Failed -> getString(R.string.model_details)
                             is DownloadState.Installed -> getString(R.string.model_delete)
                             is DownloadState.Paused -> getString(R.string.model_delete)
+                            DownloadState.Idle -> getString(R.string.model_hide)
                             else -> null
                         }
                     },
@@ -554,6 +638,9 @@ class ModelsActivity : AppCompatActivity() {
 
     private fun translationRows(device: DeviceProfile): List<Row> = buildList {
         if (!LlamaBridge.isAvailable) add(Row.Header(getString(R.string.model_native_missing)))
+        addHiddenModelsRow()
+
+        val hidden = container.settings.hiddenModelIds
 
         // MADLAD-400 first: the flagship pick — an actual translation model
         // covering hundreds of languages, not a chat model prompted for the
@@ -568,17 +655,19 @@ class ModelsActivity : AppCompatActivity() {
         // stable) — this only ever promotes a specific quant that happens to
         // already be resident right now, never reorders the curated
         // size progression otherwise.
-        TranslationModels.SEEDS.sortedByDescending { container.isModelResident(it.id) }
+        TranslationModels.SEEDS.filter { it.id !in hidden }
+            .sortedByDescending { container.isModelResident(it.id) }
             .forEach { seed -> add(translationModelRow(seed, device)) }
         // The user's own translation models, added on this tab.
         container.customSeeds(ModelPurpose.TRANSLATION).forEach { seed -> add(translationModelRow(seed, device)) }
 
         add(Row.Note(getString(R.string.models_translation_note)))
         add(Row.Header(getString(R.string.models_local_header)))
-        LocalModels.SEEDS.sortedWith(
-            compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
-                .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
-        ).forEach { seed -> add(translationModelRow(seed, device)) }
+        LocalModels.SEEDS.filter { it.id !in hidden }
+            .sortedWith(
+                compareByDescending<LocalModelSeed> { container.isModelResident(it.id) }
+                    .thenByDescending { device.fitsBudget(it.approxSizeBytes) },
+            ).forEach { seed -> add(translationModelRow(seed, device)) }
 
         addUnassignedRows(ModelPurpose.TRANSLATION)
         add(Row.Custom(onAdd = { addCustomRepo(ModelPurpose.TRANSLATION) }))
@@ -656,6 +745,7 @@ class ModelsActivity : AppCompatActivity() {
                     is DownloadState.Failed -> getString(R.string.model_details)
                     is DownloadState.Installed -> getString(R.string.model_delete)
                     is DownloadState.Paused -> getString(R.string.model_delete)
+                    DownloadState.Idle -> getString(R.string.model_hide)
                     else -> null
                 }
             },

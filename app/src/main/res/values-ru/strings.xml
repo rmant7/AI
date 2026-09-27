@@ -236,6 +236,10 @@
     <string name="models_orphans_title">Неизвестные файлы</string>
     <string name="models_orphans_subtitle">Найдено файлов: %1$d, общий размер ~%2$s. Текущая версия приложения их не использует — вероятно, остались от другой версии или ветки разработки.</string>
     <string name="models_orphans_delete">Удалить (%1$s)</string>
+    <string name="model_hide">Скрыть</string>
+    <string name="models_hidden_title">Скрытые модели</string>
+    <string name="models_hidden_subtitle">Скрыто из списка: %1$d.</string>
+    <string name="models_hidden_restore">Показать все</string>
     <string name="embed_screen_title">Экспериментальные модели эмбеддингов</string>
     <string name="embed_screen_explainer">Скачивание и проверка кандидата в модели эмбеддингов для семантического поиска по памяти. Эти модели никогда не используются в чате и не попадают в каталог моделей автоматически — скачайте модель, нажмите «Тест» и проверьте цифры ниже, прежде чем решать, годится ли она.</string>
     <string name="embed_test">Тест</string>
@@ -278,6 +282,7 @@
     <string name="note_madlad400_7b">Google MADLAD-400: 7B, 417+ языков. Нужно устройство с большим объёмом ОЗУ.</string>
     <string name="note_madlad400_10b">Google MADLAD-400: 10B, 417+ языков. Нужно устройство с большим объёмом ОЗУ.</string>
     <string name="note_translategemma_4b">Gemma 4B, дообученная для перевода — чат-модель, а не encoder-decoder как MADLAD-400. Не проверено: добавлена без проверки точного охвата языков.</string>
+    <string name="note_omnitranslate_1_1">Qwen3 0.6B, дообученная на 500+ языков — маленькая и быстрая, но её собственная карточка модели называет её экспериментальной и не для задач, где важна точность. По опыту на реальном устройстве: ненадёжна как минимум для иврита (смесь письменностей на выходе), для некоторых других языков — приемлемо. Стоит сравнивать с другими источниками в режиме Compare, а не полагаться в одиночку.</string>
     <string name="models_switched_voice">Голосовой ввод переключён на %1$s</string>
     <string name="model_state_installed">Установлена</string>
     <string name="model_state_paused">Пауза: загружено %1$s</string>
@@ -290,6 +295,7 @@
     <string name="model_fit_too_large">очень большая</string>
     <string name="model_catalog_stale">⚠ источник недоступен (проверено при запуске)</string>
     <string name="model_ram_warning">Эта модель превышает бюджет памяти для вашего устройства. Скорее всего система принудительно закроет приложение во время генерации ответа — без сообщения об ошибке, просто закроется. Продолжить всё равно?</string>
+    <string name="model_ram_warning_live">Эта модель укладывается в настроенный бюджет памяти, но столько памяти реально свободно на устройстве сейчас нет. Скорее всего загрузка не удастся, пока не освободится больше памяти. Продолжить всё равно?</string>
     <string name="model_ram_warning_numbers">Оценка потребности: ~%1$s. Бюджет памяти сейчас (с учётом свободной): ~%2$s.</string>
     <string name="model_ram_warning_continue">Всё равно использовать</string>
     <string name="dialog_ok">Понятно</string>
@@ -449,6 +455,8 @@
     <string name="translation_offer_download">%1$s ещё не скачана. Скачать сейчас (~1.65ГБ) и использовать для перевода, когда будет готова?</string>
     <string name="translation_input_hint">Текст для перевода</string>
     <string name="translation_translate">Перевести</string>
+    <string name="translation_stop">Остановить</string>
+    <string name="translation_stopped">Остановлено</string>
     <string name="translation_copy">Скопировать перевод</string>
     <string name="translation_speak">Озвучить перевод</string>
     <string name="translation_speak_unavailable">Для этого языка нет доступного голоса</string>
