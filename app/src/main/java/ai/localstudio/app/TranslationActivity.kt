@@ -142,6 +142,25 @@ class TranslationActivity : AppCompatActivity() {
             updateCaveat()
         }
 
+        // Requested: tapping a language field with a language already picked
+        // in it (the common case — this screen always has both fields filled
+        // once a translation has run) left that name sitting there for the
+        // user to manually clear character by character before they could
+        // even start typing a new search. Selected text is replaced by the
+        // next keystroke, same as any search box a fresh tap is meant to
+        // start over in — both listeners are needed: onFocusChangeListener
+        // alone misses a tap on a field that already has focus (opening the
+        // dropdown without a focus transition), and a plain click listener
+        // alone misses focus arriving via anything other than a tap (e.g.
+        // "next" from the keyboard).
+        val selectAllOnFocus = View.OnFocusChangeListener { view, hasFocus ->
+            if (hasFocus) (view as? android.widget.AutoCompleteTextView)?.selectAll()
+        }
+        binding.sourceLanguageInput.onFocusChangeListener = selectAllOnFocus
+        binding.targetLanguageInput.onFocusChangeListener = selectAllOnFocus
+        binding.sourceLanguageInput.setOnClickListener { binding.sourceLanguageInput.selectAll() }
+        binding.targetLanguageInput.setOnClickListener { binding.targetLanguageInput.selectAll() }
+
         // Restored from Settings — real device report: navigating to Chat
         // and back reset this screen to a hardcoded default, discarding
         // whatever pair (Russian -> Hebrew, in that report) was actually
