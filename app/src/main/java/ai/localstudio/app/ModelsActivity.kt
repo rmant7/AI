@@ -73,7 +73,16 @@ class ModelsActivity : AppCompatActivity() {
     private lateinit var binding: ActivityModelsBinding
     private lateinit var container: AppContainer
     private val adapter = RowAdapter()
-    private val customSeeds = mutableListOf<LocalModelSeed>()
+
+    /**
+     * Sourced from [AppContainer.customSeeds] ([Settings.customModelRepoIds]),
+     * not a field of its own — see that setting's own doc comment for the
+     * real-device bug (a model added via "Custom model from Hugging Face"
+     * vanishing, and every trace of it misidentified as an orphaned file,
+     * the moment this Activity was recreated) a plain in-memory list here
+     * used to cause.
+     */
+    private val customSeeds: List<LocalModelSeed> get() = container.customSeeds()
     private var category = Category.TEXT
 
     // A denial here does not block downloads — it only means the foreground
@@ -175,6 +184,10 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun onTextSecondary(seed: LocalModelSeed) {
+        if (seed.isCustom) {
+            removeCustomSeed(seed)
+            return
+        }
         when (val state = container.downloads.stateOf(seed)) {
             is DownloadState.Failed -> showDetails(seed.title, state.message)
             else -> {
@@ -282,6 +295,10 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun onTranslationSecondary(seed: LocalModelSeed) {
+        if (seed.isCustom) {
+            removeCustomSeed(seed)
+            return
+        }
         when (val state = container.downloads.stateOf(seed)) {
             is DownloadState.Failed -> showDetails(seed.title, state.message)
             else -> {
@@ -289,6 +306,21 @@ class ModelsActivity : AppCompatActivity() {
                 render()
             }
         }
+    }
+
+    /**
+     * Forgets a custom seed entirely — its repo id in
+     * [Settings.customModelRepoIds], not just a downloaded file — regardless
+     * of [DownloadState]: real device report, a custom download that failed
+     * (or one the user simply changed their mind about mid-download) had no
+     * way to be removed from the list within the same session, since a
+     * catalog seed's own secondary button only ever offered "Details" for a
+     * [DownloadState.Failed] row.
+     */
+    private fun removeCustomSeed(seed: LocalModelSeed) {
+        container.downloads.delete(seed)
+        container.settings.customModelRepoIds -= seed.repoIds.first()
+        render()
     }
 
     private fun useForTranslation(modelId: String, title: String, approxSizeBytes: Long = 0L) {
@@ -455,11 +487,17 @@ class ModelsActivity : AppCompatActivity() {
                         DownloadState.Idle -> getString(R.string.model_download)
                     },
                     primaryEnabled = !(state is DownloadState.Installed && selected),
-                    secondaryLabel = when (state) {
-                        is DownloadState.Failed -> getString(R.string.model_details)
-                        is DownloadState.Installed -> getString(R.string.model_delete)
-                        is DownloadState.Paused -> getString(R.string.model_delete)
-                        else -> null
+                    // isCustom: always removable, in every state — see
+                    // removeCustomSeed's own doc comment.
+                    secondaryLabel = if (seed.isCustom) {
+                        getString(R.string.model_remove)
+                    } else {
+                        when (state) {
+                            is DownloadState.Failed -> getString(R.string.model_details)
+                            is DownloadState.Installed -> getString(R.string.model_delete)
+                            is DownloadState.Paused -> getString(R.string.model_delete)
+                            else -> null
+                        }
                     },
                     onPrimary = { onTextPrimary(seed) },
                     onSecondary = { onTextSecondary(seed) },
@@ -591,11 +629,15 @@ class ModelsActivity : AppCompatActivity() {
                 DownloadState.Idle -> getString(R.string.model_download)
             },
             primaryEnabled = !(state is DownloadState.Installed && selected),
-            secondaryLabel = when (state) {
-                is DownloadState.Failed -> getString(R.string.model_details)
-                is DownloadState.Installed -> getString(R.string.model_delete)
-                is DownloadState.Paused -> getString(R.string.model_delete)
-                else -> null
+            secondaryLabel = if (seed.isCustom) {
+                getString(R.string.model_remove)
+            } else {
+                when (state) {
+                    is DownloadState.Failed -> getString(R.string.model_details)
+                    is DownloadState.Installed -> getString(R.string.model_delete)
+                    is DownloadState.Paused -> getString(R.string.model_delete)
+                    else -> null
+                }
             },
             onPrimary = { onTranslationPrimary(seed) },
             onSecondary = { onTranslationSecondary(seed) },
@@ -873,7 +915,7 @@ class ModelsActivity : AppCompatActivity() {
                 val repo = normalizeRepoInput(input.text?.toString().orEmpty())
                 if (repo != null) {
                     val seed = LocalModels.custom(repo)
-                    if (customSeeds.none { it.id == seed.id }) customSeeds += seed
+                    container.settings.customModelRepoIds += repo
                     NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
                     render()
                 } else {

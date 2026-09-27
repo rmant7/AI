@@ -98,6 +98,30 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putString(KEY_TRANSLATION_MODEL, value).apply()
 
     /**
+     * Repo ids ("owner/repo") of every model added via "Custom model from
+     * Hugging Face" — [AppContainer.customSeeds] rebuilds each one's
+     * [ai.localstudio.app.models.LocalModelSeed] from this on every read, via
+     * [ai.localstudio.app.models.LocalModels.custom]. Real device report:
+     * this used to live only as an in-memory list on
+     * [ai.localstudio.app.ModelsActivity], lost the moment that Activity was
+     * recreated (a plain back-navigation, not even a process kill) — a
+     * custom model that had already finished downloading then matched no
+     * known seed at all, misidentified as an orphaned file
+     * ([ModelStore.orphanedFiles]) offering only delete, and
+     * [AppContainer.installedSeeds] (which every real chat/translation
+     * candidate is resolved through) couldn't see it either, so a custom
+     * model selected for use silently fell through to whatever came next in
+     * the fallback chain instead of actually being used.
+     */
+    var customModelRepoIds: Set<String>
+        get() = prefs.getString(KEY_CUSTOM_MODEL_REPOS, null)
+            ?.split(',')
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
+        set(value) = prefs.edit().putString(KEY_CUSTOM_MODEL_REPOS, value.joinToString(",")).apply()
+
+    /**
      * What's currently typed on the Translation screen — persisted on every
      * keystroke so it survives a process kill (a real risk this app already
      * has, under real memory pressure) or just navigating away to pick a
@@ -306,6 +330,7 @@ class Settings(context: Context) {
         const val KEY_WHISPER_MODEL = "whisperModelId"
         const val KEY_VOSK_MODEL = "voskModelId"
         const val KEY_TRANSLATION_MODEL = "translationModel"
+        const val KEY_CUSTOM_MODEL_REPOS = "customModelRepoIds"
         const val KEY_TRANSLATION_DRAFT = "translationDraftText"
         const val KEY_TRANSLATION_SOURCE_LANG = "translationSourceLang"
         const val KEY_TRANSLATION_TARGET_LANG = "translationTargetLang"

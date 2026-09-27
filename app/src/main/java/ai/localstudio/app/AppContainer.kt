@@ -1153,14 +1153,28 @@ class AppContainer private constructor(private val context: Context) {
     var routerSessionActive: Boolean = false
 
     /**
+     * One [LocalModelSeed] per repo id in [Settings.customModelRepoIds],
+     * rebuilt fresh on every call rather than cached — this is the single
+     * source of truth [ai.localstudio.app.ModelsActivity] and every real
+     * generation path ([installedSeeds], [localRegistry]) both read, so a
+     * model added via "Custom model from Hugging Face" is visible and
+     * actually usable from the moment it's added, survives an Activity
+     * recreation or a full app restart, and is resolved the same way
+     * whichever screen is asking. See [Settings.customModelRepoIds]'s own
+     * doc comment for the real-device bug this replaces.
+     */
+    fun customSeeds(): List<LocalModelSeed> = settings.customModelRepoIds.map { LocalModels.custom(it) }
+
+    /**
      * Seeds that are on disk right now, newest state each time it is asked —
-     * [LocalModels.SEEDS] (chat GGUFs) and [TranslationModels.SEEDS]
-     * (specialized encoder-decoder translation GGUFs) alike, since both are
-     * fetched and stored the same way and [localRegistry] needs to resolve
-     * either kind by id.
+     * [LocalModels.SEEDS] (chat GGUFs), [TranslationModels.SEEDS]
+     * (specialized encoder-decoder translation GGUFs) and [customSeeds]
+     * (anything added via "Custom model from Hugging Face") alike, since all
+     * three are fetched and stored the same way and [localRegistry] needs to
+     * resolve any of them by id.
      */
     fun installedSeeds(): List<LocalModelSeed> =
-        (LocalModels.SEEDS + TranslationModels.SEEDS).filter { modelStore.isInstalled(it) }
+        (LocalModels.SEEDS + TranslationModels.SEEDS + customSeeds()).filter { modelStore.isInstalled(it) }
 
     val experimentalEmbeddingDownloads = ExperimentalEmbeddingDownloads(
         experimentalEmbeddingStore,

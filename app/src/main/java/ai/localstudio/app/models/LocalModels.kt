@@ -78,6 +78,16 @@ data class LocalModelSeed(
      * understands.
      */
     val isT5EncoderDecoder: Boolean = false,
+    /**
+     * True only for a seed built by [LocalModels.custom] — the user's own
+     * repo id, not a catalog entry — used by [ai.localstudio.app.ModelsActivity]
+     * to offer removing it from [ai.localstudio.app.Settings.customModelRepoIds] entirely
+     * (forgetting the id, not just deleting a downloaded file) regardless of
+     * its current [ai.localstudio.app.models.DownloadState], including a
+     * failed or still-running one. A catalog seed has no such action — it
+     * isn't something the user added, so there's nothing to forget.
+     */
+    val isCustom: Boolean = false,
 ) {
     fun resolvedNote(context: android.content.Context): String = noteRes?.let { context.getString(it) } ?: note
 }
@@ -262,6 +272,7 @@ object LocalModels {
         paramsLabel = "custom model",
         note = repoId,
         approxSizeBytes = 0,
+        isCustom = true,
     )
 
     fun byId(id: String): LocalModelSeed? = SEEDS.firstOrNull { it.id == id }
