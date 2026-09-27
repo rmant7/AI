@@ -45,23 +45,23 @@ set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 # quantised matmul kernels (the dominant cost of inference) rely on. Setting it
 # explicitly is what makes on-device generation usable rather than a curiosity.
 #
-# i8mm adds int8 matrix-multiply instructions ggml has dedicated kernels for
-# on top of the quantised (Q4/Q8) matmuls that dominate prompt processing —
-# on-device measurement showed llama_print_system_info() reporting DOTPROD=1
-# but no I8MM at all, meaning the build was never asking for it, not that the
-# hardware lacked it (confirmed present: Tensor G5 / Pixel 10).
+# No i8mm, deliberately. It was here (int8 matrix-multiply kernels, a real
+# prompt-processing speed-up on Tensor G5 / Pixel 10), with a comment
+# accepting that "a device from roughly 2018-2020 that has dotprod/fp16 but
+# not i8mm would still SIGILL on this build". Real device report: exactly
+# that — a Samsung Galaxy S20 FE (Snapdragon 865, Cortex-A77: ARMv8.2 with
+# dotprod and fp16, no i8mm) died with SIGILL/ILL_ILLOPC inside
+# ggml_gemm_q4_K_8x8_q8_K on its first local generation. Compiling with +i8mm
+# lets the compiler and ggml's repack path use those instructions anywhere,
+# regardless of what the CPU reports at runtime, so there is no safe way to
+# keep it in a single build.
 #
-# Trade-off: this narrows the hardware floor further than dotprod/fp16 alone
-# — i8mm is an ARMv8.6 feature, so a device from roughly 2018-2020 that has
-# dotprod/fp16 but not i8mm would still SIGILL on this build. Upstream's real
-# answer is GGML_CPU_ALL_VARIANTS with runtime dispatch (shared native libs +
-# a loader call from Kotlin) so one APK safely covers old and new hardware —
-# worth doing once there is a device in that gap to test against; for now
-# this project is developed and tested against one specific device that has
-# every one of these features, so the narrower floor is an accepted trade,
-# not an oversight.
+# The hardware floor is now ARMv8.2-A with dotprod and fp16 (roughly
+# Snapdragon 855 / Cortex-A76 and newer). Getting i8mm back on devices that
+# have it needs runtime dispatch — two builds of this library, picked from
+# Kotlin by the CPU's reported features — not a wider compile flag.
 if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16+i8mm" CACHE STRING "" FORCE)
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
 endif()
 
 FetchContent_MakeAvailable(llamacpp)

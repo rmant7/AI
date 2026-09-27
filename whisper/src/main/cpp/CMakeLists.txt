@@ -39,12 +39,11 @@ set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(WHISPER_CURL OFF CACHE BOOL "" FORCE)
 set(WHISPER_SDL2 OFF CACHE BOOL "" FORCE)
 
-# Same ARM tuning as :app's llama_jni — this project is developed and tested
-# against one specific device (Tensor G5 / Pixel 10) confirmed to have
-# dotprod, fp16 and i8mm; see that CMakeLists.txt's own comment for the
-# hardware-floor trade-off this accepts.
+# Same ARM tuning as :app's llama_jni, and for the same reason no i8mm: a
+# Snapdragon 865 (dotprod + fp16, no i8mm) died with SIGILL in a ggml i8mm
+# kernel on a build that asked for it — see that CMakeLists.txt's own comment.
 if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16+i8mm" CACHE STRING "" FORCE)
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
 endif()
 
 FetchContent_MakeAvailable(whispercpp)
