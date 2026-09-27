@@ -80,10 +80,42 @@ class LogActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean =
         UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
 
+    private var lastRenderedLog: String? = null
+    private var lastRenderedHeader: String? = null
+
+    /**
+     * Real device report: with a long log, selecting just its last part to
+     * copy was impossible — the view kept jumping back to the very top.
+     * This used to re-set both TextViews every 2 s whether anything had
+     * changed or not; on a selectable TextView that drops the selection and
+     * resets the cursor to position 0, which the ScrollView then scrolls
+     * into view. Now: nothing is touched while a selection exists, text is
+     * only re-set when it actually changed, and the scroll position is
+     * restored afterwards — following the bottom if that's where the reader
+     * was (and on first open, so the newest lines are what's on screen).
+     */
     private fun render() {
-        binding.logHeader.text = buildHeader()
-        val log = container.appLog.readAll()
-        binding.logText.text = log.ifBlank { getString(R.string.log_empty) }
+        if (binding.logText.hasSelection() || binding.logHeader.hasSelection()) return
+        val header = buildHeader()
+        val log = container.appLog.readAll().ifBlank { getString(R.string.log_empty) }
+        if (header == lastRenderedHeader && log == lastRenderedLog) return
+
+        val scroll = binding.logScroll
+        val content = scroll.getChildAt(0)
+        val firstRender = lastRenderedLog == null
+        val wasAtBottom = firstRender || scroll.scrollY + scroll.height >= content.height - FOLLOW_BOTTOM_SLOP_PX
+        val keptScrollY = scroll.scrollY
+
+        val logChanged = log != lastRenderedLog
+        if (header != lastRenderedHeader) binding.logHeader.text = header
+        if (logChanged) binding.logText.text = log
+        lastRenderedHeader = header
+        lastRenderedLog = log
+
+        // Only after the log itself changed: the header's RAM figure changes
+        // every tick, and snapping the scroll back on each of those would
+        // fight a fling the reader is in the middle of.
+        if (logChanged) scroll.post { scroll.scrollTo(0, if (wasAtBottom) content.height else keptScrollY) }
     }
 
     private fun copyLog() {
@@ -106,6 +138,7 @@ class LogActivity : AppCompatActivity() {
             .setMessage(R.string.log_clear_confirm)
             .setPositiveButton(R.string.log_clear) { _, _ ->
                 container.appLog.clear()
+                lastRenderedLog = null
                 render()
             }
             .setNegativeButton(R.string.dialog_cancel, null)
@@ -154,4 +187,9 @@ class LogActivity : AppCompatActivity() {
     }
 
     private fun gb(bytes: Long): String = "%.1f GB".format(bytes / 1_000_000_000.0)
+
+    private companion object {
+        /** How close to the bottom still counts as "following the newest lines". */
+        const val FOLLOW_BOTTOM_SLOP_PX = 48
+    }
 }
