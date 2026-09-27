@@ -45,24 +45,49 @@ set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 # quantised matmul kernels (the dominant cost of inference) rely on. Setting it
 # explicitly is what makes on-device generation usable rather than a curiosity.
 #
-# No i8mm, deliberately. It was here (int8 matrix-multiply kernels, a real
-# prompt-processing speed-up on Tensor G5 / Pixel 10), with a comment
-# accepting that "a device from roughly 2018-2020 that has dotprod/fp16 but
-# not i8mm would still SIGILL on this build". Real device report: exactly
-# that — a Samsung Galaxy S20 FE (Snapdragon 865, Cortex-A77: ARMv8.2 with
-# dotprod and fp16, no i8mm) died with SIGILL/ILL_ILLOPC inside
-# ggml_gemm_q4_K_8x8_q8_K on its first local generation. Compiling with +i8mm
-# lets the compiler and ggml's repack path use those instructions anywhere,
-# regardless of what the CPU reports at runtime, so there is no safe way to
-# keep it in a single build.
+# Three CPU-feature variants of this library, one per configure, selected at
+# runtime from Kotlin (see ai.localstudio.whisper.CpuVariant):
 #
-# The hardware floor is now ARMv8.2-A with dotprod and fp16 (roughly
-# Snapdragon 855 / Cortex-A76 and newer). Getting i8mm back on devices that
-# have it needs runtime dispatch — two builds of this library, picked from
-# Kotlin by the CPU's reported features — not a wider compile flag.
+#   baseline  armv8-a                        libllama_jni.so          any arm64 CPU
+#   dotprod   armv8.2-a+dotprod+fp16         libllama_jni_dotprod.so  ~Snapdragon 845+, Cortex-A55/A75+
+#   i8mm      armv8.2-a+dotprod+fp16+i8mm    libllama_jni_i8mm.so     ~Snapdragon 8 Gen 1+, Tensor G3+
+#
+# Why not one build: compiling with a feature flag lets the compiler and
+# ggml's repack path emit those instructions anywhere, regardless of what the
+# CPU supports at runtime. A single +i8mm build died with SIGILL inside
+# ggml_gemm_q4_K_8x8_q8_K on a Samsung Galaxy S20 FE (Snapdragon 865: dotprod
+# and fp16, no i8mm); a single dotprod build would do the same on any
+# ARMv8.0 phone, while a single baseline build gives up the int8 kernels that
+# dominate prompt processing on newer ones.
+#
+# Why separate configures rather than GGML_CPU_ALL_VARIANTS: that needs ggml
+# as shared libraries loaded through its backend registry, and :whisper
+# vendors its own, different ggml version — two libggml.so with the same
+# name in one APK. Separate configures keep every variant a self-contained
+# .so with its own static ggml, exactly like the single build before.
+#
+# :app's own configure builds the baseline (and, for the x86_64 emulator
+# build CI's smoke test uses, the only variant); :llama-dotprod and
+# :llama-i8mm (native-variants/) point at this same file with a different
+# LOCALAI_CPU_VARIANT.
+set(LOCALAI_CPU_VARIANT "baseline" CACHE STRING "baseline | dotprod | i8mm")
 if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+    if(LOCALAI_CPU_VARIANT STREQUAL "i8mm")
+        set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16+i8mm" CACHE STRING "" FORCE)
+    elseif(LOCALAI_CPU_VARIANT STREQUAL "dotprod")
+        set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+    elseif(LOCALAI_CPU_VARIANT STREQUAL "baseline")
+        set(GGML_CPU_ARM_ARCH "armv8-a" CACHE STRING "" FORCE)
+    else()
+        message(FATAL_ERROR "Unknown LOCALAI_CPU_VARIANT '${LOCALAI_CPU_VARIANT}'")
+    endif()
 endif()
+if(LOCALAI_CPU_VARIANT STREQUAL "baseline")
+    set(LOCALAI_JNI_LIB llama_jni)
+else()
+    set(LOCALAI_JNI_LIB llama_jni_${LOCALAI_CPU_VARIANT})
+endif()
+message(STATUS "llama_jni: variant=${LOCALAI_CPU_VARIANT} arch='${GGML_CPU_ARM_ARCH}' -> lib${LOCALAI_JNI_LIB}.so")
 
 FetchContent_MakeAvailable(llamacpp)
 
@@ -75,13 +100,13 @@ FetchContent_MakeAvailable(llamacpp)
 # of pulling in everything else under tools/ just to reach it.
 add_subdirectory(${llamacpp_SOURCE_DIR}/tools/mtmd ${CMAKE_CURRENT_BINARY_DIR}/mtmd-build)
 
-add_library(llama_jni SHARED llama_jni.cpp)
+add_library(${LOCALAI_JNI_LIB} SHARED llama_jni.cpp)
 
-target_include_directories(llama_jni PRIVATE
+target_include_directories(${LOCALAI_JNI_LIB} PRIVATE
     ${llamacpp_SOURCE_DIR}/include
     ${llamacpp_SOURCE_DIR}/ggml/include
     ${llamacpp_SOURCE_DIR}/tools/mtmd
 )
 
 find_library(log-lib log)
-target_link_libraries(llama_jni llama ggml mtmd ${log-lib})
+target_link_libraries(${LOCALAI_JNI_LIB} llama ggml mtmd ${log-lib})

@@ -197,7 +197,8 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest 2>&1 | tee smoke.log
+          # x86_64 build of its own: the published APK is arm64-only.
+          script: ./gradlew --no-daemon -Plocalai.abis=x86_64 :app:connectedDebugAndroidTest 2>&1 | tee smoke.log
 
       # Same idea as ci-status, on its own branch so the two jobs do not
       # overwrite each other's result.

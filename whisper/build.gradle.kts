@@ -15,10 +15,11 @@ android {
     defaultConfig {
         minSdk = 26
 
-        // Matches :app — arm64 for real devices, x86_64 so the CI emulator
-        // runs the same native code a device does.
+        // Matches :app — gradle.properties' localai.abis (arm64 by default,
+        // x86_64 only for CI's emulator smoke test).
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += providers.gradleProperty("localai.abis").orElse("arm64-v8a").get()
+                .split(',').map { it.trim() }.filter { it.isNotEmpty() }
         }
 
         externalNativeBuild {

@@ -39,21 +39,37 @@ set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(WHISPER_CURL OFF CACHE BOOL "" FORCE)
 set(WHISPER_SDL2 OFF CACHE BOOL "" FORCE)
 
-# Same ARM tuning as :app's llama_jni, and for the same reason no i8mm: a
-# Snapdragon 865 (dotprod + fp16, no i8mm) died with SIGILL in a ggml i8mm
-# kernel on a build that asked for it — see that CMakeLists.txt's own comment.
+# Same three CPU-feature variants as :app's llama_jni, for the same reasons —
+# see that CMakeLists.txt. :whisper builds the baseline; :whisper-dotprod and
+# :whisper-i8mm (native-variants/) point at this file with a different
+# LOCALAI_CPU_VARIANT.
+set(LOCALAI_CPU_VARIANT "baseline" CACHE STRING "baseline | dotprod | i8mm")
 if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+    if(LOCALAI_CPU_VARIANT STREQUAL "i8mm")
+        set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16+i8mm" CACHE STRING "" FORCE)
+    elseif(LOCALAI_CPU_VARIANT STREQUAL "dotprod")
+        set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+    elseif(LOCALAI_CPU_VARIANT STREQUAL "baseline")
+        set(GGML_CPU_ARM_ARCH "armv8-a" CACHE STRING "" FORCE)
+    else()
+        message(FATAL_ERROR "Unknown LOCALAI_CPU_VARIANT '${LOCALAI_CPU_VARIANT}'")
+    endif()
 endif()
+if(LOCALAI_CPU_VARIANT STREQUAL "baseline")
+    set(LOCALAI_JNI_LIB whisper_jni)
+else()
+    set(LOCALAI_JNI_LIB whisper_jni_${LOCALAI_CPU_VARIANT})
+endif()
+message(STATUS "whisper_jni: variant=${LOCALAI_CPU_VARIANT} arch='${GGML_CPU_ARM_ARCH}' -> lib${LOCALAI_JNI_LIB}.so")
 
 FetchContent_MakeAvailable(whispercpp)
 
-add_library(whisper_jni SHARED whisper_jni.cpp)
+add_library(${LOCALAI_JNI_LIB} SHARED whisper_jni.cpp)
 
-target_include_directories(whisper_jni PRIVATE
+target_include_directories(${LOCALAI_JNI_LIB} PRIVATE
     ${whispercpp_SOURCE_DIR}/include
     ${whispercpp_SOURCE_DIR}/ggml/include
 )
 
 find_library(log-lib log)
-target_link_libraries(whisper_jni whisper ggml ${log-lib})
+target_link_libraries(${LOCALAI_JNI_LIB} whisper ggml ${log-lib})

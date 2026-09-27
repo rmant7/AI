@@ -67,6 +67,9 @@ fun bundledKeys(envPrefix: String): String {
     return Base64.getEncoder().encodeToString(joined.toByteArray(Charsets.UTF_8))
 }
 
+val localAiAbis = providers.gradleProperty("localai.abis").orElse("arm64-v8a").get()
+    .split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
 android {
     namespace = "ai.localstudio.app"
     compileSdk = 35
@@ -88,9 +91,12 @@ android {
         buildConfigField("String", "GIGACHAT_BUNDLED_KEYS", "\"${bundledKeys("GIGACHAT_API_KEY")}\"")
 
         ndk {
-            // arm64 is every phone worth running a model on; x86_64 exists so
-            // the emulator in CI runs the same native code the device does.
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            // arm64-only by default (gradle.properties: localai.abis) — every
+            // phone worth running a model on. x86_64 only for CI's emulator
+            // smoke test, which builds its own APK with -Plocalai.abis=x86_64;
+            // bundling it here cost every phone install ~10MB of libraries it
+            // can never load.
+            abiFilters += localAiAbis
         }
 
         externalNativeBuild {
@@ -136,6 +142,9 @@ android {
     packaging {
         jniLibs {
             excludes += "**/libvosk.so"
+            // Every native module (app, whisper, the four CPU-variant builds)
+            // ships its own copy from the same NDK.
+            pickFirsts += "**/libc++_shared.so"
         }
     }
 
@@ -173,6 +182,12 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":openai"))
     implementation(project(":whisper"))
+    // CPU-feature variants of the native libraries (dotprod, i8mm) — packaged
+    // next to the baseline ones, picked at runtime by CpuVariant.
+    implementation(project(":llama-dotprod"))
+    implementation(project(":llama-i8mm"))
+    implementation(project(":whisper-dotprod"))
+    implementation(project(":whisper-i8mm"))
 
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")

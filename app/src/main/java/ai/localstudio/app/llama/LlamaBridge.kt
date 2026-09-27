@@ -176,9 +176,14 @@ class LlamaBridge {
          * older than the one the kernels were compiled for, must degrade to
          * "local models unavailable" instead of killing the app on startup.
          */
-        val isAvailable: Boolean by lazy {
-            runCatching { System.loadLibrary("llama_jni") }.isSuccess
-        }
+        val isAvailable: Boolean by lazy { loadedLibrary != null }
+
+        /**
+         * Which CPU-feature build was loaded (llama_jni, llama_jni_dotprod,
+         * llama_jni_i8mm) — the best this CPU supports, see
+         * [ai.localstudio.whisper.CpuVariant]. Null when none could be.
+         */
+        val loadedLibrary: String? by lazy { ai.localstudio.whisper.CpuVariant.loadBest("llama_jni") }
 
         // Matches NodeExecutors' default context-assembly budget (4096) —
         // deliberately, on both sides: raising this without raising the RAM

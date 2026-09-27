@@ -67,9 +67,10 @@ class WhisperBridge {
          * False rather than a crash: an ABI this build does not cover must
          * degrade to "voice input unavailable" instead of killing the app.
          */
-        val isAvailable: Boolean by lazy {
-            runCatching { System.loadLibrary("whisper_jni") }.isSuccess
-        }
+        val isAvailable: Boolean by lazy { loadedLibrary != null }
+
+        /** Which CPU-feature build was loaded (whisper_jni, whisper_jni_dotprod, whisper_jni_i8mm) — see [CpuVariant]. */
+        val loadedLibrary: String? by lazy { CpuVariant.loadBest("whisper_jni") }
 
         /** Same reasoning as LlamaBridge.defaultThreads(): favour the performance cluster, not the efficiency cores. */
         fun defaultThreads(): Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)

@@ -157,7 +157,10 @@ class LogActivity : AppCompatActivity() {
      */
     private val cpuLine: String by lazy {
         val cpuInfo = if (LlamaBridge.isAvailable) runCatching { LlamaBridge().nativeSystemInfo() }.getOrNull() else null
-        if (cpuInfo.isNullOrBlank()) getString(R.string.log_cpu_unavailable) else getString(R.string.log_cpu_features, cpuInfo)
+        val features = if (cpuInfo.isNullOrBlank()) getString(R.string.log_cpu_unavailable) else getString(R.string.log_cpu_features, cpuInfo)
+        // Which of the three CPU-feature builds this device got — the features
+        // line above describes that build's compile flags, not the CPU itself.
+        "$features\nCPU variant: ${ai.localstudio.whisper.CpuVariant.current} · loaded: ${LlamaBridge.loadedLibrary ?: "none"}"
     }
 
     /**
