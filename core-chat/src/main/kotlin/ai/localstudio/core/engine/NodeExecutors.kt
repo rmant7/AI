@@ -11,7 +11,6 @@ import ai.localstudio.core.knowledge.KnowledgeQuery
 import ai.localstudio.memory.MemoryProvider
 import ai.localstudio.memory.MemoryQuery
 import ai.localstudio.memory.MemoryScope
-import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.pipeline.NodeExecutor
 import ai.localstudio.core.pipeline.NodeType
@@ -357,10 +356,3 @@ class NodeExecutors(
         const val ATTACHED_DOCUMENT_CHUNK_LIMIT = 50
     }
 }
-
-/** Convenience for callers that only have a URI. */
-fun audioInput(uri: String, durationMs: Long? = null): NodeValue = NodeValue.Audio(AudioRef(uri, durationMs))
-
-fun imageInput(uri: String): NodeValue = NodeValue.Image(ImageRef(uri))
-
-fun textInput(text: String): NodeValue = NodeValue.Text(text)

@@ -10,6 +10,7 @@ import ai.localstudio.core.engine.UserRequest
 import ai.localstudio.core.engine.audioInput
 import ai.localstudio.memory.FileMemoryStore
 import ai.localstudio.core.pipeline.NodeType
+import ai.localstudio.core.pipeline.PipelineEngine
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.InstallState
 import ai.localstudio.core.registry.ModelDescriptor
@@ -90,15 +91,16 @@ class EndToEndTest {
             budgetBytes = 1_000_000,
             runtimes = mapOf(RuntimeKind.REMOTE_OPENAI to runtime),
         )
+        val executors = NodeExecutors(
+            selector = ModelSelector(registry, device),
+            runtimeManager = manager,
+            contextEngine = ContextEngine(),
+            memory = memory,
+            systemPrompt = "Ты локальный ассистент. Отвечай кратко.",
+        )
         return Orchestrator(
             router = CapabilityRouter(),
-            executors = NodeExecutors(
-                selector = ModelSelector(registry, device),
-                runtimeManager = manager,
-                contextEngine = ContextEngine(),
-                memory = memory,
-                systemPrompt = "Ты локальный ассистент. Отвечай кратко.",
-            ),
+            engine = PipelineEngine(executors.build()),
         )
     }
 

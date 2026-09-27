@@ -5,6 +5,13 @@ plugins {
 
 repositories {
     mavenCentral()
+    // Tests only: EndToEndTest runs a real OpenAiRuntime through the full
+    // memory-aware pipeline (NodeExecutors, FileMemoryStore), which lives in
+    // :core-chat and pulls Mobile_mem0 from JitPack. Gradle resolves each
+    // module's classpaths against its own repositories block, so this has
+    // to be here for the test classpath — it adds nothing to what a
+    // consumer of this module's main output needs. See MOBILE_MEM0_DEPENDENCY.md.
+    maven { url = uri("https://jitpack.io") }
 }
 
 dependencies {
@@ -12,6 +19,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation(kotlin("test"))
+    // testImplementation, never implementation/api: :openai's own main
+    // classpath must stay memory-free (see :core's build.gradle.kts).
+    testImplementation(project(":core-chat"))
 }
 
 kotlin {
