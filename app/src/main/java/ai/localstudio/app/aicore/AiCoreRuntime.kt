@@ -55,20 +55,41 @@ class AiCoreRuntime(
         // Every branch below now logs before it returns or throws, same as
         // LlamaCppRuntime.load()'s LOCAL_LOAD lines.
         log("AICORE_LOAD", "$AICORE_MODEL_LABEL: checking status")
-        val client = AiCorePromptClient()
+        // Client construction used to sit outside this try/catch, on the
+        // (unverified) assumption it was cheap and couldn't fail — every
+        // *other* AiCorePromptClient interaction in this file is already
+        // wrapped. Real device report: on a Samsung phone with no AICore
+        // support at all, translation failed outright with no per-card
+        // error the user could point at, exactly the shape an uncaught
+        // throw here — never converted to a ModelLoadException, so never
+        // hidden by hideOnFailure, and (in a Compare-mode batch built from
+        // several plain `async {}` children) capable of cancelling every
+        // sibling source along with it — would produce. Catching Throwable,
+        // not just Exception, here specifically: unlike the generic
+        // per-source catch blocks in ChatActivity/TranslationActivity,
+        // AICore is the one candidate whose own construction is known to
+        // reach into a system service that may simply not exist on a given
+        // device, and there's nothing more to do here than report that as
+        // this candidate's own failure.
+        var client: AiCorePromptClient? = null
         val status = try {
+            client = AiCorePromptClient()
             client.status()
         } catch (e: CancellationException) {
-            client.close()
+            client?.close()
             throw e
-        } catch (e: Exception) {
-            client.close()
+        } catch (e: Throwable) {
+            client?.close()
             val reason = "Gemini Nano (AICore) status check failed: ${e.message} — pick a different model in Settings instead."
             log("AICORE_LOAD", "$AICORE_MODEL_LABEL: FAILED status check: ${e.javaClass.simpleName}: ${e.message}")
             throw ModelLoadException(reason, e)
         }
+        // Non-null past this point: the try block above only reaches here
+        // (rather than throwing out of the function) once client has been
+        // assigned and its own status() call has already succeeded.
+        val readyClient = client!!
         if (status != FeatureStatus.AVAILABLE) {
-            client.close()
+            readyClient.close()
             // This exact message is what a real user sees, one of three ways
             // (per this app's existing, unchanged error handling — nothing
             // new needed here): the whole error bubble when AICore is the
@@ -89,7 +110,7 @@ class AiCoreRuntime(
             throw ModelLoadException(reason)
         }
         log("AICORE_LOAD", "$AICORE_MODEL_LABEL: ready (status=AVAILABLE)")
-        return AiCoreTextModel(model.id, binding.effectiveRequiredRamBytes, client, log)
+        return AiCoreTextModel(model.id, binding.effectiveRequiredRamBytes, readyClient, log)
     }
 
     private companion object {
