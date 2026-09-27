@@ -255,6 +255,16 @@
         android:textSize="13sp"
         android:visibility="gone" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/micTranscriptCopyButton"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:paddingHorizontal="16dp"
+        android:text="@string/transcribe_copy"
+        android:visibility="gone" />
+
     <!-- Vosk ASR spike (docs/14-vosk-spike.md): a second, independent live
          mic section, driving VoskSpeechRecognizer directly. Deliberately
          separate from the Whisper LIVE MIC section above rather than a
@@ -308,6 +318,16 @@
         android:paddingBottom="10dp"
         android:textIsSelectable="true"
         android:textSize="13sp"
+        android:visibility="gone" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/voskTranscriptCopyButton"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:paddingHorizontal="16dp"
+        android:text="@string/transcribe_copy"
         android:visibility="gone" />
 
     <!-- docs/15-speech-routing.md: the experimental language-routed live

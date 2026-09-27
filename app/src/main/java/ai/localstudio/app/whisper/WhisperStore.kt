@@ -35,9 +35,10 @@ class WhisperStore(private val context: Context) {
      * transcription away from whatever larger model someone had actually
      * been using, the moment nothing had been explicitly selected.
      */
-    fun installedSeed(preferredId: String? = null): WhisperModelSeed? {
-        val preferred = preferredId?.let { id -> WhisperModels.byId(id) }?.takeIf { isInstalled(it) }
-        return preferred ?: WhisperModels.SEEDS.filter { isInstalled(it) }.maxByOrNull { it.approxSizeBytes }
+    fun installedSeed(preferredId: String? = null, candidates: List<WhisperModelSeed> = WhisperModels.SEEDS): WhisperModelSeed? {
+        val preferred = preferredId?.let { id -> candidates.firstOrNull { it.id == id } ?: WhisperModels.byId(id) }
+            ?.takeIf { isInstalled(it) }
+        return preferred ?: candidates.filter { isInstalled(it) }.maxByOrNull { it.approxSizeBytes }
     }
 
     fun delete(seed: WhisperModelSeed) {

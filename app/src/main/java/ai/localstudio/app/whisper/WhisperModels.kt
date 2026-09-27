@@ -5,6 +5,8 @@ data class WhisperModelSeed(
     val title: String,
     val modelUrl: String,
     val approxSizeBytes: Long,
+    /** True only for a seed built by [WhisperModels.custom] — see that function's own doc comment. */
+    val isCustom: Boolean = false,
 )
 
 /**
@@ -97,4 +99,23 @@ object WhisperModels {
     )
 
     fun byId(id: String): WhisperModelSeed? = SEEDS.firstOrNull { it.id == id }
+
+    /**
+     * A user-supplied ggml model — a direct download link, not a Hugging
+     * Face repo id: whisper.cpp models aren't resolved the way
+     * [ai.localstudio.app.models.HuggingFaceResolver] picks a quant out of a
+     * multi-file repo, they're one self-contained .bin someone links to
+     * directly (a different quant of an official model, or a community
+     * fine-tune's own ggml conversion). The id is a stable hash of the URL,
+     * not the URL itself — [ai.localstudio.app.models.ModelStore]'s own
+     * reasoning for filing seeds under a stable id, not a path someone else
+     * controls, applies here too.
+     */
+    fun custom(url: String): WhisperModelSeed = WhisperModelSeed(
+        id = "custom-" + url.hashCode().toUInt().toString(16),
+        title = url.substringAfterLast('/').ifBlank { url },
+        modelUrl = url,
+        approxSizeBytes = 0,
+        isCustom = true,
+    )
 }

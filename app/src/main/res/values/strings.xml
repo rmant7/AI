@@ -223,6 +223,10 @@
     <string name="models_custom_add">Add</string>
     <string name="models_custom_input_hint">owner/repo with a GGUF file</string>
     <string name="models_custom_bad_format">Expected the format owner/repo</string>
+    <string name="transcribe_copy">Copy</string>
+    <string name="models_custom_voice_title">Custom voice model (Whisper)</string>
+    <string name="models_custom_voice_hint">Paste a direct download link to a whisper.cpp ggml model (.bin) — a different quant, or a community fine-tune&#8217;s own conversion.</string>
+    <string name="models_custom_voice_input_hint">https://... .bin</string>
     <string name="model_assign_here">Use here</string>
     <string name="models_unassigned_header">Models without a section</string>
     <string name="models_unassigned_note">Added before chat and translation were separated, or found on disk. Tap \"Use here\" on the tab where the model belongs.</string>

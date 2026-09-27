@@ -228,7 +228,7 @@ class TranscribeActivity : AppCompatActivity() {
      */
     private fun warmUpSelectedModel() {
         if (container.benchmarkOrchestrator.state.value is BenchmarkUiState.Running) return
-        val seed = container.whisperStore.installedSeed(container.settings.whisperModelId) ?: return
+        val seed = container.installedWhisperSeed(container.settings.whisperModelId) ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching {
                 val sample = WarmupSample.resolve(this@TranscribeActivity)
@@ -314,7 +314,7 @@ class TranscribeActivity : AppCompatActivity() {
                 container.fileTranscriptionRunner.startVosk(seed)
             }
             else -> {
-                val seed = container.whisperStore.installedSeed(container.settings.whisperModelId)
+                val seed = container.installedWhisperSeed(container.settings.whisperModelId)
                 if (seed == null) {
                     Toast.makeText(this, R.string.transcribe_no_model, Toast.LENGTH_LONG).show()
                     return
@@ -344,7 +344,7 @@ class TranscribeActivity : AppCompatActivity() {
     }
 
     private fun startMic() {
-        val seed = container.whisperStore.installedSeed(container.settings.whisperModelId)
+        val seed = container.installedWhisperSeed(container.settings.whisperModelId)
         if (seed == null) {
             Toast.makeText(this, R.string.transcribe_no_model, Toast.LENGTH_LONG).show()
             return
@@ -353,6 +353,10 @@ class TranscribeActivity : AppCompatActivity() {
         renderMicState()
         binding.micTranscriptText.text = ""
         binding.micTranscriptText.visibility = View.VISIBLE
+        binding.micTranscriptCopyButton.visibility = View.VISIBLE
+        binding.micTranscriptCopyButton.setOnClickListener {
+            copyToClipboard(binding.micTranscriptText.text?.toString().orEmpty())
+        }
         lifecycleScope.launch {
             val segments = container.whisperMicSession.start(seed, MicrophoneAudioSource(), language = null)
             var settledText = ""
@@ -436,6 +440,10 @@ class TranscribeActivity : AppCompatActivity() {
         renderVoskState()
         binding.voskTranscriptText.text = ""
         binding.voskTranscriptText.visibility = View.VISIBLE
+        binding.voskTranscriptCopyButton.visibility = View.VISIBLE
+        binding.voskTranscriptCopyButton.setOnClickListener {
+            copyToClipboard(binding.voskTranscriptText.text?.toString().orEmpty())
+        }
         lifecycleScope.launch {
             // Model(path)/Recognizer construction throw a checked IOException
             // on a corrupt/partially-extracted model directory — which

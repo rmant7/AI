@@ -225,6 +225,10 @@
     <string name="models_custom_add">Добавить</string>
     <string name="models_custom_input_hint">owner/repo с GGUF-файлом</string>
     <string name="models_custom_bad_format">Нужен формат owner/repo</string>
+    <string name="transcribe_copy">Копировать</string>
+    <string name="models_custom_voice_title">Своя модель для голоса (Whisper)</string>
+    <string name="models_custom_voice_hint">Вставьте прямую ссылку на модель whisper.cpp в формате ggml (.bin) — другой квант или собственную конвертацию сторонней модели.</string>
+    <string name="models_custom_voice_input_hint">https://... .bin</string>
     <string name="model_assign_here">Использовать здесь</string>
     <string name="models_unassigned_header">Модели без раздела</string>
     <string name="models_unassigned_note">Добавлены до разделения чата и перевода или найдены на диске. Нажмите «Использовать здесь» в том разделе, к которому модель относится.</string>

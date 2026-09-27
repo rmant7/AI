@@ -144,6 +144,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_CUSTOM_MODELS_MIGRATED, false)
         set(value) = prefs.edit().putBoolean(KEY_CUSTOM_MODELS_MIGRATED, value).apply()
 
+    /**
+     * Direct download URLs added via "Custom model" on the Voice tab — see
+     * [ai.localstudio.app.whisper.WhisperModels.custom]. A URL, not a repo
+     * id: whisper.cpp models are a single self-contained .bin, not a
+     * multi-quant repo [HuggingFaceResolver] picks from.
+     */
+    var customWhisperUrls: Set<String>
+        get() = repoSet(KEY_CUSTOM_WHISPER_URLS)
+        set(value) = putRepoSet(KEY_CUSTOM_WHISPER_URLS, value)
+
     private fun repoSet(key: String): Set<String> =
         prefs.getString(key, null)?.split(',')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
 
@@ -363,6 +373,7 @@ class Settings(context: Context) {
         const val KEY_CUSTOM_CHAT_REPOS = "customChatRepoIds"
         const val KEY_CUSTOM_TRANSLATION_REPOS = "customTranslationRepoIds"
         const val KEY_CUSTOM_MODELS_MIGRATED = "customModelsMigrated"
+        const val KEY_CUSTOM_WHISPER_URLS = "customWhisperUrls"
         const val KEY_TRANSLATION_DRAFT = "translationDraftText"
         const val KEY_TRANSLATION_SOURCE_LANG = "translationSourceLang"
         const val KEY_TRANSLATION_TARGET_LANG = "translationTargetLang"

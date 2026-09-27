@@ -982,7 +982,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun toggleRecording() {
         if (!recorder.isRecording) {
-            val seed = container.whisperStore.installedSeed(container.settings.whisperModelId)
+            val seed = container.installedWhisperSeed(container.settings.whisperModelId)
             if (seed == null) {
                 Toast.makeText(this, R.string.chat_mic_no_model, Toast.LENGTH_LONG).show()
                 return
@@ -1051,7 +1051,7 @@ class ChatActivity : AppCompatActivity() {
         val audio = recorder.stop()
         binding.micButton.setIconResource(R.drawable.ic_mic)
         updateStatus()
-        val seed = container.whisperStore.installedSeed(container.settings.whisperModelId) ?: return
+        val seed = container.installedWhisperSeed(container.settings.whisperModelId) ?: return
 
         // WhisperEngine holds one native handle at a time with no locking of
         // its own — it was never meant to be called from two coroutines at

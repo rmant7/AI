@@ -201,7 +201,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun renderWhisper() {
-        val installed = container.whisperStore.installedSeed(settings.whisperModelId)
+        val installed = container.installedWhisperSeed(settings.whisperModelId)
         val running = WhisperModels.SEEDS.firstOrNull { container.whisperDownloads.stateOf(it) is WhisperDownloadState.Running }
         val failed = WhisperModels.SEEDS.firstOrNull { container.whisperDownloads.stateOf(it) is WhisperDownloadState.Failed }
 

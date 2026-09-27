@@ -75,14 +75,6 @@ class ModelsActivity : AppCompatActivity() {
     private lateinit var container: AppContainer
     private val adapter = RowAdapter()
 
-    /**
-     * Where "Custom model from Hugging Face" puts a model: the tab it was
-     * added from. Real device report: one shared list showed a translation
-     * model added on the Translation tab under chat, and not under
-     * translation at all.
-     */
-    private val customPurpose: ModelPurpose
-        get() = if (category == Category.TRANSLATION) ModelPurpose.TRANSLATION else ModelPurpose.CHAT
     private var category = Category.TEXT
 
     // A denial here does not block downloads — it only means the foreground
@@ -358,6 +350,11 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun onVoiceSecondary(seed: WhisperModelSeed) {
+        if (seed.isCustom) {
+            container.removeCustomWhisperModel(seed.modelUrl)
+            render()
+            return
+        }
         when (val state = container.whisperDownloads.stateOf(seed)) {
             is WhisperDownloadState.Failed -> showDetails(seed.title, state.message)
             else -> {
@@ -552,7 +549,7 @@ class ModelsActivity : AppCompatActivity() {
         }
 
         addUnassignedRows(ModelPurpose.CHAT)
-        add(Row.Custom)
+        add(Row.Custom(onAdd = { addCustomRepo(ModelPurpose.CHAT) }))
     }
 
     private fun translationRows(device: DeviceProfile): List<Row> = buildList {
@@ -573,7 +570,7 @@ class ModelsActivity : AppCompatActivity() {
         // size progression otherwise.
         TranslationModels.SEEDS.sortedByDescending { container.isModelResident(it.id) }
             .forEach { seed -> add(translationModelRow(seed, device)) }
-        // The user's own translation models, added on this tab — see customPurpose.
+        // The user's own translation models, added on this tab.
         container.customSeeds(ModelPurpose.TRANSLATION).forEach { seed -> add(translationModelRow(seed, device)) }
 
         add(Row.Header(getString(R.string.models_translation_aicore_header)))
@@ -588,7 +585,7 @@ class ModelsActivity : AppCompatActivity() {
         ).forEach { seed -> add(translationModelRow(seed, device)) }
 
         addUnassignedRows(ModelPurpose.TRANSLATION)
-        add(Row.Custom)
+        add(Row.Custom(onAdd = { addCustomRepo(ModelPurpose.TRANSLATION) }))
     }
 
     /**
@@ -827,9 +824,56 @@ class ModelsActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun whisperModelRow(seed: WhisperModelSeed, device: DeviceProfile, selected: Boolean): Row.Model {
+        val state = container.whisperDownloads.stateOf(seed)
+        return Row.Model(
+            title = seed.title,
+            subtitle = if (seed.approxSizeBytes > 0) {
+                "~${size(seed.approxSizeBytes)} · ${fitLabel(device.classifyFit(seed.approxSizeBytes))}"
+            } else {
+                seed.modelUrl
+            },
+            selected = selected,
+            status = when {
+                state is WhisperDownloadState.Installed -> getString(R.string.model_state_installed)
+                state is WhisperDownloadState.Running ->
+                    getString(
+                        R.string.download_progress_label,
+                        state.stage,
+                        size(state.progress.bytesDownloaded),
+                        if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?",
+                    )
+                state is WhisperDownloadState.Failed ->
+                    getString(R.string.model_state_error, state.message.lineSequence().first())
+                else -> null
+            },
+            progress = (state as? WhisperDownloadState.Running)?.progress?.fraction,
+            indeterminate = false,
+            primaryLabel = when (state) {
+                is WhisperDownloadState.Installed ->
+                    getString(if (selected) R.string.model_installed else R.string.model_use)
+                is WhisperDownloadState.Running -> getString(R.string.model_pause)
+                is WhisperDownloadState.Failed -> getString(R.string.model_retry)
+                WhisperDownloadState.Idle -> getString(R.string.model_download)
+            },
+            primaryEnabled = !(state is WhisperDownloadState.Installed && selected),
+            secondaryLabel = if (seed.isCustom) {
+                getString(R.string.model_remove)
+            } else {
+                when (state) {
+                    is WhisperDownloadState.Failed -> getString(R.string.model_details)
+                    is WhisperDownloadState.Installed -> getString(R.string.model_delete)
+                    else -> null
+                }
+            },
+            onPrimary = { onVoicePrimary(seed) },
+            onSecondary = { onVoiceSecondary(seed) },
+        )
+    }
+
     private fun voiceRows(device: DeviceProfile): List<Row> = buildList {
         add(Row.Header(getString(R.string.models_voice_header)))
-        val selectedSeed = container.whisperStore.installedSeed(container.settings.whisperModelId)
+        val selectedSeed = container.installedWhisperSeed(container.settings.whisperModelId)
         // Real device report: this used to check only whisperModelId, so a
         // Vosk pick below could show as "selected" here too — both engines
         // remember their own last pick (see Settings.activeSttEngine's own
@@ -837,49 +881,17 @@ class ModelsActivity : AppCompatActivity() {
         // here means *that*, not merely "this is the id stored for Whisper".
         val whisperActive = container.settings.activeSttEngine == AsrEngineType.WHISPER
 
-        WhisperModels.SEEDS.forEach { seed ->
-            val state = container.whisperDownloads.stateOf(seed)
-            val selected = whisperActive && selectedSeed?.id == seed.id
-
-            add(
-                Row.Model(
-                    title = seed.title,
-                    subtitle = "~${size(seed.approxSizeBytes)} · ${fitLabel(device.classifyFit(seed.approxSizeBytes))}",
-                    selected = selected,
-                    status = when {
-                        state is WhisperDownloadState.Installed -> getString(R.string.model_state_installed)
-                        state is WhisperDownloadState.Running ->
-                            getString(
-                                R.string.download_progress_label,
-                                state.stage,
-                                size(state.progress.bytesDownloaded),
-                                if (state.progress.bytesTotal > 0) size(state.progress.bytesTotal) else "?",
-                            )
-                        state is WhisperDownloadState.Failed ->
-                            getString(R.string.model_state_error, state.message.lineSequence().first())
-                        else -> null
-                    },
-                    progress = (state as? WhisperDownloadState.Running)?.progress?.fraction,
-                    indeterminate = false,
-                    primaryLabel = when (state) {
-                        is WhisperDownloadState.Installed ->
-                            getString(if (selected) R.string.model_installed else R.string.model_use)
-                        is WhisperDownloadState.Running -> getString(R.string.model_pause)
-                        is WhisperDownloadState.Failed -> getString(R.string.model_retry)
-                        WhisperDownloadState.Idle -> getString(R.string.model_download)
-                    },
-                    primaryEnabled = !(state is WhisperDownloadState.Installed && selected),
-                    secondaryLabel = when (state) {
-                        is WhisperDownloadState.Failed -> getString(R.string.model_details)
-                        is WhisperDownloadState.Installed -> getString(R.string.model_delete)
-                        else -> null
-                    },
-                    onPrimary = { onVoicePrimary(seed) },
-                    onSecondary = { onVoiceSecondary(seed) },
-                ),
-            )
+        (WhisperModels.SEEDS + container.customWhisperSeeds()).forEach { seed ->
+            add(whisperModelRow(seed, device, whisperActive && selectedSeed?.id == seed.id))
         }
         add(Row.Note(getString(R.string.settings_whisper_note)))
+        add(
+            Row.Custom(
+                title = R.string.models_custom_voice_title,
+                hint = R.string.models_custom_voice_hint,
+                onAdd = { addCustomWhisperModel() },
+            ),
+        )
 
         // Vosk ASR spike (docs/14-vosk-spike.md): a second catalogue on the
         // same tab, not a separate screen — this is exactly where someone
@@ -964,7 +976,35 @@ class ModelsActivity : AppCompatActivity() {
         else -> null
     }
 
-    private fun addCustomRepo() {
+    /**
+     * A direct download link, not a repo id — see [WhisperModels.custom]'s
+     * own doc comment for why whisper.cpp models can't reuse
+     * [normalizeRepoInput]/[HuggingFaceResolver]'s repo resolution.
+     */
+    private fun addCustomWhisperModel() {
+        val input = android.widget.EditText(this).apply {
+            hint = getString(R.string.models_custom_voice_input_hint)
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.models_custom_voice_title)
+            .setMessage(R.string.models_custom_voice_hint)
+            .setView(input)
+            .setPositiveButton(R.string.model_download) { _, _ ->
+                val url = input.text?.toString()?.trim().orEmpty()
+                if (url.startsWith("http://") || url.startsWith("https://")) {
+                    val seed = container.addCustomWhisperModel(url)
+                    NetworkPolicy.confirmIfNeeded(this, container.settings) { container.whisperDownloads.start(seed) }
+                    render()
+                } else {
+                    Toast.makeText(this, R.string.models_custom_bad_format, Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun addCustomRepo(purpose: ModelPurpose) {
         val input = android.widget.EditText(this).apply {
             hint = getString(R.string.models_custom_input_hint)
             setSingleLine()
@@ -976,7 +1016,7 @@ class ModelsActivity : AppCompatActivity() {
             .setPositiveButton(R.string.model_download) { _, _ ->
                 val repo = normalizeRepoInput(input.text?.toString().orEmpty())
                 if (repo != null) {
-                    val seed = container.addCustomModel(repo, customPurpose)
+                    val seed = container.addCustomModel(repo, purpose)
                     NetworkPolicy.confirmIfNeeded(this, container.settings) { container.downloads.start(seed) }
                     render()
                 } else {
@@ -1045,7 +1085,7 @@ class ModelsActivity : AppCompatActivity() {
     sealed interface Row {
         data class Header(val title: String) : Row
         data class Note(val text: String) : Row
-        data object Custom : Row
+        data class Custom(val title: Int = R.string.models_custom_title, val hint: Int = R.string.models_custom_hint, val onAdd: () -> Unit) : Row
 
         data class Model(
             val title: String,
@@ -1091,7 +1131,7 @@ class ModelsActivity : AppCompatActivity() {
         private fun rowIdentity(row: Row): Any = when (row) {
             is Row.Header -> "header:${row.title}"
             is Row.Note -> "note:${row.text}"
-            Row.Custom -> "custom"
+            is Row.Custom -> "custom:${row.title}"
             is Row.Model -> "model:${row.title}"
         }
 
@@ -1111,7 +1151,7 @@ class ModelsActivity : AppCompatActivity() {
 
         override fun getItemViewType(position: Int): Int = when (rows[position]) {
             is Row.Header, is Row.Note -> TYPE_HEADER
-            is Row.Model, Row.Custom -> TYPE_MODEL
+            is Row.Model, is Row.Custom -> TYPE_MODEL
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
@@ -1128,7 +1168,7 @@ class ModelsActivity : AppCompatActivity() {
                 is Row.Header -> (holder as HeaderHolder).bind(row.title, bold = true)
                 is Row.Note -> (holder as HeaderHolder).bind(row.text, bold = false)
                 is Row.Model -> (holder as ModelHolder).bind(row)
-                Row.Custom -> (holder as ModelHolder).bindCustom { addCustomRepo() }
+                is Row.Custom -> (holder as ModelHolder).bindCustom(row.title, row.hint, row.onAdd)
             }
         }
     }
@@ -1151,10 +1191,10 @@ class ModelsActivity : AppCompatActivity() {
         // would keep bleeding into an unrelated row reusing the same holder.
         private val defaultSubtitleColor = binding.localSubtitle.currentTextColor
 
-        fun bindCustom(onClick: () -> Unit) {
+        fun bindCustom(title: Int, hint: Int, onClick: () -> Unit) {
             val context = binding.root.context
-            binding.localTitle.text = context.getString(R.string.models_custom_title)
-            binding.localSubtitle.text = context.getString(R.string.models_custom_hint)
+            binding.localTitle.text = context.getString(title)
+            binding.localSubtitle.text = context.getString(hint)
             binding.localSubtitle.setTextColor(defaultSubtitleColor)
             binding.localStatus.visibility = View.GONE
             binding.localProgress.visibility = View.GONE

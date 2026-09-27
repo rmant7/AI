@@ -1068,6 +1068,33 @@ class AppContainer private constructor(private val context: Context) {
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
     )
 
+    /**
+     * One [ai.localstudio.app.whisper.WhisperModelSeed] per URL in
+     * [Settings.customWhisperUrls] — same pattern as [customSeeds] for chat
+     * models: rebuilt fresh on every read, so a model added via "Custom
+     * model" on the Voice tab survives an Activity recreation or a full
+     * app restart.
+     */
+    fun customWhisperSeeds(): List<ai.localstudio.app.whisper.WhisperModelSeed> =
+        settings.customWhisperUrls.map { ai.localstudio.app.whisper.WhisperModels.custom(it) }
+
+    fun addCustomWhisperModel(url: String): ai.localstudio.app.whisper.WhisperModelSeed {
+        settings.customWhisperUrls += url
+        return ai.localstudio.app.whisper.WhisperModels.custom(url)
+    }
+
+    /** Forgets a custom Whisper model entirely, same reasoning as [removeCustomModel]. */
+    fun removeCustomWhisperModel(url: String) {
+        val seed = ai.localstudio.app.whisper.WhisperModels.custom(url)
+        if (settings.whisperModelId == seed.id) settings.whisperModelId = ""
+        settings.customWhisperUrls -= url
+        whisperDownloads.delete(seed)
+    }
+
+    /** [WhisperStore.installedSeed], but able to resolve a custom model too — see [customWhisperSeeds]. */
+    fun installedWhisperSeed(preferredId: String? = null) =
+        whisperStore.installedSeed(preferredId, WhisperModels.SEEDS + customWhisperSeeds())
+
     /** The model the user picked (or the biggest installed one) — used for the one accurate final transcript. */
     val whisperEngine = WhisperEngine(whisperStore)
 
@@ -1222,7 +1249,7 @@ class AppContainer private constructor(private val context: Context) {
     private val whisperFallbackModel = WhisperRegisteredSpeechModel(
         runtime = whisperCppRuntime as WhisperCppRuntime,
         whisperStore = whisperStore,
-        seedProvider = { whisperStore.installedSeed(settings.whisperModelId) },
+        seedProvider = { installedWhisperSeed(settings.whisperModelId) },
     )
 
     /**
