@@ -573,10 +573,6 @@ class ModelsActivity : AppCompatActivity() {
         // The user's own translation models, added on this tab.
         container.customSeeds(ModelPurpose.TRANSLATION).forEach { seed -> add(translationModelRow(seed, device)) }
 
-        add(Row.Header(getString(R.string.models_translation_aicore_header)))
-        add(Row.Note(getString(R.string.models_translation_aicore_note)))
-        add(aicoreTranslationRow())
-
         add(Row.Note(getString(R.string.models_translation_note)))
         add(Row.Header(getString(R.string.models_local_header)))
         LocalModels.SEEDS.sortedWith(
@@ -619,41 +615,6 @@ class ModelsActivity : AppCompatActivity() {
                 ),
             )
         }
-    }
-
-    /**
-     * Not a [Row.Model] built from a [LocalModelSeed] like every other row
-     * here — Gemini Nano is nothing this app downloads or stores itself (see
-     * [AppContainer.translationLocalCandidate]'s own doc comment), so there is
-     * no file, no [DownloadState], nothing to delete. Selecting it just
-     * writes [CloudProviders.AICORE]'s id to [Settings.translationModel];
-     * whether it is actually usable on this device is discovered the first
-     * time a translation is actually attempted, same as it already is for
-     * AICore as a chat candidate.
-     */
-    private fun aicoreTranslationRow(): Row.Model {
-        // Only once AICore itself has said so — unknown still offers it.
-        val unsupported = container.aicoreUnsupported
-        val selected = container.settings.translationModel == CloudProviders.AICORE.id && !unsupported
-        return Row.Model(
-            title = getString(CloudProviders.AICORE.titleRes),
-            subtitle = getString(if (unsupported) R.string.models_aicore_unavailable else R.string.models_translation_aicore_subtitle),
-            selected = selected,
-            status = null,
-            progress = null,
-            indeterminate = false,
-            primaryLabel = getString(
-                when {
-                    unsupported -> R.string.model_unavailable
-                    selected -> R.string.model_installed
-                    else -> R.string.model_use
-                },
-            ),
-            primaryEnabled = !selected && !unsupported,
-            secondaryLabel = null,
-            onPrimary = { useForTranslation(CloudProviders.AICORE.id, getString(CloudProviders.AICORE.titleRes)) },
-            onSecondary = {},
-        )
     }
 
     private fun translationModelRow(seed: LocalModelSeed, device: DeviceProfile): Row.Model {

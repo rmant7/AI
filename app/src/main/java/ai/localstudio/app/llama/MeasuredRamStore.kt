@@ -32,7 +32,9 @@ class MeasuredRamStore(context: Context) {
         val file = File(artifactPath)
         if (!file.isFile) return null
         val canonical = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
-        return "$canonical|${file.length()}|$contextTokens"
+        // KEY_VERSION: measurements from before the projector was loaded
+        // lazily include it (~1 GB for Gemma's) — dropped rather than trusted.
+        return "$KEY_VERSION|$canonical|${file.length()}|$contextTokens"
     }
 
     private fun decode(raw: String?): RamMeasurement? {
@@ -44,5 +46,6 @@ class MeasuredRamStore(context: Context) {
 
     private companion object {
         const val PREFS_NAME = "measured_ram"
+        const val KEY_VERSION = "v2"
     }
 }

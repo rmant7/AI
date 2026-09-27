@@ -312,12 +312,9 @@ class TranslationActivity : AppCompatActivity() {
     }
 
     private fun updateModelNote() {
-        val modelId = container.settings.translationModel.ifBlank { container.settings.chatModelFor(CloudProviders.LOCAL.id) }
-        val label = when {
-            modelId == CloudProviders.AICORE.id -> getString(CloudProviders.AICORE.titleRes)
-            modelId.isNotBlank() -> modelId
-            else -> null
-        }
+        val modelId = container.settings.translationModel.takeUnless { it == CloudProviders.AICORE.id }.orEmpty()
+            .ifBlank { container.settings.chatModelFor(CloudProviders.LOCAL.id) }
+        val label = modelId.ifBlank { null }
         binding.translationModelNote.text = getString(R.string.translation_model_note, label ?: getString(R.string.translation_model_note_none))
     }
 
@@ -584,6 +581,8 @@ class TranslationActivity : AppCompatActivity() {
         // recognize (see cleanTranslation's own doc comment) — covers every
         // chat-template family this app's catalog actually includes
         // (Gemma, Qwen/ChatML, Llama), not just the one seen on-device so far.
+        val THINK_BLOCK = Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL)
+
         val TURN_MARKERS = listOf("<end_of_turn>", "<turn|>", "<|im_end|>", "<|eot_id|>", "<|end|>")
 
         /**
@@ -608,6 +607,12 @@ class TranslationActivity : AppCompatActivity() {
          */
         fun cleanTranslation(raw: String): String {
             var text = raw.substringBefore("\n\n---\n").trim()
+            // A reasoning model's scratchpad (Qwen3-style `<think>…</think>`)
+            // is not the translation — real device report: OmniTranslate's
+            // result card started with "<think>\nEN->sul_Latn.\n</think>".
+            // An unclosed block (cut off by maxTokens) holds no answer at all.
+            text = THINK_BLOCK.replace(text, "").trim()
+            if (text.startsWith("<think>")) text = ""
             for (marker in TURN_MARKERS) text = text.substringBefore(marker).trim()
             if (text.startsWith("```") && text.endsWith("```")) text = text.removePrefix("```").removeSuffix("```").trim()
             if (text.length >= 2 && text.first() == text.last() && text.first() in "\"'«»") {

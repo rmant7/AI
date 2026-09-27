@@ -87,13 +87,21 @@ class RamMeasuringRuntime(
                 emitAll(handle.generate(request))
                 completed = true
             } finally {
-                probe?.let { finish(it, completed) }
+                probe?.let { finish(it, completed, withImage = request.images.isNotEmpty()) }
             }
         }
 
-        private fun finish(probe: PeakProbe, completed: Boolean) {
+        private fun finish(probe: PeakProbe, completed: Boolean, withImage: Boolean) {
             val deltaBytes = probe.stop()
             val prefix = "$modelId ctx=$contextTokens"
+            // The vision projector loads only on an image turn (see
+            // LlamaCppRuntime.load), adding ~1 GB for Gemma's. Recording that
+            // as the model's cost would make every later text-only chat need
+            // it too — real device report: 8.5 GB demanded of a text chat.
+            if (withImage) {
+                log("RAM_MEASURE", "$prefix: first run carried an image (projector loaded) — not recorded")
+                return
+            }
             if (!completed) {
                 log("RAM_MEASURE", "$prefix: first run didn't complete — not recorded")
                 return

@@ -1814,10 +1814,12 @@ class AppContainer private constructor(private val context: Context) {
      * that id directly) and when nothing local is chosen or installed.
      */
     private fun translationLocalCandidate(): FallbackCandidate? {
-        // An AICore pick on a device that can't run it means "auto", not
-        // "no local model" — see aicoreUnsupported.
-        val chosenId = settings.translationModel.takeUnless { it == CloudProviders.AICORE.id && aicoreUnsupported }.orEmpty()
-        if (chosenId == CloudProviders.AICORE.id) return null
+        // A stored AICore pick (from before Gemini Nano left the Models →
+        // Translation list) means "auto": Nano is added to every translation
+        // batch on its own (see translationCompareCandidates), so treating it
+        // as the translation model only ever removed the local source —
+        // real device report: picking Nano there switched the local model off.
+        val chosenId = settings.translationModel.takeUnless { it == CloudProviders.AICORE.id }.orEmpty()
         val registry = localRegistry(ModelPurpose.TRANSLATION)
         val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
             ?: effectiveLocalSelection(registry)

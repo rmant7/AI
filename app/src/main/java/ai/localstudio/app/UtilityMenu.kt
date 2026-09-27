@@ -24,7 +24,9 @@ import androidx.appcompat.app.AppCompatActivity
  * documents (see its own doc comment), so offering it from Models, Log or
  * any other screen with no conversation in view read as a general file
  * manager it isn't. [ChatActivity] adds it directly, the same way it
- * already added Memory/Share/Clear.
+ * already added Memory/Share/Clear. Chat history is left out for the same
+ * reason — it is chat's own, and [ChatActivity] already adds its own
+ * History item (which needs a result back, see [inflate]).
  *
  * [MORE_ENTRIES] (Phrasebook, Benchmark) fold into one "More" submenu
  * instead of two more flat rows — both are occasional, task-specific
@@ -53,7 +55,6 @@ object UtilityMenu {
         Entry(9000, R.string.menu_chat, ChatActivity::class.java),
         Entry(9001, R.string.menu_models, ModelsActivity::class.java),
         Entry(9003, R.string.menu_settings, SettingsActivity::class.java),
-        Entry(9004, R.string.menu_history, HistoryActivity::class.java),
         Entry(9006, R.string.menu_transcribe, TranscribeActivity::class.java),
         Entry(9008, R.string.menu_translation, TranslationActivity::class.java),
     )
