@@ -30,8 +30,6 @@ import ai.localstudio.app.models.TranslationModels
 import ai.localstudio.app.models.TtsVoiceFallback
 import ai.localstudio.core.engine.UserRequest
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -401,67 +399,78 @@ class TranslationActivity : AppCompatActivity() {
         // flag for the whole batch — only the local source (if any) needs
         // it, a cloud/AICore source is network-bound, not CPU-bound.
         val keepAlive = sources.any { it.isLocal }
+        // The batch itself — concurrency, per-candidate reporting order,
+        // hide-on-failure, and the "a plain cancellation propagates instead
+        // of being reported as this candidate's own failure" rule — is
+        // ai.localstudio.core.engine.runCompare, the same COMPARE engine
+        // ChatActivity's own Compare mode is meant to share (see
+        // docs/17-ai-core-stage1.md). Only what to do with each outcome
+        // (the appLog line, session.finish/hide, this screen's own error
+        // message strings) stays here.
+        val candidates = sources.mapIndexed { index, translationSource ->
+            ai.localstudio.core.engine.CompareCandidate(
+                label = translationSource.label,
+                hideOnFailure = translationSource.hideOnFailure,
+                run = {
+                    // Budget counts only this source's own work: time queued
+                    // behind AICore/another local model on the device-memory
+                    // gate is excluded (see withOperationTimeout), bounded
+                    // by the deadline.
+                    withContext(Dispatchers.IO) {
+                        heavyOperations.track { withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
+                            translationSource.orchestrator.handle(
+                                UserRequest(
+                                    // Unique per request and never saved to
+                                    // ChatHistoryStore — this is one-shot, not
+                                    // a conversation, so there is no earlier
+                                    // turn for a shared id to collide with.
+                                    conversationId = "translate-" + System.currentTimeMillis() + "-" + index,
+                                    text = prompts[index],
+                                    memoryEnabled = false,
+                                ),
+                            )
+                        } }
+                    }
+                },
+            )
+        }
         session.job = session.scope.launch {
             if (keepAlive) GenerationKeepAliveService.begin(app)
             try {
-                val jobs = sources.mapIndexed { index, translationSource ->
-                    async(Dispatchers.IO) {
-                        val result = runCatching {
-                            // Budget counts only this source's own work: time
-                            // queued behind AICore/another local model on the
-                            // device-memory gate is excluded (see
-                            // withOperationTimeout), bounded by the deadline.
-                            heavyOperations.track { withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
-                                translationSource.orchestrator.handle(
-                                    UserRequest(
-                                        // Unique per request and never saved to
-                                        // ChatHistoryStore — this is one-shot, not
-                                        // a conversation, so there is no earlier
-                                        // turn for a shared id to collide with.
-                                        conversationId = "translate-" + System.currentTimeMillis() + "-" + index,
-                                        text = prompts[index],
-                                        memoryEnabled = false,
-                                    ),
-                                )
-                            } }
+                ai.localstudio.core.engine.runCompare(candidates) { index, outcome ->
+                    when (outcome) {
+                        is ai.localstudio.core.engine.CompareOutcome.Success -> {
+                            val answer = outcome.value
+                            appLog.record("TRANSLATE", "${candidates[index].label}: done, ${answer.text.length} chars back")
+                            session.finish(index, cleanTranslation(answer.text))
                         }
-                        withContext(Dispatchers.Main) {
-                            result.onSuccess { answer ->
-                                appLog.record("TRANSLATE", "${translationSource.label}: done, ${answer.text.length} chars back")
-                                session.finish(index, cleanTranslation(answer.text))
-                            }.onFailure { error ->
-                                if (error is kotlinx.coroutines.CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
-                                appLog.record(
-                                    "TRANSLATE",
-                                    "${translationSource.label}: FAILED: ${error.javaClass.simpleName}: ${error.message}",
-                                )
-                                // A source the caller added on the user's own
-                                // behalf (Gemini Nano, forced in regardless of
-                                // Settings — see CompareSource's own doc
-                                // comment) just disappears on failure instead
-                                // of showing an error for something the user
-                                // never asked to see in the first place — not
-                                // installed on this device, AICore's service
-                                // not bound, whatever else.
-                                if (translationSource.hideOnFailure) {
-                                    session.hide(index)
+                        // A source the caller added on the user's own behalf
+                        // (Gemini Nano, forced in regardless of Settings —
+                        // see CompareSource's own doc comment) just
+                        // disappears on failure instead of showing an error
+                        // for something the user never asked to see in the
+                        // first place — not installed on this device,
+                        // AICore's service not bound, whatever else.
+                        ai.localstudio.core.engine.CompareOutcome.Hidden -> session.hide(index)
+                        is ai.localstudio.core.engine.CompareOutcome.Failed -> {
+                            val error = outcome.error
+                            appLog.record(
+                                "TRANSLATE",
+                                "${candidates[index].label}: FAILED: ${error.javaClass.simpleName}: ${error.message}",
+                            )
+                            session.finish(
+                                index,
+                                if (error is OperationTimeoutException) {
+                                    app.getString(R.string.chat_compare_timeout_error, error.limitMs / 1000)
+                                } else if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                                    app.getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
                                 } else {
-                                    session.finish(
-                                        index,
-                                        if (error is OperationTimeoutException) {
-                                            app.getString(R.string.chat_compare_timeout_error, error.limitMs / 1000)
-                                        } else if (error is kotlinx.coroutines.TimeoutCancellationException) {
-                                            app.getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
-                                        } else {
-                                            app.getString(R.string.chat_compare_generic_error, error.message ?: error.toString())
-                                        },
-                                    )
-                                }
-                            }
+                                    app.getString(R.string.chat_compare_generic_error, error.message ?: error.toString())
+                                },
+                            )
                         }
                     }
                 }
-                jobs.awaitAll()
             } finally {
                 session.end(batch)
                 if (keepAlive) GenerationKeepAliveService.end(app)
