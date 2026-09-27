@@ -267,27 +267,58 @@ class LlamaCppRuntime(
         // Running it on a detached worker (its own SupervisorJob, not a
         // child of the caller) means load() itself still responds to
         // cancellation immediately, while the worker keeps running to
-        // completion in the background and frees whatever it produced if
-        // nobody is waiting for it anymore, instead of leaking a model.
-        // Plain var, not @Volatile: CompletableDeferred's completion (awaited
-        // below, and observed via invokeOnCompletion in the cancelled path)
-        // already establishes happens-before, so both readers always see the
-        // write the worker made just before completing.
-        var producedHandle = 0L
-        val result = CompletableDeferred<Unit>()
+        // completion in the background.
+        //
+        // Ownership of the produced handle is decided exactly once, through
+        // [result]: the worker's complete() and the caller's
+        // completeExceptionally() race on the same CompletableDeferred and
+        // only one of them wins. The worker frees a handle nobody will ever
+        // receive while still holding nativeOpMutex — so the next native op,
+        // possibly the next model's load, can't start until it's gone. The
+        // previous version freed it from invokeOnCompletion instead, outside
+        // nativeOpMutex, concurrently with whatever native op ran next — and
+        // RuntimeManager, which had already released its own lock, could
+        // admit and start loading another model while this one was still
+        // resident: two multi-GB models at once, the exact OOM this class is
+        // built to avoid.
+        val result = CompletableDeferred<Long>()
+        // Written before complete(): read back only when the caller's
+        // completeExceptionally() lost the race, i.e. complete() already
+        // happened — visibility comes from the deferred's own atomic state.
+        val producedRef = java.util.concurrent.atomic.AtomicLong(0L)
         val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             LlamaBridge.nativeOpMutex.withLock {
-                producedHandle = runCatching { bridge.nativeLoad(file.absolutePath, contextTokens, threads) }.getOrDefault(0L)
+                // Only the caller's completeExceptionally() can complete
+                // [result] before this point: it gave up while this worker
+                // was still queued behind another native op, so there's
+                // nothing to load for anyone — skip the (possibly minutes
+                // long) load entirely instead of loading just to free it.
+                if (result.isCompleted) {
+                    log("LOCAL_LOAD", "${file.name}: abandoned before the load started — skipped")
+                    return@withLock
+                }
+                val produced = runCatching { bridge.nativeLoad(file.absolutePath, contextTokens, threads) }.getOrDefault(0L)
+                producedRef.set(produced)
+                if (!result.complete(produced) && produced != 0L) {
+                    bridge.nativeFree(produced)
+                    log("LOCAL_LOAD", "${file.name}: abandoned load finished — native model freed")
+                }
             }
-            result.complete(Unit)
         }
         val handle = try {
             result.await()
-            producedHandle
         } catch (e: CancellationException) {
             log("LOCAL_LOAD", "${file.name}: abandoned after ${System.currentTimeMillis() - loadStart}ms, still loading in the background")
-            worker.invokeOnCompletion {
-                if (producedHandle != 0L) bridge.nativeFree(producedHandle)
+            // The next admission (RuntimeManager's beforeAdmission, see
+            // awaitPendingNativeWork) waits for this worker, not just for
+            // nativeOpMutex, so its budget is read only after this model is
+            // physically gone.
+            trackPendingNativeWork(worker)
+            if (!result.completeExceptionally(e)) {
+                // The worker won the race: the handle already exists and,
+                // since this caller is giving up, belongs to nobody else.
+                val produced = producedRef.get()
+                if (produced != 0L) trackPendingNativeWork(releaseInBackground(bridge, produced, file.name))
             }
             throw e
         }
@@ -296,47 +327,100 @@ class LlamaCppRuntime(
             log("LOCAL_LOAD", "${file.name}: FAILED after ${loadMs}ms")
             throw ModelLoadException("llama.cpp could not load ${file.name}")
         }
-        log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)")
+        // From here until the LlamaTextModel below is returned, this function
+        // is the handle's only owner — and there are still suspension points
+        // (nativeOpMutex.withLock for the projector and the encoder check)
+        // where a cancellation, or any other throw, would otherwise leave a
+        // multi-GB native model with no reference to it at all, never freed
+        // for the life of the process.
+        try {
+            log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)")
 
-        // Best-effort, and only if a projector was actually downloaded for
-        // this model (see ModelStore.hasMmproj) — a model with none behaves
-        // exactly as it always did, text-only. Also skipped outright when
-        // there isn't visibly enough free RAM left after the base model's
-        // own load to also hold a vision encoder — attempting it anyway was
-        // observed on a real device to reliably run the whole process out of
-        // memory a turn or two later (Android's OOM killer, not a catchable
-        // Kotlin exception), losing whatever the conversation was doing at
-        // the time. The margin is deliberately generous: the projector's
-        // *file* size is only its weights, and encoding an image needs
-        // activation buffers on top that scale with the same size.
-        val hasVision = binding.mmprojArtifact?.let { mmprojPath ->
-            val mmprojBytes = File(mmprojPath).length()
-            val headroom = availableRamBytes()
-            if (mmprojBytes > 0 && headroom < mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR) {
-                log(
-                    "LOCAL_LOAD",
-                    "${file.name}: mmproj SKIPPED — only ${headroom / 1_000_000}MB free, " +
-                        "want ~${(mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR / 1_000_000).toLong()}MB for $mmprojPath",
-                )
-                false
-            } else {
-                LlamaBridge.nativeOpMutex.withLock {
-                    runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
-                }.also { loaded ->
-                    log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} from $mmprojPath")
+            // Best-effort, and only if a projector was actually downloaded for
+            // this model (see ModelStore.hasMmproj) — a model with none behaves
+            // exactly as it always did, text-only. Also skipped outright when
+            // there isn't visibly enough free RAM left after the base model's
+            // own load to also hold a vision encoder — attempting it anyway was
+            // observed on a real device to reliably run the whole process out of
+            // memory a turn or two later (Android's OOM killer, not a catchable
+            // Kotlin exception), losing whatever the conversation was doing at
+            // the time. The margin is deliberately generous: the projector's
+            // *file* size is only its weights, and encoding an image needs
+            // activation buffers on top that scale with the same size.
+            val hasVision = binding.mmprojArtifact?.let { mmprojPath ->
+                val mmprojBytes = File(mmprojPath).length()
+                val headroom = availableRamBytes()
+                if (mmprojBytes > 0 && headroom < mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR) {
+                    log(
+                        "LOCAL_LOAD",
+                        "${file.name}: mmproj SKIPPED — only ${headroom / 1_000_000}MB free, " +
+                            "want ~${(mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR / 1_000_000).toLong()}MB for $mmprojPath",
+                    )
+                    false
+                } else {
+                    LlamaBridge.nativeOpMutex.withLock {
+                        runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
+                    }.also { loaded ->
+                        log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} from $mmprojPath")
+                    }
                 }
+            } ?: false
+
+            // Read once here rather than on every generate() call — it's a read
+            // of static model metadata (llama_model_has_encoder), unchanging for
+            // the life of this handle, same reasoning as caching hasVision above.
+            val hasEncoder = LlamaBridge.nativeOpMutex.withLock {
+                runCatching { bridge.nativeHasEncoder(handle) }.getOrDefault(false)
             }
-        } ?: false
+            if (hasEncoder) log("LOCAL_LOAD", "${file.name}: encoder-decoder model — routing generate() through nativeGenerateT5")
 
-        // Read once here rather than on every generate() call — it's a read
-        // of static model metadata (llama_model_has_encoder), unchanging for
-        // the life of this handle, same reasoning as caching hasVision above.
-        val hasEncoder = LlamaBridge.nativeOpMutex.withLock {
-            runCatching { bridge.nativeHasEncoder(handle) }.getOrDefault(false)
+            return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, hasEncoder, log)
+        } catch (t: Throwable) {
+            log("LOCAL_LOAD", "${file.name}: abandoned after load (${t.javaClass.simpleName}) — freeing native model")
+            trackPendingNativeWork(releaseInBackground(bridge, handle, file.name))
+            throw t
         }
-        if (hasEncoder) log("LOCAL_LOAD", "${file.name}: encoder-decoder model — routing generate() through nativeGenerateT5")
+    }
 
-        return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, hasEncoder, log)
+    /** Frees [handle] under nativeOpMutex, off the caller — who may already be cancelled and can't suspend on the lock itself. */
+    private fun releaseInBackground(bridge: LlamaBridge, handle: Long, fileName: String): Job =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            LlamaBridge.nativeOpMutex.withLock { bridge.nativeFree(handle) }
+            log("LOCAL_LOAD", "$fileName: abandoned native model freed")
+        }
+
+    companion object {
+        /**
+         * Native loads/frees that outlived the caller who started them —
+         * see load()'s own comments. Only abandoned work goes here; a load
+         * someone is still waiting for is already serialized by
+         * RuntimeManager's own lock.
+         */
+        private val pendingNativeWork = java.util.Collections.synchronizedSet(mutableSetOf<Job>())
+
+        private fun trackPendingNativeWork(job: Job) {
+            // Added before the completion handler is registered: an
+            // already-finished job fires its handler immediately, which must
+            // find it in the set to remove it.
+            pendingNativeWork += job
+            job.invokeOnCompletion { pendingNativeWork -= job }
+        }
+
+        /**
+         * Suspends until every abandoned native load/free has physically
+         * finished. RuntimeManager calls this before reading its budget, so
+         * a model still loading (or being freed) in the background is never
+         * mistaken for free memory by the next admission check.
+         */
+        suspend fun awaitPendingNativeWork() {
+            while (true) {
+                val snapshot = synchronized(pendingNativeWork) { pendingNativeWork.toList() }
+                if (snapshot.isEmpty()) return
+                snapshot.forEach { it.join() }
+            }
+        }
+
+        fun hasPendingNativeWork(): Boolean = pendingNativeWork.isNotEmpty()
     }
 }
 

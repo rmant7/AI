@@ -41,6 +41,12 @@ data class ResidentModel(
  * model's pages as reclaimable cache, so no budget arithmetic can tell
  * whether two of them really fit side by side — and when they don't, both
  * thrash the page cache instead of failing.
+ *
+ * [beforeAdmission] runs before every new load's budget is read — for a
+ * runtime whose own loads can outlive a cancelled caller (a blocking native
+ * load on a detached worker), so a model still physically loading or being
+ * freed in the background is never mistaken for free memory by the next
+ * admission check.
  */
 class RuntimeManager(
     private val budgetBytes: () -> Long,
@@ -49,6 +55,7 @@ class RuntimeManager(
     private val strictBudget: Boolean = true,
     private val exclusive: Boolean = false,
     private val log: (String) -> Unit = {},
+    private val beforeAdmission: suspend () -> Unit = {},
 ) {
     constructor(
         budgetBytes: Long,
@@ -124,6 +131,7 @@ class RuntimeManager(
         if (!chosen.canRun(model, binding)) {
             throw ModelLoadException("Runtime ${binding.runtime.id} cannot run ${model.id}")
         }
+        beforeAdmission()
         val requiredBytes = binding.effectiveRequiredRamBytes
         val budget = budgetBytes()
         if (exclusive) evictAllIdle()

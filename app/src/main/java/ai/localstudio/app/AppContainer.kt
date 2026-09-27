@@ -157,6 +157,15 @@ class AppContainer private constructor(private val context: Context) {
         runtimes = emptyMap(),
         exclusive = true,
         log = { appLog.record("RAM_MANAGER", it) },
+        // A cancelled load keeps running on its detached native worker (see
+        // LlamaCppRuntime.load) — the next model's budget must not be read
+        // while that one still physically holds memory.
+        beforeAdmission = {
+            if (LlamaCppRuntime.hasPendingNativeWork()) {
+                appLog.record("RAM_MANAGER", "waiting for an abandoned native load/free to finish before admitting the next model")
+                LlamaCppRuntime.awaitPendingNativeWork()
+            }
+        },
     )
 
     /**

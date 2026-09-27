@@ -228,4 +228,29 @@ class RuntimeManagerTest {
         assertEquals(listOf("gemma"), runtime.unloads)
         assertEquals(listOf("qwen"), manager.residentModels().map { it.modelId })
     }
+
+    @Test
+    fun `beforeAdmission runs before the budget is read and the load starts, and not on reuse`() = runBlocking {
+        val events = mutableListOf<String>()
+        val recordingRuntime = object : ModelRuntime {
+            override val kind = RuntimeKind.LLAMA_CPP
+            override fun canRun(model: ModelDescriptor, binding: RuntimeBinding) = true
+            override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel {
+                events += "load"
+                return FakeLoadedModel(model.id, binding.effectiveRequiredRamBytes) {}
+            }
+        }
+        val manager = RuntimeManager(
+            budgetBytes = { events += "budget"; 6 * GB },
+            runtimes = mapOf(RuntimeKind.LLAMA_CPP to recordingRuntime),
+            clock = { ++now },
+            beforeAdmission = { events += "beforeAdmission" },
+        )
+        val llm = model("llm", bindings = listOf(binding(ramBytes = 2 * GB)))
+
+        manager.withModel(llm, llm.bindings.first()) { }
+        manager.withModel(llm, llm.bindings.first()) { }
+
+        assertEquals(listOf("beforeAdmission", "budget", "load"), events)
+    }
 }
