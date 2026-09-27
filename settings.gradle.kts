@@ -13,6 +13,11 @@ rootProject.name = "local-ai-studio"
 include(":memory")
 include(":commercial-memory")
 include(":core")
+// NodeExecutors (memory/knowledge-aware pipeline wiring) and the
+// LlmMemoryExtractor it uses — the only pieces of the old :core that
+// touched :commercial-memory/Mobile_mem0. Split out so :core itself stays
+// buildable against nothing but plain Kotlin — see MOBILE_MEM0_DEPENDENCY.md.
+include(":core-chat")
 include(":openai")
 
 // The Android app is included only where it can actually be built. `core` and

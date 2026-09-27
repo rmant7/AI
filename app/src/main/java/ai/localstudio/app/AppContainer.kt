@@ -24,6 +24,7 @@ import ai.localstudio.core.engine.UserRequest
 import ai.localstudio.core.memory.LlmMemoryExtractor
 import ai.localstudio.core.pipeline.NodeValue
 import ai.localstudio.core.pipeline.PipelineCodec
+import ai.localstudio.core.pipeline.PipelineEngine
 import ai.localstudio.memory.FileMemoryStore
 import ai.localstudio.memory.FileSemanticIndex
 import ai.localstudio.memory.MemoryQuery
@@ -1664,7 +1665,7 @@ class AppContainer private constructor(private val context: Context) {
             // bottleneck, not just extra RAM the way context length is.
             defaultMaxTokens = if (isLocalOnly) minOf(settings.maxResponseTokens, LOCAL_MAX_OUTPUT_TOKENS) else settings.maxResponseTokens,
         )
-        return Orchestrator(CapabilityRouter(), executors)
+        return Orchestrator(CapabilityRouter(), PipelineEngine(executors.build()))
     }
 
     /**
@@ -1957,7 +1958,7 @@ class AppContainer private constructor(private val context: Context) {
             defaultRepeatPenalty = settings.repeatPenalty,
             defaultMaxTokens = minOf(settings.maxResponseTokens, TRANSLATION_MAX_OUTPUT_TOKENS),
         )
-        return Orchestrator(CapabilityRouter(), executors)
+        return Orchestrator(CapabilityRouter(), PipelineEngine(executors.build()))
     }
 
     /**

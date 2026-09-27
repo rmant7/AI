@@ -13,6 +13,7 @@ import ai.localstudio.core.model
 import ai.localstudio.core.pipeline.ConversationTurn
 import ai.localstudio.core.pipeline.NodeType
 import ai.localstudio.core.pipeline.NodeValue
+import ai.localstudio.core.pipeline.PipelineEngine
 import ai.localstudio.core.registry.Benchmarks
 import ai.localstudio.core.registry.InstallState
 import ai.localstudio.core.registry.ModelRegistry
@@ -80,7 +81,7 @@ class OrchestratorTest {
             memory = if (memoryEnabled) memory else null,
             systemPrompt = "Ты локальный ассистент.",
         )
-        return Orchestrator(CapabilityRouter(), executors)
+        return Orchestrator(CapabilityRouter(), PipelineEngine(executors.build()))
     }
 
     @Test
@@ -162,7 +163,7 @@ class OrchestratorTest {
             systemPrompt = "Ты локальный ассистент.",
         )
 
-        val answer = Orchestrator(CapabilityRouter(), executors).handle(
+        val answer = Orchestrator(CapabilityRouter(), PipelineEngine(executors.build())).handle(
             UserRequest(conversationId = "c1", text = "что на фото?", attachment = imageInput("file://a.png")),
         )
 
@@ -262,7 +263,7 @@ class OrchestratorTest {
         )
 
         val failure = assertFailsWith<NoModelForCapabilityException> {
-            Orchestrator(CapabilityRouter(), executors)
+            Orchestrator(CapabilityRouter(), PipelineEngine(executors.build()))
                 .handle(UserRequest(conversationId = "c1", text = "привет"))
         }
 

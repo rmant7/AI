@@ -20,9 +20,10 @@ plugins {
 repositories {
     google()
     mavenCentral()
-    // Same reasoning as :openai's own copy of this line — see
-    // MOBILE_MEM0_DEPENDENCY.md. Needed here too since this module depends
-    // on :core/:openai/:commercial-memory directly.
+    // Resolves com.github.rmant7:Mobile_mem0, via :core-chat and
+    // :commercial-memory (both depend on it) — Gradle resolves each
+    // module's own compileClasspath against its own repositories block, not
+    // whatever a project() dependency declared. See MOBILE_MEM0_DEPENDENCY.md.
     maven { url = uri("https://jitpack.io") }
 }
 
@@ -180,6 +181,12 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    // NodeExecutors — :core itself no longer depends on :commercial-memory/
+    // Mobile_mem0 (see MOBILE_MEM0_DEPENDENCY.md), so this app, which
+    // actually wants memory-aware chat, needs both explicitly now instead of
+    // getting them transitively through :core's old api(...) declarations.
+    implementation(project(":core-chat"))
+    implementation(project(":commercial-memory"))
     implementation(project(":openai"))
     implementation(project(":whisper"))
     // CPU-feature variants of the native libraries (dotprod, i8mm) — packaged

@@ -48,11 +48,20 @@ data class Answer(
  * Chat and user-authored pipelines share one path: [handle] builds a graph and
  * runs it, [run] takes a graph that already exists. There is no second
  * execution path that can drift.
+ *
+ * Takes [engine] pre-built rather than a `NodeExecutors` to build it from:
+ * `NodeExecutors` is what actually wires memory/knowledge retrieval into the
+ * pipeline, and it — along with everything it needs from `:commercial-memory`
+ * and the external Mobile_mem0 artifact — lives in the separate `:core-chat`
+ * module specifically so `:core` itself never has to depend on either. A
+ * caller that wants memory just builds its own `NodeExecutors` and passes
+ * `PipelineEngine(executors.build())`; one with no use for it (translation,
+ * or a future IntelliVerse caller wanting only cloud models) never needs
+ * `:core-chat`, `:commercial-memory` or Mobile_mem0 on its classpath at all.
  */
 class Orchestrator(
     private val router: CapabilityRouter,
-    private val executors: NodeExecutors,
-    private val engine: PipelineEngine = PipelineEngine(executors.build()),
+    private val engine: PipelineEngine,
 ) {
     suspend fun handle(request: UserRequest, onPartialText: ((String) -> Unit)? = null): Answer {
         val signals = RequestSignals(

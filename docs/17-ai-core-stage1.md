@@ -98,6 +98,7 @@ peak RAM, tok/s) delivered through a listener; log lines are derived from it.
 | 9–10 | Model catalog: discovery per provider, normalization, repo + remote catalog, merge, cache, statuses |
 | 11 | Capability-based selection over the catalog, respecting enabled providers and status; manual model choice kept |
 | 12–13 | Buffer for on-device regressions |
+| — | `core` split from `core-chat`: `NodeExecutors`/`LlmMemoryExtractor` (memory/knowledge-aware pipeline wiring) moved to a new `core-chat` module, so `core` itself no longer depends on Mobile_mem0/`:commercial-memory` at all — routing, errors, the model catalog and the SINGLE/COMPARE engine are provably memory-free (`core`'s own JVM test suite now runs with zero memory imports on its classpath). `Orchestrator` takes a pre-built `PipelineEngine` instead of a `NodeExecutors`, so a caller with no use for memory (a translation-only IntelliVerse integration is the concrete case this was done for) never needs `core-chat` on its classpath. See MOBILE_MEM0_DEPENDENCY.md. Not one of the original 13 sessions — prep work for whichever Stage 2 session actually adds an IntelliVerse consumer, done early because it was low-risk (a mechanical move plus one constructor signature change, zero behavior change) and directly unblocks it. |
 
 ## Definition of done
 

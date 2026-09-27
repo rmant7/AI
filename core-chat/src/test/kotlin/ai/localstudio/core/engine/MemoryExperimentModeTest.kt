@@ -15,6 +15,7 @@ import ai.localstudio.core.model
 import ai.localstudio.core.registry.Benchmarks
 import ai.localstudio.core.registry.InstallState
 import ai.localstudio.core.registry.ModelRegistry
+import ai.localstudio.core.pipeline.PipelineEngine
 import ai.localstudio.core.registry.RegistryEntry
 import ai.localstudio.core.router.CapabilityRouter
 import ai.localstudio.core.runtime.RuntimeManager
@@ -61,7 +62,7 @@ class MemoryExperimentModeTest {
             memoryExperimentMode = mode,
             systemPrompt = "Ты локальный ассистент.",
         )
-        return Orchestrator(CapabilityRouter(), executors)
+        return Orchestrator(CapabilityRouter(), PipelineEngine(executors.build()))
     }
 
     private fun memoryWithFact(): FileMemoryStore {
