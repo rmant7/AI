@@ -72,9 +72,9 @@ data class OpenAiConfig(
     val normalizedBaseUrl: String get() = baseUrl.trimEnd('/')
 }
 
-class OpenAiException(val status: Int, val body: String) : Exception(
+class OpenAiException(override val status: Int, override val body: String) : Exception(
     "OpenAI-compatible endpoint returned HTTP $status: ${describe(body)}",
-) {
+), ai.localstudio.core.errors.HttpStatusError {
     private companion object {
         /**
          * The provider's own sentence, not its JSON.
@@ -104,34 +104,17 @@ class OpenAiException(val status: Int, val body: String) : Exception(
 /**
  * Groq's own free-tier rate-limit message spells out the wait itself —
  * "...Please try again in 15.84s." — and OpenAiException's message already
- * surfaces that sentence via [OpenAiException.describe]. A small buffer is
- * added on top of the parsed value: the provider's own clock and this
- * device's are not perfectly synced, and retrying at the exact instant the
- * limit lifts risks landing on the wrong side of it by a few hundred
- * milliseconds.
- *
- * Real device report: a daily-quota 429 ("...on requests per day (RPD):
- * Limit 14400, Used 14400... Please try again in 4.32s.") names a wait
- * too, exactly like a per-minute burst does — this used to assume it never
- * would, and took that few-second number at face value as the key's whole
- * cooldown, so a genuinely-exhausted-for-the-day key came back out of
- * cooldown within seconds and immediately re-hit the same daily limit,
- * showing the user a nonsensical "frees up in ~0 min." [DAILY_LIMIT_PATTERN]
- * catches the limit types that reset once a day (TPD/RPD, or the literal
- * "per day") and forces the real 24h default for those regardless of
- * whatever short wait Groq's own message happens to quote — that number is
- * about Groq's internal bucket math, not about when the day actually rolls
- * over.
+ * surfaces that sentence via [OpenAiException.describe]. The daily-quota
+ * distinction (a 429 naming TPD/RPD/"per day" gets no retry hint at all,
+ * even if it also quotes a few-second wait — that number is about the
+ * provider's internal bucket math, not when the day actually rolls over)
+ * and the retry hint itself now live in [ai.localstudio.core.errors.AIErrorClassifier],
+ * shared with every other provider's 429 — this just reads its verdict
+ * back out through [AIError.retryAfterMs] rather than re-parsing the
+ * message here.
  */
-private val RETRY_AFTER_PATTERN = Regex("""try again in ([0-9]+(?:\.[0-9]+)?)\s*s""", RegexOption.IGNORE_CASE)
-private val DAILY_LIMIT_PATTERN = Regex("""per day|\(TPD\)|\(RPD\)""", RegexOption.IGNORE_CASE)
-
-private fun retryAfterMs(message: String?): Long? {
-    if (message == null || DAILY_LIMIT_PATTERN.containsMatchIn(message)) return null
-    return RETRY_AFTER_PATTERN.find(message)
-        ?.groupValues?.get(1)?.toDoubleOrNull()
-        ?.let { seconds -> (seconds * 1000).toLong() + 2_000L }
-}
+private fun retryAfterMs(e: OpenAiException): Long? =
+    ai.localstudio.core.errors.AIErrorClassifier.classify(e).retryAfterMs
 
 /**
  * Runs models on an OpenAI-compatible endpoint — Ollama, llama-server, or any
@@ -318,7 +301,7 @@ class OpenAiRuntime(private val config: OpenAiConfig) : ModelRuntime {
                         // point of bundling one at all. When the provider's
                         // own message names a wait, that becomes the cooldown
                         // instead of the default.
-                        val cooldownMs = retryAfterMs(e.message) ?: ApiKeyRotator.DEFAULT_COOLDOWN_MS
+                        val cooldownMs = retryAfterMs(e) ?: ApiKeyRotator.DEFAULT_COOLDOWN_MS
                         rotator.markExhausted(keyEntry.id, cooldownMs)
                         continue
                     }

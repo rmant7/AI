@@ -12,9 +12,9 @@ import java.util.concurrent.ConcurrentHashMap
 private data class GigaChatTokenResponse(val access_token: String)
 
 /** See the doc comment where this is thrown, in [GigaChatTokenProvider.fetchToken]. */
-class GigaChatOAuthException(val status: Int, val body: String) : Exception(
+class GigaChatOAuthException(override val status: Int, override val body: String) : Exception(
     "GigaChat OAuth token request failed (HTTP $status): ${body.take(500)}",
-)
+), ai.localstudio.core.errors.HttpStatusError
 
 /**
  * GigaChat is the one provider this app targets that does not take a static
