@@ -6,8 +6,7 @@ import java.io.File
  * Which CPU-feature build of a native library this device can run. The APK
  * ships three per library (see app/src/main/cpp/CMakeLists.txt):
  * `lib<name>.so` (plain ARMv8.0), `lib<name>_dotprod.so` (ARMv8.2 + dotprod +
- * fp16) and `lib<name>_i8mm.so` (+ int8 matrix multiply) — though [detect]
- * never actually picks that last one; see its own doc comment.
+ * fp16) and `lib<name>_i8mm.so` (+ int8 matrix multiply).
  *
  * Loading a build that uses instructions the CPU lacks isn't an error you can
  * catch — it's SIGILL mid-inference (real device report: a Snapdragon 865
@@ -27,29 +26,7 @@ enum class CpuVariant(val librarySuffix: String) {
     ;
 
     companion object {
-        /**
-         * Pure, for tests: the best variant [cpuinfo]'s `Features` lines
-         * allow — capped at [DOTPROD], never [I8MM], even on a CPU that
-         * supports it.
-         *
-         * Real device report, Pixel 10 Pro (which does have i8mm):
-         * OmniTranslate translating Russian into Hebrew came back as a
-         * garbled mix of Hebrew/Arabic/Chinese/Vietnamese script — not a
-         * crash, wrong output, and every one of those turns had "0 reused"
-         * in its own KV-cache stats, so it wasn't stale cache state either.
-         * The same ARM i8mm 8x8-block Q4_K repack GEMM kernel this file's
-         * own [I8MM] doc comment already names as having SIGILL'd a
-         * different device (Snapdragon 865) is a documented source of real
-         * *correctness* bugs upstream too, not just illegal-instruction
-         * crashes on unsupported hardware — this project has no way to
-         * verify llama.cpp's pinned commit against that history from this
-         * sandbox. Given i8mm has now cost this project one crash and one
-         * wrong-output report on two different real devices, it is not
-         * worth the prompt-processing speedup until upstream's fix (if any)
-         * is confirmed and this pin is bumped past it; dropping straight to
-         * dotprod is the same trade this project already made once before,
-         * just made permanent instead of device-conditional.
-         */
+        /** Pure, for tests: the best variant [cpuinfo]'s `Features` lines allow. */
         fun detect(cpuinfo: String): CpuVariant {
             val perCore = cpuinfo.lineSequence()
                 .filter { it.trimStart().startsWith("Features") && ':' in it }
@@ -60,7 +37,11 @@ enum class CpuVariant(val librarySuffix: String) {
             // armv8.2-a+dotprod+fp16: dot product plus half-precision FP in
             // both the scalar (fphp) and SIMD (asimdhp) units.
             val dotprodFp16 = "asimddp" in common && "fphp" in common && "asimdhp" in common
-            return if (dotprodFp16) DOTPROD else BASELINE
+            return when {
+                dotprodFp16 && "i8mm" in common -> I8MM
+                dotprodFp16 -> DOTPROD
+                else -> BASELINE
+            }
         }
 
         /** This device's best variant; [BASELINE] when /proc/cpuinfo can't be read (or on x86_64, which has no `Features` lines). */
