@@ -22,6 +22,8 @@ import ai.localstudio.app.databinding.ActivityTranslationBinding
 import ai.localstudio.app.databinding.ItemTranslationResultBinding
 import ai.localstudio.app.llama.GenerationKeepAliveService
 import ai.localstudio.app.models.DownloadState
+import ai.localstudio.core.runtime.OperationTimeoutException
+import ai.localstudio.core.runtime.withOperationTimeout
 import ai.localstudio.app.models.MadladLanguage
 import ai.localstudio.app.models.MadladLanguages
 import ai.localstudio.app.models.TranslationModels
@@ -32,7 +34,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 /**
  * Free-text translation, one card per source from
@@ -402,7 +403,11 @@ class TranslationActivity : AppCompatActivity() {
                     async(Dispatchers.IO) {
                         val prompt = buildPrompt(translationSource, source, target, text)
                         val result = runCatching {
-                            withTimeout(GENERATION_TIMEOUT_MS) {
+                            // Budget counts only this source's own work: time
+                            // queued behind AICore/another local model on the
+                            // device-memory gate is excluded (see
+                            // withOperationTimeout), bounded by the deadline.
+                            withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
                                 translationSource.orchestrator.handle(
                                     UserRequest(
                                         // Unique per request and never saved to
@@ -439,7 +444,9 @@ class TranslationActivity : AppCompatActivity() {
                                 if (translationSource.hideOnFailure) {
                                     binding.translationResultsContainer.removeView(cards[index].root)
                                 } else {
-                                    cards[index].resultText.text = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                                    cards[index].resultText.text = if (error is OperationTimeoutException) {
+                                        getString(R.string.chat_compare_timeout_error, error.limitMs / 1000)
+                                    } else if (error is kotlinx.coroutines.TimeoutCancellationException) {
                                         getString(R.string.chat_compare_timeout_error, GENERATION_TIMEOUT_MS / 1000)
                                     } else {
                                         getString(R.string.chat_compare_generic_error, error.message ?: error.toString())
@@ -572,6 +579,9 @@ class TranslationActivity : AppCompatActivity() {
 
     private companion object {
         const val GENERATION_TIMEOUT_MS = 120_000L
+
+        /** Hard upper bound per source, queueing on the device-memory gate included. */
+        const val GENERATION_DEADLINE_MS = 300_000L
 
         // Turn-marker tokens a model's own EOG detection sometimes fails to
         // recognize (see cleanTranslation's own doc comment) — covers every

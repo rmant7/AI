@@ -30,6 +30,8 @@ import ai.localstudio.app.whisper.AudioRecorder
 import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.engine.UserRequest
 import ai.localstudio.core.runtime.ANSWERED_BY_LABEL
+import ai.localstudio.core.runtime.OperationTimeoutException
+import ai.localstudio.core.runtime.withOperationTimeout
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.pipeline.ConversationTurn
 import ai.localstudio.core.pipeline.NodeValue
@@ -504,7 +506,7 @@ class ChatActivity : AppCompatActivity() {
                         // — must not be silent forever. Cancelling here at least
                         // frees the UI to try again instead of the send button
                         // staying disabled with nothing to explain why.
-                        kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
+                        withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
                             orchestrator.handle(
                                 UserRequest(
                                     conversationId = conversationId,
@@ -559,7 +561,9 @@ class ChatActivity : AppCompatActivity() {
                     )
                 }
                 .onFailure { error ->
-                    val body = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                    val body = if (error is OperationTimeoutException) {
+                        getString(R.string.chat_timeout_message, error.limitMs / 1000)
+                    } else if (error is kotlinx.coroutines.TimeoutCancellationException) {
                         getString(R.string.chat_timeout_message, GENERATION_TIMEOUT_MS / 1000)
                     } else {
                         error.message ?: error.toString()
@@ -707,7 +711,10 @@ class ChatActivity : AppCompatActivity() {
                         // FallbackTextRuntime for the sequential fallback path.
                         var failed = false
                         val rendered = try {
-                            val answer = kotlinx.coroutines.withTimeout(GENERATION_TIMEOUT_MS) {
+                            // Queueing on the device-memory gate (behind AICore
+                            // or another local source) is excluded from this
+                            // source's own budget — see withOperationTimeout.
+                            val answer = withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
                                 orchestrator.handle(
                                     UserRequest(
                                         conversationId = conversationId,
@@ -721,6 +728,10 @@ class ChatActivity : AppCompatActivity() {
                                 )
                             }
                             answer.text.ifBlank { getString(R.string.chat_empty_answer) }
+                        } catch (e: OperationTimeoutException) {
+                            failed = true
+                            container.appLog.record("GENERATION_ERROR", "$label: ${e.message}")
+                            withPartial(partial.value, getString(R.string.chat_compare_timeout_error, e.limitMs / 1000))
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                             failed = true
                             container.appLog.record("GENERATION_ERROR", "$label: timeout after ${GENERATION_TIMEOUT_MS}ms")
@@ -1204,6 +1215,9 @@ class ChatActivity : AppCompatActivity() {
         // without leaving the send button disabled for half an hour on an
         // actual hang.
         const val GENERATION_TIMEOUT_MS = 5 * 60 * 1_000L
+
+        /** Hard upper bound, time queued on the device-memory gate included — see withOperationTimeout. */
+        const val GENERATION_DEADLINE_MS = 10 * 60 * 1_000L
 
         // How often a streaming answer's bubble is allowed to re-render —
         // see the renderJob comments in send()/sendCompare(). Fast enough

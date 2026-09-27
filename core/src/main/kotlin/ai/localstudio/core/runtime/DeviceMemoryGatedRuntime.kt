@@ -3,11 +3,11 @@ package ai.localstudio.core.runtime
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * Serializes [inner]'s real memory-heavy work — whatever [TextModelHandle.generate]
@@ -65,9 +65,20 @@ private class GatedTextHandle(
     override val ramBytes: Long get() = inner.ramBytes
 
     override fun generate(request: GenerationRequest): Flow<String> = flow {
-        gate.withLock {
+        // Reported to withOperationTimeout (if one is running) so time spent
+        // queued here doesn't count against the operation's own budget.
+        val clock = currentCoroutineContext()[GateWaitClock]
+        clock?.beginWait()
+        try {
+            gate.lock()
+        } finally {
+            clock?.endWait()
+        }
+        try {
             beforeGenerate()
             emitAll(inner.generate(request))
+        } finally {
+            gate.unlock()
         }
     }
 
