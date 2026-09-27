@@ -229,8 +229,37 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
+    private val aicoreCheckInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    @Volatile
+    private var aicoreLastCheckAt = 0L
+
+    /**
+     * Re-asks AICore whenever one of this app's screens comes to the front,
+     * at most every [AICORE_RECHECK_INTERVAL_MS]. Once status=0 drops Gemini
+     * Nano from routing, nothing else ever asks again — real device report:
+     * AICore disabled at launch, re-enabled while the app kept running, and
+     * Nano still missing from the options 10 minutes later.
+     */
+    private fun watchAicoreOnResume() {
+        val app = context.applicationContext as? android.app.Application ?: return
+        app.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: android.app.Activity) {
+                if (System.currentTimeMillis() - aicoreLastCheckAt >= AICORE_RECHECK_INTERVAL_MS) refreshAicoreStatus()
+            }
+            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) = Unit
+            override fun onActivityStarted(activity: android.app.Activity) = Unit
+            override fun onActivityPaused(activity: android.app.Activity) = Unit
+            override fun onActivityStopped(activity: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) = Unit
+            override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+        })
+    }
+
     /** Asks AICore once, in the background; errors leave the status unknown rather than guessing. */
     fun refreshAicoreStatus() {
+        if (!aicoreCheckInFlight.compareAndSet(false, true)) return
+        aicoreLastCheckAt = System.currentTimeMillis()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             val client = AiCorePromptClient()
             try {
@@ -241,6 +270,7 @@ class AppContainer private constructor(private val context: Context) {
                 appLog.record("AICORE_LOAD", "background status check failed: ${t.javaClass.simpleName}: ${t.message}")
             } finally {
                 runCatching { client.close() }
+                aicoreCheckInFlight.set(false)
             }
         }
     }
@@ -2311,9 +2341,13 @@ class AppContainer private constructor(private val context: Context) {
     init {
         constructionComplete.complete(Unit)
         refreshAicoreStatus()
+        watchAicoreOnResume()
     }
 
     companion object {
+        /** See [watchAicoreOnResume]. An IPC to AICore, cheap, but not worth doing on every screen switch. */
+        private const val AICORE_RECHECK_INTERVAL_MS = 15_000L
+
         private const val CATALOG_ASSET = "catalog.example.json"
 
         // Not a real ceiling, just "large enough that this app's own context

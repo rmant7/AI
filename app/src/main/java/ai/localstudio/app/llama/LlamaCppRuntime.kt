@@ -349,45 +349,55 @@ class LlamaCppRuntime(
         try {
             log("LOCAL_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)")
 
-            // Best-effort, and only if a projector was actually downloaded for
-            // this model (see ModelStore.hasMmproj) — a model with none behaves
-            // exactly as it always did, text-only. Also skipped outright when
-            // there isn't visibly enough free RAM left after the base model's
-            // own load to also hold a vision encoder — attempting it anyway was
-            // observed on a real device to reliably run the whole process out of
-            // memory a turn or two later (Android's OOM killer, not a catchable
-            // Kotlin exception), losing whatever the conversation was doing at
-            // the time. The margin is deliberately generous: the projector's
-            // *file* size is only its weights, and encoding an image needs
-            // activation buffers on top that scale with the same size.
-            val hasVision = binding.mmprojArtifact?.let { mmprojPath ->
-                val mmprojBytes = File(mmprojPath).length()
-                val headroom = availableRamBytes()
-                if (mmprojBytes > 0 && headroom < mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR) {
-                    log(
-                        "LOCAL_LOAD",
-                        "${file.name}: mmproj SKIPPED — only ${headroom / 1_000_000}MB free, " +
-                            "want ~${(mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR / 1_000_000).toLong()}MB for $mmprojPath",
-                    )
-                    false
-                } else {
-                    LlamaBridge.nativeOpMutex.withLock {
-                        runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
-                    }.also { loaded ->
-                        log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} from $mmprojPath")
+            // Not loaded here: the projector (~1 GB for Gemma's) is only
+            // needed for a turn that actually carries an image, and loading
+            // it eagerly cost that much RAM on every text-only chat (real
+            // device log: gemma-4-e4b-it-q4, "mmproj loaded" on a plain text
+            // turn). [LlamaTextModel.generate] calls this the first time an
+            // image arrives, under the same nativeOpMutex hold as that turn.
+            //
+            // Best-effort, and only if a projector was actually downloaded
+            // for this model (see ModelStore.hasMmproj) — a model with none
+            // behaves exactly as it always did, text-only. Also skipped
+            // outright when there isn't visibly enough free RAM to also hold
+            // a vision encoder — attempting it anyway was observed on a real
+            // device to reliably run the whole process out of memory a turn
+            // or two later (Android's OOM killer, not a catchable Kotlin
+            // exception). The margin is deliberately generous: the
+            // projector's *file* size is only its weights, and encoding an
+            // image needs activation buffers on top that scale with the same
+            // size. Not holding nativeOpMutex itself — the caller already does.
+            val visionLoader: (() -> Boolean)? = binding.mmprojArtifact
+                ?.takeIf { File(it).length() > 0 }
+                ?.let { mmprojPath ->
+                    {
+                        val mmprojBytes = File(mmprojPath).length()
+                        val headroom = availableRamBytes()
+                        if (headroom < mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR) {
+                            log(
+                                "LOCAL_LOAD",
+                                "${file.name}: mmproj SKIPPED — only ${headroom / 1_000_000}MB free, " +
+                                    "want ~${(mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR / 1_000_000).toLong()}MB for $mmprojPath",
+                            )
+                            false
+                        } else {
+                            runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
+                                .also { loaded ->
+                                    log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} on first image from $mmprojPath")
+                                }
+                        }
                     }
                 }
-            } ?: false
 
             // Read once here rather than on every generate() call — it's a read
             // of static model metadata (llama_model_has_encoder), unchanging for
-            // the life of this handle, same reasoning as caching hasVision above.
+            // the life of this handle.
             val hasEncoder = LlamaBridge.nativeOpMutex.withLock {
                 runCatching { bridge.nativeHasEncoder(handle) }.getOrDefault(false)
             }
             if (hasEncoder) log("LOCAL_LOAD", "${file.name}: encoder-decoder model — routing generate() through nativeGenerateT5")
 
-            return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, hasVision, hasEncoder, log)
+            return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, visionLoader, hasEncoder, log)
         } catch (t: Throwable) {
             log("LOCAL_LOAD", "${file.name}: abandoned after load (${t.javaClass.simpleName}) — freeing native model")
             trackPendingNativeWork(releaseInBackground(bridge, handle, file.name))
@@ -442,8 +452,11 @@ private class LlamaTextModel(
     override val ramBytes: Long,
     private val bridge: LlamaBridge,
     private val handle: Long,
-    /** Whether [LlamaBridge.nativeLoadMmproj] succeeded for this handle — see [generate]. */
-    private val hasVision: Boolean,
+    /**
+     * Loads this model's projector on the first image turn; null when it has
+     * none on disk. Called with nativeOpMutex already held — see [generate].
+     */
+    private val visionLoader: (() -> Boolean)?,
     /** Whether this handle is an encoder-decoder (T5-family) model — see [generate]. */
     private val hasEncoder: Boolean,
     private val log: (tag: String, message: String) -> Unit,
@@ -457,6 +470,10 @@ private class LlamaTextModel(
     // call is using out from under it.
     private val activeWorker = AtomicReference<Job?>(null)
 
+    /** Set once [visionLoader] succeeds; a skipped or failed attempt is retried on the next image turn. */
+    @Volatile
+    private var visionLoaded = false
+
     /** So the chat-template line lands in the log once per model, not once per turn. */
     private val templateLogged = AtomicBoolean(false)
 
@@ -465,7 +482,7 @@ private class LlamaTextModel(
         var tokenCount = 0
         var firstTokenLogged = false
         val completed = AtomicBoolean(false)
-        val image = request.images.firstOrNull().takeIf { hasVision }
+        val image = request.images.firstOrNull().takeIf { visionLoader != null }
         log(
             "LOCAL_GENERATE",
             "$modelId: starting (prompt=${request.prompt.length} chars, maxTokens=${request.maxTokens}" +
@@ -512,6 +529,9 @@ private class LlamaTextModel(
             // user-copyable log everything else in this app does.
             val produced = try {
                 LlamaBridge.nativeOpMutex.withLock {
+                    if (image != null && !visionLoaded) {
+                        visionLoaded = runCatching { visionLoader?.invoke() ?: false }.getOrDefault(false)
+                    }
                     if (hasEncoder) {
                     // T5-family (MADLAD-400): request.prompt is already the
                     // model's own expected input (`<2xx> source text`, built
@@ -528,7 +548,7 @@ private class LlamaTextModel(
                         repeatPenalty = request.repeatPenalty.toFloat(),
                         callback = sink,
                     )
-                } else if (image != null) {
+                } else if (image != null && visionLoaded) {
                     // ImageRef.uri is always a "data:<mime>;base64,<payload>" string
                     // here, never a content:// or file path — ChatActivity.attachImage()
                     // builds it that way specifically because core/openai are plain JVM

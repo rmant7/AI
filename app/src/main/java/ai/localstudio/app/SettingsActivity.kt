@@ -18,6 +18,9 @@ import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivitySettingsBinding
 import ai.localstudio.app.whisper.WhisperDownloadState
 import ai.localstudio.app.whisper.WhisperModels
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -85,6 +88,16 @@ class SettingsActivity : AppCompatActivity() {
         setupDownloadPolicy()
 
         lifecycleScope.launch { container.whisperDownloads.state.collect { renderWhisper() } }
+        // AICore's status can change while this screen is open (re-enabled
+        // in system settings, re-checked on resume) — Gemini Nano's row
+        // must follow it rather than stay greyed out until the next visit.
+        lifecycleScope.launch {
+            container.aicoreStatus
+                .map { container.aicoreUnsupported }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { buildProviderCheckboxes() }
+        }
         renderWhisper()
     }
 
