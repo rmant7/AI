@@ -152,6 +152,7 @@ class ModelsActivity : AppCompatActivity() {
         lifecycleScope.launch { container.whisperDownloads.state.collect { render() } }
         lifecycleScope.launch { container.voskDownloads.state.collect { render() } }
         lifecycleScope.launch { container.experimentalEmbeddingDownloads.state.collect { render() } }
+        lifecycleScope.launch { container.aicoreStatus.collect { render() } }
         render()
     }
 
@@ -598,16 +599,24 @@ class ModelsActivity : AppCompatActivity() {
      * AICore as a chat candidate.
      */
     private fun aicoreTranslationRow(): Row.Model {
-        val selected = container.settings.translationModel == CloudProviders.AICORE.id
+        // Only once AICore itself has said so — unknown still offers it.
+        val unsupported = container.aicoreUnsupported
+        val selected = container.settings.translationModel == CloudProviders.AICORE.id && !unsupported
         return Row.Model(
             title = getString(CloudProviders.AICORE.titleRes),
-            subtitle = getString(R.string.models_translation_aicore_subtitle),
+            subtitle = getString(if (unsupported) R.string.models_aicore_unavailable else R.string.models_translation_aicore_subtitle),
             selected = selected,
             status = null,
             progress = null,
             indeterminate = false,
-            primaryLabel = getString(if (selected) R.string.model_installed else R.string.model_use),
-            primaryEnabled = !selected,
+            primaryLabel = getString(
+                when {
+                    unsupported -> R.string.model_unavailable
+                    selected -> R.string.model_installed
+                    else -> R.string.model_use
+                },
+            ),
+            primaryEnabled = !selected && !unsupported,
             secondaryLabel = null,
             onPrimary = { useForTranslation(CloudProviders.AICORE.id, getString(CloudProviders.AICORE.titleRes)) },
             onSecondary = {},

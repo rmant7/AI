@@ -3,6 +3,7 @@ package ai.localstudio.app
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
+import com.google.mlkit.genai.common.FeatureStatus
 import ai.localstudio.commercialmemory.AppMemory
 import ai.localstudio.commercialmemory.CommercialContextSelector
 import ai.localstudio.commercialmemory.ExperimentLogger
@@ -11,6 +12,7 @@ import ai.localstudio.commercialmemory.ExperimentRecord
 import ai.localstudio.commercialmemory.JsonlExperimentLogger
 import ai.localstudio.commercialmemory.MemoryExperimentRunner
 import ai.localstudio.commercialmemory.RankingWeights
+import ai.localstudio.app.aicore.AiCorePromptClient
 import ai.localstudio.app.aicore.AiCoreRuntime
 import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.context.ContextEngine
@@ -102,11 +104,14 @@ import ai.localstudio.openai.GigaChatTokenProvider
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiException
 import ai.localstudio.openai.OpenAiRuntime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -195,6 +200,50 @@ class AppContainer private constructor(private val context: Context) {
 
     /** See [HeavyOperations] — chat/translation generation and voice transcription wrap themselves in this. */
     val heavyOperations = HeavyOperations()
+
+    /**
+     * The last AICore [FeatureStatus] seen this run — null until the first
+     * check (started from this class's last init block) finishes. Updated
+     * again every time [AiCoreRuntime] checks it before a real generation.
+     */
+    private val _aicoreStatus = MutableStateFlow<Int?>(null)
+    val aicoreStatus: StateFlow<Int?> = _aicoreStatus
+
+    /**
+     * True only when AICore itself answered that this device can't run
+     * Gemini Nano — not "not downloaded yet", not "unknown". Real device
+     * report: a Samsung Galaxy S20 FE (status=0) still offered Gemini Nano
+     * on Models → Translation, with a working "Use" button — and picking it
+     * silently removed the local translation source, leaving only cloud
+     * answers.
+     */
+    val aicoreUnsupported: Boolean get() = _aicoreStatus.value == FeatureStatus.UNAVAILABLE
+
+    private fun recordAicoreStatus(status: Int) {
+        val previous = _aicoreStatus.value
+        _aicoreStatus.value = status
+        if (previous != status) appLog.record("AICORE_LOAD", "device status: $status")
+        if (status == FeatureStatus.UNAVAILABLE && settings.translationModel == CloudProviders.AICORE.id) {
+            settings.translationModel = ""
+            appLog.record("MODELS", "Gemini Nano is not available on this device — translation model reset to auto")
+        }
+    }
+
+    /** Asks AICore once, in the background; errors leave the status unknown rather than guessing. */
+    fun refreshAicoreStatus() {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val client = AiCorePromptClient()
+            try {
+                recordAicoreStatus(client.status())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                appLog.record("AICORE_LOAD", "background status check failed: ${t.javaClass.simpleName}: ${t.message}")
+            } finally {
+                runCatching { client.close() }
+            }
+        }
+    }
 
     /**
      * Completed by the very last init block in this class. [init]'s
@@ -1604,7 +1653,9 @@ class AppContainer private constructor(private val context: Context) {
      * that id directly) and when nothing local is chosen or installed.
      */
     private fun translationLocalCandidate(): FallbackCandidate? {
-        val chosenId = settings.translationModel
+        // An AICore pick on a device that can't run it means "auto", not
+        // "no local model" — see aicoreUnsupported.
+        val chosenId = settings.translationModel.takeUnless { it == CloudProviders.AICORE.id && aicoreUnsupported }.orEmpty()
         if (chosenId == CloudProviders.AICORE.id) return null
         val registry = localRegistry()
         val selected = (if (chosenId.isNotBlank()) effectiveLocalSelection(registry, chosenId) else null)
@@ -1649,8 +1700,13 @@ class AppContainer private constructor(private val context: Context) {
         // translationLocalCandidate's own doc comment) — conflating the two
         // here silently dropped the one source the user most explicitly
         // asked for.
-        val providerIds = settings.enabledProviderIds + CloudProviders.AICORE.id + CloudProviders.LOCAL.id
-        return CloudProviders.ALL.filter { it.id in providerIds }.mapNotNull { provider ->
+        // AICore is skipped outright once it has said this device can't run
+        // it — hideOnFailure would hide the card anyway, but not the
+        // pointless status round-trip on every single translation.
+        val providerIds = settings.enabledProviderIds + CloudProviders.LOCAL.id +
+            (if (aicoreUnsupported) emptySet() else setOf(CloudProviders.AICORE.id))
+        val effectiveProviderIds = if (aicoreUnsupported) providerIds - CloudProviders.AICORE.id else providerIds
+        return CloudProviders.ALL.filter { it.id in effectiveProviderIds }.mapNotNull { provider ->
             val candidates = when (provider.id) {
                 CloudProviders.LOCAL.id -> listOfNotNull(translationLocalCandidate())
                 CloudProviders.AICORE.id -> listOf(aicoreCandidate())
@@ -1854,7 +1910,7 @@ class AppContainer private constructor(private val context: Context) {
         return FallbackCandidate(
             label = context.getString(CloudProviders.AICORE.titleRes),
             runtime = DeviceMemoryGatedRuntime(
-                inner = AiCoreRuntime(log = appLog::record),
+                inner = AiCoreRuntime(log = appLog::record, onStatus = ::recordAicoreStatus),
                 gate = deviceMemoryGate,
                 beforeGenerate = { makeRoomForAicore() },
             ),
@@ -2246,6 +2302,7 @@ class AppContainer private constructor(private val context: Context) {
     // Must stay the last initializer in this class — see constructionComplete.
     init {
         constructionComplete.complete(Unit)
+        refreshAicoreStatus()
     }
 
     companion object {

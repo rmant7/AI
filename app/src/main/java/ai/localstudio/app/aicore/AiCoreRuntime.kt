@@ -40,6 +40,8 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class AiCoreRuntime(
     private val log: (tag: String, message: String) -> Unit = { _, _ -> },
+    /** Every status AICore reports, so callers can remember whether this device supports it at all. */
+    private val onStatus: (Int) -> Unit = {},
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.AICORE
@@ -88,6 +90,7 @@ class AiCoreRuntime(
         // (rather than throwing out of the function) once client has been
         // assigned and its own status() call has already succeeded.
         val readyClient = client!!
+        onStatus(status)
         if (status != FeatureStatus.AVAILABLE) {
             readyClient.close()
             // This exact message is what a real user sees, one of three ways

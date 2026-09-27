@@ -144,9 +144,17 @@ class SettingsActivity : AppCompatActivity() {
         binding.providerCheckboxList.removeAllViews()
         providerCheckboxes.clear()
         for (provider in CloudProviders.ALL) {
+            // Gemini Nano on a device where AICore itself said it can't run:
+            // shown, but not selectable — see AppContainer.aicoreUnsupported.
+            val unavailable = provider.id == CloudProviders.AICORE.id && container.aicoreUnsupported
             val box = CheckBox(this).apply {
-                text = getString(provider.titleRes)
-                isChecked = provider.id in pendingEnabled
+                text = if (unavailable) {
+                    getString(provider.titleRes) + " — " + getString(R.string.models_aicore_unavailable)
+                } else {
+                    getString(provider.titleRes)
+                }
+                isEnabled = !unavailable
+                isChecked = provider.id in pendingEnabled && !unavailable
                 setOnCheckedChangeListener { _, checked ->
                     if (checked) pendingEnabled += provider.id else pendingEnabled -= provider.id
                     settings.enabledProviderIds = pendingEnabled
