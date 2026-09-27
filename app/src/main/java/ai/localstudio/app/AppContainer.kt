@@ -2102,15 +2102,18 @@ class AppContainer private constructor(private val context: Context) {
         val residentBytes = sharedRuntimeManager.residentBytes
         val freeBytes = currentFreeRamBytes(context)
         val mb = { bytes: Long -> bytes / (1024 * 1024) }
-        when {
-            residentBytes <= 0L ->
+        // The three-way branch itself is ai.localstudio.core.resources.decideAicoreRoom
+        // — a pure function, tested without a real RuntimeManager or free-RAM
+        // reading — this is only the logging/eviction each outcome performs.
+        when (ai.localstudio.core.resources.decideAicoreRoom(freeBytes, residentBytes, AICORE_RAM_RESERVE_BYTES)) {
+            ai.localstudio.core.resources.AicoreRoomDecision.NO_LOCAL_MODEL ->
                 appLog.record("AICORE_RAM", "free ${mb(freeBytes)} MB, no local model resident")
-            freeBytes >= AICORE_RAM_RESERVE_BYTES ->
+            ai.localstudio.core.resources.AicoreRoomDecision.SUFFICIENT_HEADROOM ->
                 appLog.record(
                     "AICORE_RAM",
                     "free ${mb(freeBytes)} MB >= reserve ${mb(AICORE_RAM_RESERVE_BYTES)} MB — keeping local model(s) resident (${mb(residentBytes)} MB)",
                 )
-            else -> {
+            ai.localstudio.core.resources.AicoreRoomDecision.EVICT_IDLE -> {
                 appLog.record(
                     "AICORE_RAM",
                     "free ${mb(freeBytes)} MB < reserve ${mb(AICORE_RAM_RESERVE_BYTES)} MB — evicting idle local model(s) (${mb(residentBytes)} MB) first",
