@@ -95,7 +95,14 @@ class ApiKeysActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val provider = CloudProviders.byId(providerId)
             val result = withContext(Dispatchers.IO) {
-                ApiKeyValidator.validate(provider.baseUrl, entry.key)
+                // Anthropic needs its own headers (x-api-key/anthropic-version,
+                // not a bearer token) — see ApiKeyValidator.validateAnthropic's
+                // own doc comment.
+                if (provider.id == "anthropic") {
+                    ApiKeyValidator.validateAnthropic(provider.baseUrl, entry.key)
+                } else {
+                    ApiKeyValidator.validate(provider.baseUrl, entry.key)
+                }
             }
             validation[entry.id] = ValidationState.Done(result)
             render()

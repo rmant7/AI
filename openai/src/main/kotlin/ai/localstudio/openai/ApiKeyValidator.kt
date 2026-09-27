@@ -42,6 +42,51 @@ object ApiKeyValidator {
     }
 
     /**
+     * Same idea as [validate], for Anthropic's own Messages API — its
+     * `GET /models` needs `x-api-key`/`anthropic-version` headers, not a
+     * bearer token, so it can't go through [HttpTransport]/[OpenAiException]
+     * the way every other provider's validation does (see [AnthropicRuntime]'s
+     * own doc comment on why it has its own small HTTP client too).
+     */
+    fun validateAnthropic(
+        baseUrl: String,
+        apiKey: String,
+        apiVersion: String = "2023-06-01",
+        timeoutMs: Int = 10_000,
+    ): ApiKeyValidationResult = try {
+        anthropicGet("${baseUrl.trimEnd('/')}/models", apiKey, apiVersion, timeoutMs)
+        ApiKeyValidationResult.Valid
+    } catch (e: AnthropicException) {
+        when (e.status) {
+            401, 403 -> ApiKeyValidationResult.Invalid(e.message ?: "unauthorized")
+            429 -> ApiKeyValidationResult.RateLimited
+            else -> ApiKeyValidationResult.Unknown(e.message ?: "HTTP ${e.status}")
+        }
+    } catch (e: Exception) {
+        ApiKeyValidationResult.Unknown(e.message ?: e.toString())
+    }
+
+    /** A plain authenticated GET against Anthropic's API — throws [AnthropicException] on a non-2xx status. */
+    private fun anthropicGet(url: String, apiKey: String, apiVersion: String, timeoutMs: Int): String {
+        val connection = (java.net.URI.create(url).toURL().openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
+            useCaches = false
+            setRequestProperty("anthropic-version", apiVersion)
+            setRequestProperty("x-api-key", apiKey)
+        }
+        val status = connection.responseCode
+        return if (status in 200..299) {
+            connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }.also { connection.disconnect() }
+        } else {
+            val error = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            connection.disconnect()
+            throw AnthropicException(status, error)
+        }
+    }
+
+    /**
      * The same `GET /models` call [validate] already makes, but keeping the
      * body it discards — parsed into provider-agnostic
      * [ai.localstudio.core.provider.DiscoveredModel]s

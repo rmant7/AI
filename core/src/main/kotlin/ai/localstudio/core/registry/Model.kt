@@ -33,6 +33,10 @@ enum class RuntimeKind(val id: String) {
     @SerialName("remote_openai")
     REMOTE_OPENAI("remote_openai"),
 
+    /** Anthropic's own Messages API (`/v1/messages`) — a different wire protocol from [REMOTE_OPENAI], not a config variant of it. */
+    @SerialName("remote_anthropic")
+    REMOTE_ANTHROPIC("remote_anthropic"),
+
     /**
      * Gemini Nano via Google's AICore system service (ML Kit's GenAI Prompt
      * API) — unlike [LLAMA_CPP], inference runs out-of-process against

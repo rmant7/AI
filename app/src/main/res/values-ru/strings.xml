@@ -361,6 +361,10 @@
     <string name="provider_keyhint_xai">Ключ: console.x.ai. Бесплатных моделей нет — при регистрации дают $25 кредита, дальше платно.</string>
     <string name="provider_title_openrouter">OpenRouter</string>
     <string name="provider_keyhint_openrouter">Ключ: openrouter.ai → Keys. Модели с суффиксом :free бесплатны, но список часто меняется.</string>
+    <string name="provider_title_openai">OpenAI</string>
+    <string name="provider_keyhint_openai">Ключ: platform.openai.com → API keys. Бесплатного тарифа нет — оплата за токены.</string>
+    <string name="provider_title_anthropic">Anthropic (Claude)</string>
+    <string name="provider_keyhint_anthropic">Ключ: console.anthropic.com → API keys. Бесплатного тарифа нет — оплата за токены.</string>
     <string name="provider_title_custom">Свой сервер (Ollama, llama-server)</string>
     <string name="provider_keyhint_custom">Адрес OpenAI-совместимого сервера в вашей сети.</string>
 

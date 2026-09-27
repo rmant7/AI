@@ -2183,14 +2183,30 @@ class AppContainer private constructor(private val context: Context) {
     private fun cloudCandidates(provider: CloudProvider): List<FallbackCandidate> {
         val endpoint = if (provider.editableUrl) settings.customEndpoint else provider.baseUrl
         if (endpoint.isBlank()) return emptyList()
-        val runtime = OpenAiRuntime(
-            OpenAiConfig(
-                baseUrl = endpoint,
-                apiKey = settings.apiKeyFor(provider.id).ifBlank { null },
-                keyRotator = apiKeyRotator(provider.id),
-                transformKey = if (provider.id == "gigachat") gigaChatTokenProvider::token else null,
-            ),
-        )
+        // Anthropic speaks a genuinely different wire protocol (its own
+        // Messages API), not an OpenAI-compatible one — see AnthropicRuntime's
+        // own doc comment for why it isn't just another OpenAiConfig, the
+        // way GigaChat's differing auth is. Every other provider here still
+        // goes through the shared OpenAiRuntime.
+        val runtimeKind = if (provider.id == "anthropic") RuntimeKind.REMOTE_ANTHROPIC else RuntimeKind.REMOTE_OPENAI
+        val runtime: ModelRuntime = if (provider.id == "anthropic") {
+            ai.localstudio.openai.AnthropicRuntime(
+                ai.localstudio.openai.AnthropicConfig(
+                    baseUrl = endpoint,
+                    apiKey = settings.apiKeyFor(provider.id).ifBlank { null },
+                    keyRotator = apiKeyRotator(provider.id),
+                ),
+            )
+        } else {
+            OpenAiRuntime(
+                OpenAiConfig(
+                    baseUrl = endpoint,
+                    apiKey = settings.apiKeyFor(provider.id).ifBlank { null },
+                    keyRotator = apiKeyRotator(provider.id),
+                    transformKey = if (provider.id == "gigachat") gigaChatTokenProvider::token else null,
+                ),
+            )
+        }
         val primaryModel = settings.chatModelFor(provider.id)
         val modelNames = (listOf(primaryModel) + provider.freeModels.filterNot { it == primaryModel })
             .filterNot { modelCooldowns.isOnCooldown(provider.id, it) }
@@ -2206,7 +2222,7 @@ class AppContainer private constructor(private val context: Context) {
         // expected to work against the exact same models.
         val requestTooLargeForProvider = java.util.concurrent.atomic.AtomicBoolean(false)
         return modelNames.map { modelName ->
-            val model = servedModel(modelName, RuntimeKind.REMOTE_OPENAI, Capability.TEXT_GENERATION, Capability.REASONING)
+            val model = servedModel(modelName, runtimeKind, Capability.TEXT_GENERATION, Capability.REASONING)
             val providerTitle = context.getString(provider.titleRes)
             FallbackCandidate(
                 // Always the specific model, even for the primary one: the

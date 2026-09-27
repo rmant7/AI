@@ -240,6 +240,42 @@ object CloudProviders {
                 "qwen/qwen-2.5-7b-instruct:free",
             ),
         ),
+        // Model names here are a best-effort snapshot (web search only —
+        // OpenAI's own docs site is unreachable from this app's build/dev
+        // environment, same limitation GigaChat's own entry below notes),
+        // not confirmed against a live account. The model field stays
+        // editable, same as every other provider here, for exactly this
+        // kind of drift — OpenAI's own catalog moves at least as fast as
+        // Gemini's.
+        CloudProvider(
+            id = "openai",
+            titleRes = R.string.provider_title_openai,
+            baseUrl = "https://api.openai.com/v1",
+            defaultModel = "gpt-6-astra",
+            keyHintRes = R.string.provider_keyhint_openai,
+            freeModels = listOf(
+                "gpt-6-astra",
+                "gpt-6-sol",
+                "gpt-6-luna",
+            ),
+            visionCapable = true,
+        ),
+        // Anthropic's own Messages API, not OpenAI-compatible — see
+        // AppContainer.cloudCandidates' own comment on why this is the one
+        // provider here that doesn't go through OpenAiRuntime.
+        CloudProvider(
+            id = "anthropic",
+            titleRes = R.string.provider_title_anthropic,
+            baseUrl = "https://api.anthropic.com/v1",
+            defaultModel = "claude-opus-5",
+            keyHintRes = R.string.provider_keyhint_anthropic,
+            freeModels = listOf(
+                "claude-opus-5",
+                "claude-sonnet-5",
+                "claude-haiku-4-5",
+            ),
+            visionCapable = true,
+        ),
         CloudProvider(
             id = "custom",
             titleRes = R.string.provider_title_custom,

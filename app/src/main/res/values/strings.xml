@@ -359,6 +359,10 @@
     <string name="provider_keyhint_xai">Key: console.x.ai. No free models — sign-up grants $25 of credit, then it\'s paid.</string>
     <string name="provider_title_openrouter">OpenRouter</string>
     <string name="provider_keyhint_openrouter">Key: openrouter.ai → Keys. Models with a :free suffix are free, but the list changes often.</string>
+    <string name="provider_title_openai">OpenAI</string>
+    <string name="provider_keyhint_openai">Key: platform.openai.com → API keys. No free tier — billed per token.</string>
+    <string name="provider_title_anthropic">Anthropic (Claude)</string>
+    <string name="provider_keyhint_anthropic">Key: console.anthropic.com → API keys. No free tier — billed per token.</string>
     <string name="provider_title_custom">Custom server (Ollama, llama-server)</string>
     <string name="provider_keyhint_custom">Address of an OpenAI-compatible server on your network.</string>
 
