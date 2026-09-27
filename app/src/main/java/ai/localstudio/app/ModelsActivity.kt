@@ -318,8 +318,25 @@ class ModelsActivity : AppCompatActivity() {
      * [DownloadState.Failed] row.
      */
     private fun removeCustomSeed(seed: LocalModelSeed) {
+        // Selection first, list second: nothing — this screen's next render,
+        // or a translation/chat turn racing it — may ever see a selection
+        // pointing at a model id that no longer exists. A dangling one
+        // doesn't fail loudly: effectiveLocalSelection just finds nothing
+        // installed under it and the turn silently falls through to
+        // whichever candidate comes next, which reads as "the answer came
+        // from a different model than the one I picked". Blank means "auto"
+        // for both settings, same as a fresh install.
+        val settings = container.settings
+        if (settings.translationModel == seed.id) {
+            settings.translationModel = ""
+            container.appLog.record("MODELS", "${seed.id}: removed while selected for translation — selection reset to auto")
+        }
+        if (settings.chatModelFor(CloudProviders.LOCAL.id) == seed.id) {
+            settings.setChatModelFor(CloudProviders.LOCAL.id, "")
+            container.appLog.record("MODELS", "${seed.id}: removed while selected for chat — selection reset to default")
+        }
         container.downloads.delete(seed)
-        container.settings.customModelRepoIds -= seed.repoIds.first()
+        settings.customModelRepoIds -= seed.repoIds.first()
         render()
     }
 

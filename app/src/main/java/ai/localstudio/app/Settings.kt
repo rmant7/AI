@@ -69,6 +69,11 @@ class Settings(context: Context) {
             ?.takeIf { it.isNotBlank() }
             ?: CloudProviders.byId(id).defaultModel
 
+    /** [chatModel]'s setter for a specific provider; blank resets it to [CloudProviders.byId]'s default. */
+    fun setChatModelFor(id: String, value: String) {
+        prefs.edit().putString("$KEY_CHAT_MODEL:$id", value.trim()).apply()
+    }
+
     fun apiKeyFor(id: String): String = prefs.getString("$KEY_API_KEY:$id", "").orEmpty().trim()
 
     var speechModel: String
