@@ -506,7 +506,7 @@ class ChatActivity : AppCompatActivity() {
                         // — must not be silent forever. Cancelling here at least
                         // frees the UI to try again instead of the send button
                         // staying disabled with nothing to explain why.
-                        withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
+                        container.heavyOperations.track { withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
                             orchestrator.handle(
                                 UserRequest(
                                     conversationId = conversationId,
@@ -518,7 +518,7 @@ class ChatActivity : AppCompatActivity() {
                                 ),
                                 onPartialText = { partial.value = it },
                             )
-                        }
+                        } }
                     }
                 }
             } finally {
@@ -714,7 +714,7 @@ class ChatActivity : AppCompatActivity() {
                             // Queueing on the device-memory gate (behind AICore
                             // or another local source) is excluded from this
                             // source's own budget — see withOperationTimeout.
-                            val answer = withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
+                            val answer = container.heavyOperations.track { withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
                                 orchestrator.handle(
                                     UserRequest(
                                         conversationId = conversationId,
@@ -726,7 +726,7 @@ class ChatActivity : AppCompatActivity() {
                                     ),
                                     onPartialText = { partial.value = it },
                                 )
-                            }
+                            } }
                             answer.text.ifBlank { getString(R.string.chat_empty_answer) }
                         } catch (e: OperationTimeoutException) {
                             failed = true
@@ -1081,7 +1081,7 @@ class ChatActivity : AppCompatActivity() {
             try {
                 binding.statusText.text = getString(R.string.chat_transcribing)
                 val result = withContext(Dispatchers.Default) {
-                    runCatching { container.whisperEngine.transcribe(seed, audio, micLanguageHint) }
+                    runCatching { container.heavyOperations.track { container.whisperEngine.transcribe(seed, audio, micLanguageHint) } }
                 }
                 // Freed immediately after this one transcription, not kept
                 // warm for next time: the very next thing that happens is
@@ -1145,7 +1145,9 @@ class ChatActivity : AppCompatActivity() {
                     val snapshot = recorder.snapshot()
                     if (snapshot.isNotEmpty()) {
                         val partial = runCatching {
-                            container.whisperPreviewEngine.transcribe(previewSeed, snapshot, micLanguageHint)
+                            container.heavyOperations.track {
+                                container.whisperPreviewEngine.transcribe(previewSeed, snapshot, micLanguageHint)
+                            }
                         }.getOrNull()
                         if (!partial.isNullOrBlank()) setInputText(partial)
                     }

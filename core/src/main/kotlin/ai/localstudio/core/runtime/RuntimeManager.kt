@@ -82,6 +82,16 @@ class RuntimeManager(
     private val mutex = Mutex()
     private val resident = LinkedHashMap<String, Entry>()
 
+    /** Sum of every entry's refCount, readable without [mutex] — see [hasModelInUse]. */
+    private val activeRefs = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Whether any model is acquired right now (loading, generating). Lock-free,
+     * so a background task can check it cheaply before starting work of its
+     * own that would compete for the same memory.
+     */
+    val hasModelInUse: Boolean get() = activeRefs.get() > 0
+
     val residentBytes: Long
         get() = resident.values.sumOf { it.loaded.ramBytes }
 
@@ -126,6 +136,7 @@ class RuntimeManager(
         resident[model.id]?.let { entry ->
             if (entry.variant == variant || entry.refCount > 0) {
                 entry.refCount++
+                activeRefs.incrementAndGet()
                 entry.lastUsedAt = clock()
                 return entry.loaded
             }
@@ -157,12 +168,16 @@ class RuntimeManager(
 
         val loaded = chosen.load(model, binding)
         resident[model.id] = Entry(loaded, binding.runtime, variant, refCount = 1, lastUsedAt = clock())
+        activeRefs.incrementAndGet()
         return loaded
     }
 
     suspend fun release(modelId: String) = mutex.withLock {
         val entry = resident[modelId] ?: return@withLock
-        if (entry.refCount > 0) entry.refCount--
+        if (entry.refCount > 0) {
+            entry.refCount--
+            activeRefs.decrementAndGet()
+        }
         entry.lastUsedAt = clock()
     }
 
@@ -192,6 +207,7 @@ class RuntimeManager(
 
     private fun unload(modelId: String) {
         resident.remove(modelId)?.let { entry ->
+            activeRefs.addAndGet(-entry.refCount)
             log("$modelId: evicted (${entry.loaded.ramBytes / MB}MB)")
             entry.loaded.close()
         }

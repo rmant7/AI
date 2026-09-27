@@ -273,4 +273,21 @@ class RuntimeManagerTest {
         manager.withModel(madlad, madlad.bindings.first()) { }
         assertEquals(listOf("madlad"), runtime.loads)
     }
+
+    @Test
+    fun `hasModelInUse tracks acquisitions and releases`() = runBlocking {
+        val manager = manager(6 * GB)
+        val llm = model("llm", bindings = listOf(binding(ramBytes = 2 * GB)))
+
+        assertEquals(false, manager.hasModelInUse)
+        manager.withModel(llm, llm.bindings.first()) {
+            assertEquals(true, manager.hasModelInUse)
+        }
+        assertEquals(false, manager.hasModelInUse)
+
+        manager.acquire(llm, llm.bindings.first())
+        assertEquals(true, manager.hasModelInUse)
+        manager.unloadAll()
+        assertEquals(false, manager.hasModelInUse)
+    }
 }

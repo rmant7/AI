@@ -47,6 +47,7 @@ import ai.localstudio.app.attach.DocumentStore
 import ai.localstudio.app.benchmark.BenchmarkOrchestrator
 import ai.localstudio.app.benchmark.BenchmarkReportStore
 import ai.localstudio.app.benchmark.BenchmarkService
+import ai.localstudio.app.benchmark.BenchmarkUiState
 import ai.localstudio.core.benchmark.BenchmarkRunner
 import ai.localstudio.core.benchmark.TranscriptionEngine
 import ai.localstudio.app.keys.BundledApiKeyStore
@@ -101,6 +102,7 @@ import ai.localstudio.openai.GigaChatTokenProvider
 import ai.localstudio.openai.OpenAiConfig
 import ai.localstudio.openai.OpenAiException
 import ai.localstudio.openai.OpenAiRuntime
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -190,6 +192,19 @@ class AppContainer private constructor(private val context: Context) {
      * actually generating at a time.
      */
     private val deviceMemoryGate = Mutex()
+
+    /** See [HeavyOperations] — chat/translation generation and voice transcription wrap themselves in this. */
+    val heavyOperations = HeavyOperations()
+
+    /**
+     * Completed by the very last init block in this class. [init]'s
+     * background task starts semantic-memory work while construction is
+     * still running, and [embedderBlockedBy] reads properties declared far
+     * below it (fileTranscriptionRunner, benchmarkOrchestrator) — read too
+     * early, those are still null on the JVM. Everything that consults
+     * [embedderBlockedBy] awaits this first.
+     */
+    private val constructionComplete = CompletableDeferred<Unit>()
 
     /**
      * Fronts [memory]'s semantic half. Constructing this is cheap and
@@ -605,7 +620,15 @@ class AppContainer private constructor(private val context: Context) {
                         // 2GB+ free ran fine, everything under that showed
                         // real symptoms (slow loads, decode failures).
                         val freeRamBytes = currentAvailableRamBytes(context)
-                        if (freeRamBytes >= SEMANTIC_BACKFILL_MIN_FREE_RAM_BYTES) {
+                        constructionComplete.await()
+                        val blockedBy = embedderBlockedBy()
+                        if (blockedBy != null) {
+                            // Checked before the RAM reading, not instead of
+                            // it: even an already-loaded E5 embeds under the
+                            // shared nativeOpMutex, stalling a local
+                            // generation's native calls behind its batches.
+                            appLog.record("SEMANTIC_MEMORY", "backfill skipped: $blockedBy")
+                        } else if (freeRamBytes >= SEMANTIC_BACKFILL_MIN_FREE_RAM_BYTES) {
                             ensureEmbedderLoaded(spec)
                             runCatching { memory.embedPending(SEMANTIC_BACKFILL_BATCH) }
                                 .onFailure { appLog.record("SEMANTIC_MEMORY", "embedPending failed: ${it.message}") }
@@ -820,6 +843,22 @@ class AppContainer private constructor(private val context: Context) {
     private val embedderReloadMutex = Mutex()
 
     /**
+     * Why semantic-memory work (loading E5, embedding batches) should wait
+     * right now, or null when nothing heavier is running. Only after this
+     * says null does the free-RAM threshold even matter.
+     */
+    private fun embedderBlockedBy(): String? = when {
+        heavyOperations.isActive -> "a generation or transcription is running"
+        deviceMemoryGate.isLocked -> "a local or AICore generation holds the device-memory gate"
+        sharedRuntimeManager.hasModelInUse -> "a local model is in use"
+        LlamaCppRuntime.hasPendingNativeWork() -> "an abandoned native model load is still finishing"
+        routerSessionActive -> "a live mic session is running"
+        fileTranscriptionRunner.running.value -> "a file transcription is running"
+        benchmarkOrchestrator.state.value is BenchmarkUiState.Running -> "a benchmark is running"
+        else -> null
+    }
+
+    /**
      * Loads [spec] and hands it to [semanticMemoryEmbedder] if it isn't
      * already resident — shared by the initial load above, the periodic
      * reload-after-[LazyMemoryEmbedder.unload] check, and
@@ -831,8 +870,20 @@ class AppContainer private constructor(private val context: Context) {
      * started here, exactly as before.
      */
     private suspend fun ensureEmbedderLoaded(spec: EmbeddingModelSpec): Boolean = embedderReloadMutex.withLock {
+        constructionComplete.await()
         if (semanticMemoryEmbedder.isReady) return@withLock true
         if (!experimentalEmbeddingStore.isInstalled(spec)) return@withLock false
+        // E5 is the lowest-priority native model this app has: semantic
+        // recall degrades to lexical search without it, while a local
+        // generation or transcription that loses its headroom to it can be
+        // OOM-killed. All three callers (initial load, periodic backfill,
+        // reloadTrigger — which fires mid-chat, right as a local model is
+        // loading) go through this, so all three wait for a quiet moment;
+        // the periodic loop retries later.
+        embedderBlockedBy()?.let { reason ->
+            appLog.record("SEMANTIC_MEMORY", "E5 load deferred: $reason")
+            return@withLock false
+        }
 
         val embedder = runCatching {
             LlamaCppMemoryEmbedder.load(
@@ -2191,6 +2242,11 @@ class AppContainer private constructor(private val context: Context) {
             ),
         ),
     )
+
+    // Must stay the last initializer in this class — see constructionComplete.
+    init {
+        constructionComplete.complete(Unit)
+    }
 
     companion object {
         private const val CATALOG_ASSET = "catalog.example.json"

@@ -407,7 +407,7 @@ class TranslationActivity : AppCompatActivity() {
                             // queued behind AICore/another local model on the
                             // device-memory gate is excluded (see
                             // withOperationTimeout), bounded by the deadline.
-                            withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
+                            container.heavyOperations.track { withOperationTimeout(GENERATION_TIMEOUT_MS, GENERATION_DEADLINE_MS) {
                                 translationSource.orchestrator.handle(
                                     UserRequest(
                                         // Unique per request and never saved to
@@ -419,7 +419,7 @@ class TranslationActivity : AppCompatActivity() {
                                         memoryEnabled = false,
                                     ),
                                 )
-                            }
+                            } }
                         }
                         withContext(Dispatchers.Main) {
                             result.onSuccess { answer ->
