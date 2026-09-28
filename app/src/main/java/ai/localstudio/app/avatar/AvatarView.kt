@@ -1,22 +1,24 @@
 package ai.localstudio.app.avatar
 
+import ai.localstudio.app.R
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
 import kotlin.random.Random
 
 /**
- * Phase 1 placeholder face — plain [Canvas] shapes (a circle head, two eye
- * ellipses, one mouth ellipse), not artwork. The point of this skeleton is
- * proving the whole pipeline (LLM stream → sentence → TTS → mouth shape/
- * openness → a face that visibly reacts) works end to end before spending
- * anything on real character art; see the `avatar` branch's own scope notes
- * for why bitmap sprites and mesh-deformed mouths are deliberately later
- * phases, not this one.
+ * Phase 2 face — the user's own photo ([R.drawable.avatar_face]), animated by
+ * warping a mesh of points laid over it (via [Canvas.drawBitmapMesh]) instead
+ * of drawing cartoon shapes on top of it. There's no face-landmark detection
+ * here: the mouth/eye regions below are a fixed guess at where those are in
+ * *this specific* photo, expressed as fractions of its width/height — if the
+ * photo is ever swapped for a different one, those constants need re-eyeballing
+ * too. The warp itself stays purely local (smoothstep falloff around each
+ * region) so the rest of the face never moves.
  *
  * Owns two loops, both independent of whatever [AvatarSpeechController]
  * feeds it: a per-frame smoothing loop (so mouth-open jumps from
@@ -31,6 +33,19 @@ class AvatarView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
 
+    // decodeResource, not a Bitmap.createBitmap round-trip — this is a fixed
+    // photo baked into the APK, never generated or replaced at runtime.
+    private val faceBitmap: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.avatar_face)
+    private val meshPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
+
+    // Rebuilt in onSizeChanged: the mesh's rest position (bitmap
+    // center-cropped to this view's current bounds), before any per-frame
+    // mouth/eye offset is added.
+    private var baseVerts = FloatArray(0)
+    private var warpVerts = FloatArray(0)
+    private var drawWidthPx = 0f
+    private var drawHeightPx = 0f
+
     private var targetState = AvatarState()
     private var currentMouthOpen = 0f
     private var currentBlink = 0f
@@ -39,11 +54,6 @@ class AvatarView @JvmOverloads constructor(
     private var nextBlinkAtMs = 0L
     private var blinkPhaseStartMs = 0L
     private var blinking = false
-
-    private val facePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FACE_COLOR }
-    private val eyePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = EYE_COLOR }
-    private val mouthPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MOUTH_COLOR }
-    private val mouthRect = RectF()
 
     private val frameCallback = object : Runnable {
         override fun run() {
@@ -66,6 +76,39 @@ class AvatarView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         removeCallbacks(frameCallback)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        rebuildBaseMesh(w, h)
+    }
+
+    // Center-crop the photo into the view's bounds (it's rarely the same
+    // aspect ratio as the AvatarView, e.g. a square photo in a short wide
+    // strip), then lay an evenly spaced grid of rest positions over it —
+    // this is the mesh applyWarp() perturbs per frame, not the bitmap's own
+    // pixels.
+    private fun rebuildBaseMesh(w: Int, h: Int) {
+        if (w <= 0 || h <= 0) return
+        val scale = maxOf(w.toFloat() / faceBitmap.width, h.toFloat() / faceBitmap.height)
+        drawWidthPx = faceBitmap.width * scale
+        drawHeightPx = faceBitmap.height * scale
+        val left = (w - drawWidthPx) / 2f
+        val top = (h - drawHeightPx) / 2f
+
+        val verts = FloatArray((MESH_COLS + 1) * (MESH_ROWS + 1) * 2)
+        var vi = 0
+        for (row in 0..MESH_ROWS) {
+            val v = row / MESH_ROWS.toFloat()
+            for (col in 0..MESH_COLS) {
+                val u = col / MESH_COLS.toFloat()
+                verts[vi] = left + u * drawWidthPx
+                verts[vi + 1] = top + v * drawHeightPx
+                vi += 2
+            }
+        }
+        baseVerts = verts
+        warpVerts = verts.copyOf()
     }
 
     private fun step() {
@@ -104,42 +147,74 @@ class AvatarView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val cx = width / 2f
-        val cy = height / 2f
-        val radius = minOf(width, height) / 2f * 0.85f
-        canvas.drawCircle(cx, cy, radius, facePaint)
-
-        val eyeOffsetX = radius * 0.4f
-        val eyeY = cy - radius * 0.25f
-        val eyeRadiusX = radius * 0.14f
-        // 1f (open) down to a sliver — never fully 0, a fully flat oval
-        // draws as an invisible line rather than a closed eye.
-        val eyeRadiusY = radius * 0.14f * (1f - currentBlink * 0.9f)
-        canvas.drawOval(cx - eyeOffsetX - eyeRadiusX, eyeY - eyeRadiusY, cx - eyeOffsetX + eyeRadiusX, eyeY + eyeRadiusY, eyePaint)
-        canvas.drawOval(cx + eyeOffsetX - eyeRadiusX, eyeY - eyeRadiusY, cx + eyeOffsetX + eyeRadiusX, eyeY + eyeRadiusY, eyePaint)
-
-        drawMouth(canvas, cx, cy + radius * 0.35f, radius)
+        if (baseVerts.isEmpty()) return
+        applyWarp()
+        canvas.drawBitmapMesh(faceBitmap, MESH_COLS, MESH_ROWS, warpVerts, 0, null, 0, meshPaint)
     }
 
-    private fun drawMouth(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
-        val baseWidth = radius * 0.36f
-        val baseHeight = radius * 0.06f
+    private fun applyWarp() {
         val openAmount = currentMouthOpen.coerceIn(0f, 1f)
-        // Width/height multipliers are a rough per-shape look, not measured
-        // against anything — see MouthShape's own doc comment.
-        val (widthScale, heightScale) = when (currentMouthShape) {
-            MouthShape.CLOSED -> 1f to 1f
-            MouthShape.OPEN -> 1f to (1f + openAmount * 5f)
-            MouthShape.ROUND -> 0.55f to (1f + openAmount * 4f)
-            MouthShape.WIDE -> 1.4f to (1f + openAmount * 2.5f)
-            MouthShape.TEETH -> 1.1f to (1f + openAmount * 1.5f)
-            MouthShape.SIBILANT -> 0.7f to (1f + openAmount * 1.8f)
-            MouthShape.NARROW -> 0.85f to (1f + openAmount * 2f)
+        // Rough, not measured — see this class's own doc comment: real lips
+        // move mostly via the jaw (the "below center" half of the mouth
+        // region), the upper lip barely at all, which is why these two
+        // fractions aren't symmetric.
+        val (openScale, widthScale) = when (currentMouthShape) {
+            MouthShape.CLOSED -> 0f to 0f
+            MouthShape.OPEN -> 1f to 0f
+            MouthShape.ROUND -> 0.8f to -0.4f
+            MouthShape.WIDE -> 0.5f to 0.5f
+            MouthShape.TEETH -> 0.4f to 0.2f
+            MouthShape.SIBILANT -> 0.3f to -0.2f
+            MouthShape.NARROW -> 0.5f to -0.15f
         }
-        val halfWidth = baseWidth * widthScale
-        val halfHeight = baseHeight * heightScale
-        mouthRect.set(cx - halfWidth, cy - halfHeight, cx + halfWidth, cy + halfHeight)
-        canvas.drawOval(mouthRect, mouthPaint)
+        val mouthOpenPx = openAmount * openScale * MAX_MOUTH_OPEN_FRACTION * drawHeightPx
+        val mouthWidthPx = openAmount * widthScale * MAX_MOUTH_WIDTH_FRACTION * drawWidthPx
+        val eyeClosePx = currentBlink.coerceIn(0f, 1f) * MAX_BLINK_FRACTION * drawHeightPx
+
+        var vi = 0
+        for (row in 0..MESH_ROWS) {
+            val v = row / MESH_ROWS.toFloat()
+            for (col in 0..MESH_COLS) {
+                val u = col / MESH_COLS.toFloat()
+                var dx = 0f
+                var dy = 0f
+
+                val mouthInfluence = ellipseFalloff(u - MOUTH_CX, v - MOUTH_CY, MOUTH_RX, MOUTH_RY)
+                if (mouthInfluence > 0f) {
+                    val jawSign = if (v >= MOUTH_CY) 1f else -0.4f
+                    dy += mouthInfluence * mouthOpenPx * jawSign
+                    val cornerSign = if (u >= MOUTH_CX) 1f else -1f
+                    dx += mouthInfluence * mouthWidthPx * cornerSign
+                }
+
+                val eyeInfluence = maxOf(
+                    ellipseFalloff(u - LEFT_EYE_CX, v - EYE_CY, EYE_RX, EYE_RY),
+                    ellipseFalloff(u - RIGHT_EYE_CX, v - EYE_CY, EYE_RX, EYE_RY),
+                )
+                if (eyeInfluence > 0f) {
+                    // Upper eyelid pulled down, lower eyelid pulled up — the
+                    // eye visually pinches shut instead of the whole region
+                    // just sliding, which read as the eye "melting".
+                    val lidSign = if (v < EYE_CY) 1f else -1f
+                    dy += eyeInfluence * eyeClosePx * lidSign
+                }
+
+                warpVerts[vi] = baseVerts[vi] + dx
+                warpVerts[vi + 1] = baseVerts[vi + 1] + dy
+                vi += 2
+            }
+        }
+    }
+
+    // Smoothstep falloff on normalized elliptical distance: 1 at the region's
+    // center, 0 at/beyond its radius, with no hard edge in between — a linear
+    // falloff instead would show as a visible crease where influence hits 0.
+    private fun ellipseFalloff(du: Float, dv: Float, rx: Float, ry: Float): Float {
+        val nx = du / rx
+        val ny = dv / ry
+        val d = kotlin.math.sqrt(nx * nx + ny * ny)
+        val t = (1f - d).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
     }
 
     private companion object {
@@ -147,11 +222,28 @@ class AvatarView @JvmOverloads constructor(
         const val BLINK_DURATION_MS = 180L
         const val MIN_BLINK_GAP_MS = 2000L
         const val MAX_BLINK_GAP_MS = 6000L
-        // Not `const` — Color.parseColor() is a real function call (an ARGB
-        // int computed from the hex string at class-init time), not a
-        // compile-time literal, which is exactly what `const val` requires.
-        val FACE_COLOR = Color.parseColor("#F2C9A0")
-        val EYE_COLOR = Color.parseColor("#2B2B2B")
-        val MOUTH_COLOR = Color.parseColor("#8A3B3B")
+
+        const val MESH_COLS = 16
+        const val MESH_ROWS = 16
+
+        // Fractions of avatar_face.jpg's own width/height (0..1) — eyeballed
+        // against that specific photo, not derived from any detector.
+        const val MOUTH_CX = 0.51f
+        const val MOUTH_CY = 0.77f
+        const val MOUTH_RX = 0.17f
+        const val MOUTH_RY = 0.11f
+        const val LEFT_EYE_CX = 0.39f
+        const val RIGHT_EYE_CX = 0.66f
+        const val EYE_CY = 0.51f
+        const val EYE_RX = 0.075f
+        const val EYE_RY = 0.05f
+
+        // How far a fully-open mouth/fully-closed eye is allowed to displace
+        // the mesh, as a fraction of the drawn photo's own size — kept small
+        // on purpose: this is a real photo, not a caricature, and a few
+        // percent of displacement already reads clearly at 200dp height.
+        const val MAX_MOUTH_OPEN_FRACTION = 0.09f
+        const val MAX_MOUTH_WIDTH_FRACTION = 0.05f
+        const val MAX_BLINK_FRACTION = 0.028f
     }
 }
