@@ -89,6 +89,7 @@ class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
         if (!ready || text.isBlank()) return null
         if (locale != null && tts.isLanguageAvailable(locale) < TextToSpeech.LANG_AVAILABLE) return null
         if (locale != null) tts.language = locale
+        preferMaleVoice()
         val utteranceId = UUID.randomUUID().toString()
         utteranceText[utteranceId] = text
         val result = tts.speak(text, TextToSpeech.QUEUE_ADD, null, utteranceId)
@@ -109,5 +110,31 @@ class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
         tts.stop()
         tts.shutdown()
         utteranceText.clear()
+    }
+
+    // The avatar depicts a specific (male) person, so this engine's voice
+    // should match — TextToSpeech has no gender field on Voice, so this is
+    // two best-effort layers rather than one reliable API: (1) some engines
+    // do put "male"/"female" in a voice's own name (careful: "female"
+    // contains "male" as a substring, so the exclusion below isn't
+    // optional), picked per call since setting `language` above resets the
+    // engine back to that language's default voice; (2) a lower pitch,
+    // which works on every engine/voice regardless of (1) ever matching, as
+    // the actual fallback that makes this reliable rather than a guess.
+    private fun preferMaleVoice() {
+        val activeLocale = tts.voice?.locale ?: tts.language
+        val maleVoice = activeLocale?.let { locale ->
+            tts.voices?.firstOrNull { voice ->
+                voice.locale.language == locale.language &&
+                    voice.name.contains("male", ignoreCase = true) &&
+                    !voice.name.contains("female", ignoreCase = true)
+            }
+        }
+        if (maleVoice != null) tts.voice = maleVoice
+        tts.setPitch(MALE_PITCH)
+    }
+
+    private companion object {
+        const val MALE_PITCH = 0.85f
     }
 }
