@@ -20,6 +20,7 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import ai.localstudio.app.attach.DocumentIngest
+import ai.localstudio.app.avatar.AvatarSpeechController
 import ai.localstudio.app.databinding.ActivityChatBinding
 import ai.localstudio.app.history.ChatHistoryStore
 import ai.localstudio.app.history.Conversation
@@ -73,6 +74,13 @@ class ChatActivity : AppCompatActivity() {
     // updates the field repeatedly while recording, and each update must
     // still be "the old text plus what's been said so far", not overwrite it.
     private var recordingPrefix = ""
+
+    // Null unless Settings.avatarEnabled — created once in onCreate, never
+    // recreated for the life of this Activity (matching whisperEngine's own
+    // ownership shape below), and only ever driven from send()'s own
+    // single-answer path, not sendCompare()'s multiple simultaneous sources
+    // (see AvatarSpeechController's own doc comment).
+    private var avatarController: AvatarSpeechController? = null
 
     // Staged for exactly one turn, then cleared — an attached image is a
     // question about *this* photo, not something to keep resending on every
@@ -147,6 +155,11 @@ class ChatActivity : AppCompatActivity() {
         binding.pendingImageClear.setOnClickListener { clearPendingImage() }
         binding.micButton.setOnClickListener { onMicClicked() }
 
+        if (container.settings.avatarEnabled) {
+            binding.avatarView.visibility = android.view.View.VISIBLE
+            avatarController = AvatarSpeechController(this, binding.avatarView)
+        }
+
         // The app being killed in the background is routine on Android, not
         // exceptional — resuming the most recent conversation instead of a
         // blank screen is what makes that invisible to the user.
@@ -180,6 +193,7 @@ class ChatActivity : AppCompatActivity() {
         super.onDestroy()
         container.whisperEngine.release()
         container.whisperPreviewEngine.release()
+        avatarController?.shutdown()
     }
 
     override fun onResume() {
@@ -398,6 +412,7 @@ class ChatActivity : AppCompatActivity() {
         val hasAttachment = pendingImage != null || sessionDocumentNames.isNotEmpty()
         if (text.isEmpty() && !hasAttachment) return
 
+        avatarController?.onNewTurn()
         binding.input.setText("")
         adapter.add(Message.user(text, imageDataUri = pendingImage?.uri))
         binding.messages.scrollToPosition(adapter.itemCount - 1)
@@ -531,7 +546,10 @@ class ChatActivity : AppCompatActivity() {
                                     history = history,
                                     attachedDocuments = attachedDocuments,
                                 ),
-                                onPartialText = { partial.value = it },
+                                onPartialText = {
+                                    partial.value = it
+                                    avatarController?.onPartialText(it)
+                                },
                             )
                         } }
                     }
@@ -545,6 +563,7 @@ class ChatActivity : AppCompatActivity() {
             setBusy(false)
             if (stoppedByUser) {
                 stoppedByUser = false
+                avatarController?.onInterrupted()
                 adapter.update(placeholderIndex, Message.error(body = getString(R.string.chat_stopped), details = null))
                 binding.messages.scrollToPosition(adapter.itemCount - 1)
                 persist()
@@ -552,6 +571,7 @@ class ChatActivity : AppCompatActivity() {
             }
             result
                 .onSuccess { answer ->
+                    avatarController?.onGenerationDone(answer.text)
                     // FallbackTextRuntime already embeds "Ответ от: <label>"
                     // whenever 2+ candidates are configured (any cloud
                     // provider, via its own model rotation, counts as 2+).
@@ -596,11 +616,13 @@ class ChatActivity : AppCompatActivity() {
                     // noted underneath instead of overwriting it.
                     val partialText = partial.value
                     if (!partialText.isNullOrBlank()) {
+                        avatarController?.onGenerationDone(partialText)
                         adapter.update(
                             placeholderIndex,
                             Message.assistant(body = "$partialText\n\n---\n⚠ $body", details = error.javaClass.simpleName),
                         )
                     } else {
+                        avatarController?.onInterrupted()
                         adapter.update(placeholderIndex, Message.error(body = body, details = error.javaClass.simpleName))
                     }
                 }

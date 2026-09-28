@@ -59,6 +59,8 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.compareModeCheck.isChecked = settings.compareMode
         binding.compareModeCheck.setOnCheckedChangeListener { _, checked -> settings.compareMode = checked }
+        binding.avatarEnabledCheck.isChecked = settings.avatarEnabled
+        binding.avatarEnabledCheck.setOnCheckedChangeListener { _, checked -> settings.avatarEnabled = checked }
         binding.systemPromptInput.setText(settings.systemPrompt)
         binding.systemPromptInput.persistOnChange { settings.systemPrompt = it }
         binding.ramInput.setText(settings.ramBudgetPercent.toString())

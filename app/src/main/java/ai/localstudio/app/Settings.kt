@@ -305,6 +305,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_COMPARE_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_COMPARE_MODE, value).apply()
 
+    /**
+     * Off by default — this is the Phase 1 skeleton (see the `avatar`
+     * branch's own scope): a placeholder face drawn on [android.graphics.Canvas],
+     * not real artwork yet, so this stays opt-in rather than surprising
+     * anyone who just wants the plain chat screen.
+     */
+    var avatarEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AVATAR_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_AVATAR_ENABLED, value).apply()
+
     val hasEndpoint: Boolean get() = endpoint.isNotBlank()
 
     // Sampling: how the model picks its next token. Exposed because a fixed
@@ -399,6 +409,7 @@ class Settings(context: Context) {
         const val KEY_MEMORY = "memoryEnabled"
         const val KEY_SEMANTIC_MEMORY = "semanticMemoryEnabled"
         const val KEY_COMPARE_MODE = "compareMode"
+        const val KEY_AVATAR_ENABLED = "avatarEnabled"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_DOWNLOAD_POLICY = "downloadPolicy"
