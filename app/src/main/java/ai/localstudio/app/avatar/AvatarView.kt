@@ -251,12 +251,21 @@ class AvatarView @JvmOverloads constructor(
 
                 // Left/right regions are spatially disjoint, so a vertex only
                 // ever gets influence from (at most) one of them — no need to
-                // pick a max, both contributions can just be added.
-                val lidSign = if (v < EYE_CY) 1f else -1f
-                val leftEyeInfluence = ellipseFalloff(u - LEFT_EYE_CX, v - EYE_CY, EYE_RX, EYE_RY)
-                if (leftEyeInfluence > 0f) dy += leftEyeInfluence * leftEyePx * lidSign
-                val rightEyeInfluence = ellipseFalloff(u - RIGHT_EYE_CX, v - EYE_CY, EYE_RX, EYE_RY)
-                if (rightEyeInfluence > 0f) dy += rightEyeInfluence * rightEyePx * lidSign
+                // pick a max, both contributions can just be added. Separate
+                // *_EYE_CY per eye, not one shared value, because the two
+                // eyes in this specific photo don't sit at quite the same
+                // height (a real device report showed the left one warping
+                // visibly worse than the right with a single shared center).
+                val leftEyeInfluence = ellipseFalloff(u - LEFT_EYE_CX, v - LEFT_EYE_CY, EYE_RX, EYE_RY)
+                if (leftEyeInfluence > 0f) {
+                    val lidSign = if (v < LEFT_EYE_CY) 1f else -1f
+                    dy += leftEyeInfluence * leftEyePx * lidSign
+                }
+                val rightEyeInfluence = ellipseFalloff(u - RIGHT_EYE_CX, v - RIGHT_EYE_CY, EYE_RX, EYE_RY)
+                if (rightEyeInfluence > 0f) {
+                    val lidSign = if (v < RIGHT_EYE_CY) 1f else -1f
+                    dy += rightEyeInfluence * rightEyePx * lidSign
+                }
 
                 warpVerts[vi] = baseVerts[vi] + dx
                 warpVerts[vi + 1] = baseVerts[vi + 1] + dy
@@ -288,8 +297,15 @@ class AvatarView @JvmOverloads constructor(
         const val MIN_BLINK_GAP_MS = 2000L
         const val MAX_BLINK_GAP_MS = 6000L
 
-        const val MESH_COLS = 16
-        const val MESH_ROWS = 16
+        // 16 (the original value) made the eye ellipses only 2-3 vertices
+        // wide/tall — coarse enough that a fraction of a mesh cell's
+        // difference in exactly where an eye's center landed relative to the
+        // grid lines was visibly worse for one eye than the other. Higher
+        // resolution costs nothing meaningful (a few hundred more verts is
+        // still trivial for drawBitmapMesh once per frame) and removes that
+        // sensitivity for both eyes and the mouth alike.
+        const val MESH_COLS = 28
+        const val MESH_ROWS = 28
 
         // Fractions of avatar_face.jpg's own width/height (0..1) — eyeballed
         // against that specific photo, not derived from any detector.
@@ -298,10 +314,11 @@ class AvatarView @JvmOverloads constructor(
         const val MOUTH_RX = 0.17f
         const val MOUTH_RY = 0.11f
         const val LEFT_EYE_CX = 0.39f
+        const val LEFT_EYE_CY = 0.53f
         const val RIGHT_EYE_CX = 0.66f
-        const val EYE_CY = 0.51f
+        const val RIGHT_EYE_CY = 0.52f
         const val EYE_RX = 0.075f
-        const val EYE_RY = 0.05f
+        const val EYE_RY = 0.06f
 
         // How far a fully-open mouth/fully-closed eye is allowed to displace
         // the mesh, as a fraction of the drawn photo's own size — kept small
@@ -310,10 +327,10 @@ class AvatarView @JvmOverloads constructor(
         const val MAX_MOUTH_OPEN_FRACTION = 0.09f
         const val MAX_MOUTH_WIDTH_FRACTION = 0.05f
         const val MAX_BLINK_FRACTION = 0.028f
-        // Larger than MAX_BLINK_FRACTION on purpose — eyes widening open is
-        // a subtler visual change than eyes shutting, so it needs more room
-        // to read as "surprised" rather than just a slightly bigger blink.
-        const val MAX_EYE_WIDE_FRACTION = 0.045f
+        // Closer to MAX_BLINK_FRACTION than before (was 0.045) — that much
+        // more displacement than a blink's own read as the skin stretching
+        // rather than an eye widening, on a real device.
+        const val MAX_EYE_WIDE_FRACTION = 0.032f
     }
 }
 
