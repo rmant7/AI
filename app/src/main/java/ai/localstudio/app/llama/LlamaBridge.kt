@@ -1,6 +1,7 @@
 package ai.localstudio.app.llama
 
 import kotlinx.coroutines.sync.Mutex
+import java.io.File
 
 /**
  * Which token(s) of an embedding model's output become the sentence vector —
@@ -198,10 +199,45 @@ class LlamaBridge {
         /**
          * Phone SoCs are big.LITTLE and ggml splits each matmul evenly across
          * its threads, so handing work to the efficiency cores makes every
-         * other thread wait on them. Four is a good proxy for the performance
-         * cluster, and it keeps sustained load — and thermal throttling — lower.
+         * other thread wait on them each round — [detectPerformanceClusterCoreCount]
+         * reads which cores this specific device's SoC actually gives that
+         * cluster to, rather than assuming a flat number that's right for
+         * some phones and leaves others' extra cores idle (an 8-core phone
+         * capped at 4 threads) or, on a device with a smaller performance
+         * cluster, hands work to efficiency cores anyway (a phone with only
+         * 2 real big cores still getting 4 threads).
          */
-        fun defaultThreads(): Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+        fun defaultThreads(): Int =
+            detectPerformanceClusterCoreCount()
+                ?: Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+
+        /**
+         * Counts cores sharing this SoC's highest per-core max frequency —
+         * the performance ("big") cluster in a big.LITTLE layout — via the
+         * same per-core `/sys/devices/system/cpu/cpuN/cpufreq/cpuinfo_max_freq`
+         * read [ai.localstudio.whisper.CpuVariant.detect] already relies on
+         * for ISA features, just grouped by clock speed instead of
+         * instruction set. Null (falls back to the flat guess above) when
+         * the read fails or fewer cores were readable than
+         * [Runtime.availableProcessors] reports — an emulator, a sandboxed
+         * environment, or a kernel that hides this file — and also when
+         * every core reports the same max frequency (no big.LITTLE split to
+         * detect; the flat guess's own cap already handles a single-cluster
+         * SoC fine).
+         */
+        private fun detectPerformanceClusterCoreCount(): Int? {
+            val totalCores = Runtime.getRuntime().availableProcessors()
+            val maxFreqs = (0 until totalCores).mapNotNull { core ->
+                runCatching {
+                    File("/sys/devices/system/cpu/cpu$core/cpufreq/cpuinfo_max_freq").readText().trim().toLong()
+                }.getOrNull()
+            }
+            if (maxFreqs.size < totalCores) return null
+            val topFrequency = maxFreqs.max()
+            val bigCoreCount = maxFreqs.count { it == topFrequency }
+            if (bigCoreCount == totalCores) return null
+            return bigCoreCount.coerceIn(1, totalCores)
+        }
 
         /**
          * Serializes every blocking native llama.cpp call across the whole
