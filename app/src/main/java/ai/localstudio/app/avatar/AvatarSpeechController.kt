@@ -37,13 +37,23 @@ class AvatarSpeechController(context: Context, private val view: AvatarView) {
 
     /** Called on every growing-text update from the LLM's own stream — see this class's own doc comment. */
     fun onPartialText(fullText: String) {
-        chunker.consume(fullText).forEach(::enqueue)
+        chunker.consume(stripAttribution(fullText)).forEach(::enqueue)
     }
 
     /** The turn finished generating: speaks whatever text never reached a sentence-ending mark. */
     fun onGenerationDone(fullText: String) {
-        chunker.flushRemainder(fullText)?.let(::enqueue)
+        chunker.flushRemainder(stripAttribution(fullText))?.let(::enqueue)
     }
+
+    // FallbackTextRuntime.attributionFooter() (and ChatActivity's own copy of
+    // it for the single-candidate case) appends "\n\n---\n" plus an
+    // "Answer from: <model>" line to the *displayed* answer — useful in the chat bubble,
+    // not something that should ever be read aloud. Cutting at the marker
+    // rather than stripping it after the fact keeps SentenceChunker's own
+    // "same string, or longer" contract intact: once the footer starts
+    // streaming in (always in one piece — see attributionFooter's own single
+    // emit), the text this returns simply stops growing instead of shrinking.
+    private fun stripAttribution(text: String): String = text.substringBefore(ATTRIBUTION_MARKER)
 
     /** The user hit Stop, or a new turn is starting — drops anything still queued/speaking and resets for the next turn. */
     fun onInterrupted() {
@@ -91,5 +101,7 @@ class AvatarSpeechController(context: Context, private val view: AvatarView) {
         // open amount so the mouth still visibly moves per range instead of
         // sitting shut for the whole utterance.
         const val OPEN_ON_RANGE = 0.45f
+
+        const val ATTRIBUTION_MARKER = "\n\n---"
     }
 }
