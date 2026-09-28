@@ -147,8 +147,11 @@ class AvatarView @JvmOverloads constructor(
         const val BLINK_DURATION_MS = 180L
         const val MIN_BLINK_GAP_MS = 2000L
         const val MAX_BLINK_GAP_MS = 6000L
-        const val FACE_COLOR = Color.parseColor("#F2C9A0")
-        const val EYE_COLOR = Color.parseColor("#2B2B2B")
-        const val MOUTH_COLOR = Color.parseColor("#8A3B3B")
+        // Not `const` — Color.parseColor() is a real function call (an ARGB
+        // int computed from the hex string at class-init time), not a
+        // compile-time literal, which is exactly what `const val` requires.
+        val FACE_COLOR = Color.parseColor("#F2C9A0")
+        val EYE_COLOR = Color.parseColor("#2B2B2B")
+        val MOUTH_COLOR = Color.parseColor("#8A3B3B")
     }
 }
