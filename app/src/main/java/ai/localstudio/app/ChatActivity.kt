@@ -75,11 +75,11 @@ class ChatActivity : AppCompatActivity() {
     // still be "the old text plus what's been said so far", not overwrite it.
     private var recordingPrefix = ""
 
-    // Null unless Settings.avatarEnabled — created once in onCreate, never
-    // recreated for the life of this Activity (matching whisperEngine's own
-    // ownership shape below), and only ever driven from send()'s own
-    // single-answer path, not sendCompare()'s multiple simultaneous sources
-    // (see AvatarSpeechController's own doc comment).
+    // Null unless Settings.avatarEnabled — created/torn down on each
+    // onResume() by syncAvatarEnabled() as the setting is flipped, and only
+    // ever driven from send()'s own single-answer path, not sendCompare()'s
+    // multiple simultaneous sources (see AvatarSpeechController's own doc
+    // comment).
     private var avatarController: AvatarSpeechController? = null
 
     // Staged for exactly one turn, then cleared — an attached image is a
@@ -155,11 +155,6 @@ class ChatActivity : AppCompatActivity() {
         binding.pendingImageClear.setOnClickListener { clearPendingImage() }
         binding.micButton.setOnClickListener { onMicClicked() }
 
-        if (container.settings.avatarEnabled) {
-            binding.avatarView.visibility = android.view.View.VISIBLE
-            avatarController = AvatarSpeechController(this, binding.avatarView)
-        }
-
         // The app being killed in the background is routine on Android, not
         // exceptional — resuming the most recent conversation instead of a
         // blank screen is what makes that invisible to the user.
@@ -199,6 +194,23 @@ class ChatActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateStatus()
+        syncAvatarEnabled()
+    }
+
+    // Re-checked on every resume, not just onCreate — flipping the setting on
+    // the Settings screen and pressing Back only triggers onResume() here,
+    // never a fresh onCreate(), so onCreate-only used to leave the avatar
+    // missing until the whole activity was killed and relaunched.
+    private fun syncAvatarEnabled() {
+        val enabled = container.settings.avatarEnabled
+        if (enabled && avatarController == null) {
+            binding.avatarView.visibility = android.view.View.VISIBLE
+            avatarController = AvatarSpeechController(this, binding.avatarView)
+        } else if (!enabled && avatarController != null) {
+            avatarController?.shutdown()
+            avatarController = null
+            binding.avatarView.visibility = android.view.View.GONE
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
