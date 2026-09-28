@@ -1,6 +1,7 @@
 package ai.localstudio.app.avatar
 
 import android.content.Context
+import android.speech.tts.Voice
 
 /**
  * Glues the three pieces of the Phase 1 pipeline together: the LLM's own
@@ -70,6 +71,15 @@ class AvatarSpeechController(context: Context, private val view: AvatarView) {
     fun shutdown() {
         engine.shutdown()
     }
+
+    /** True once the underlying TTS engine has finished its own async init — see [AvatarTestActivity]'s voice picker. */
+    val isReady: Boolean get() = engine.isReady
+
+    /** Delegates to [AvatarTtsEngine.availableVoices] — see [AvatarTestActivity]. */
+    fun availableVoices(): List<Voice> = engine.availableVoices()
+
+    /** Delegates to [AvatarTtsEngine.setManualVoice] — see [AvatarTestActivity]. */
+    fun setVoice(voice: Voice?) = engine.setManualVoice(voice)
 
     private fun enqueue(sentence: String) {
         engine.speak(sentence, locale = null)

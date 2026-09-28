@@ -48,12 +48,20 @@ class AvatarView @JvmOverloads constructor(
 
     private var targetState = AvatarState()
     private var currentMouthOpen = 0f
-    private var currentBlink = 0f
     private var currentMouthShape = MouthShape.CLOSED
+
+    // -1..1: positive closes the eye (a blink), negative widens it (e.g.
+    // [AvatarGesture.SURPRISE]) — see applyWarp's own comment on why the
+    // same warp direction handles both.
+    private var currentLeftEyeAmount = 0f
+    private var currentRightEyeAmount = 0f
 
     private var nextBlinkAtMs = 0L
     private var blinkPhaseStartMs = 0L
     private var blinking = false
+
+    private var gesture: AvatarGesture? = null
+    private var gestureStartMs = 0L
 
     private val frameCallback = object : Runnable {
         override fun run() {
@@ -65,6 +73,19 @@ class AvatarView @JvmOverloads constructor(
     /** Called by [AvatarSpeechController] whenever the target expression changes — takes effect gradually, over the next few frames, not instantly. */
     fun updateState(state: AvatarState) {
         targetState = state
+    }
+
+    /**
+     * One-shot, timed expression, independent of whatever [updateState] is
+     * currently driving (speech keeps animating the mouth underneath a
+     * [AvatarGesture.SURPRISE], for instance) — see [AvatarTestActivity] for
+     * where this is triggered from. Replaces any gesture already playing
+     * rather than queuing, so mashing a button restarts it instead of piling
+     * up.
+     */
+    fun playGesture(gesture: AvatarGesture) {
+        this.gesture = gesture
+        gestureStartMs = System.currentTimeMillis()
     }
 
     override fun onAttachedToWindow() {
@@ -125,22 +146,56 @@ class AvatarView @JvmOverloads constructor(
             blinking = true
             blinkPhaseStartMs = now
         }
-        currentBlink = if (blinking) {
+        val autoBlink = if (blinking) {
             val elapsed = now - blinkPhaseStartMs
             if (elapsed >= BLINK_DURATION_MS) {
                 blinking = false
                 nextBlinkAtMs = now + nextBlinkDelayMs()
                 0f
             } else {
-                // A triangular pulse (0 -> 1 -> 0), not a step — an instant
-                // closed-then-open eyelid reads as a glitch, not a blink.
-                val phase = elapsed.toFloat() / BLINK_DURATION_MS
-                1f - kotlin.math.abs(phase - 0.5f) * 2f
+                trianglePulse(elapsed, BLINK_DURATION_MS)
             }
         } else {
             0f
         }
+
+        var leftEye = autoBlink
+        var rightEye = autoBlink
+        val activeGesture = gesture
+        if (activeGesture != null) {
+            val elapsed = now - gestureStartMs
+            if (elapsed >= activeGesture.durationMs) {
+                gesture = null
+            } else {
+                when (activeGesture) {
+                    AvatarGesture.BLINK -> {
+                        leftEye = trianglePulse(elapsed, activeGesture.durationMs)
+                        rightEye = leftEye
+                    }
+                    AvatarGesture.WINK_LEFT -> leftEye = trianglePulse(elapsed, activeGesture.durationMs)
+                    AvatarGesture.WINK_RIGHT -> rightEye = trianglePulse(elapsed, activeGesture.durationMs)
+                    AvatarGesture.SURPRISE -> {
+                        // Negative = widened, not closed — see applyWarp.
+                        val pulse = trianglePulse(elapsed, activeGesture.durationMs)
+                        leftEye = -pulse
+                        rightEye = -pulse
+                        currentMouthShape = MouthShape.ROUND
+                        currentMouthOpen = pulse
+                    }
+                }
+            }
+        }
+        currentLeftEyeAmount = leftEye
+        currentRightEyeAmount = rightEye
         invalidate()
+    }
+
+    // A triangular pulse (0 -> 1 -> 0), not a step — an instant open/closed
+    // eyelid reads as a glitch, not a blink or a wink. Shared by the idle
+    // auto-blink timer and every timed [AvatarGesture].
+    private fun trianglePulse(elapsedMs: Long, durationMs: Long): Float {
+        val phase = elapsedMs.toFloat() / durationMs
+        return 1f - kotlin.math.abs(phase - 0.5f) * 2f
     }
 
     private fun nextBlinkDelayMs(): Long = Random.nextLong(MIN_BLINK_GAP_MS, MAX_BLINK_GAP_MS)
@@ -169,7 +224,14 @@ class AvatarView @JvmOverloads constructor(
         }
         val mouthOpenPx = openAmount * openScale * MAX_MOUTH_OPEN_FRACTION * drawHeightPx
         val mouthWidthPx = openAmount * widthScale * MAX_MOUTH_WIDTH_FRACTION * drawWidthPx
-        val eyeClosePx = currentBlink.coerceIn(0f, 1f) * MAX_BLINK_FRACTION * drawHeightPx
+        // Same displacement, opposite direction depending on sign — a
+        // negative amount (only ever from AvatarGesture.SURPRISE) pushes the
+        // lids apart instead of together, which is why this isn't just
+        // `.coerceIn(0f, 1f)` the way a plain blink amount would be. Widening
+        // reads clearly at a slightly larger fraction than a blink's own —
+        // see MAX_EYE_WIDE_FRACTION's own comment.
+        val leftEyePx = eyeAmplitudePx(currentLeftEyeAmount)
+        val rightEyePx = eyeAmplitudePx(currentRightEyeAmount)
 
         var vi = 0
         for (row in 0..MESH_ROWS) {
@@ -187,23 +249,26 @@ class AvatarView @JvmOverloads constructor(
                     dx += mouthInfluence * mouthWidthPx * cornerSign
                 }
 
-                val eyeInfluence = maxOf(
-                    ellipseFalloff(u - LEFT_EYE_CX, v - EYE_CY, EYE_RX, EYE_RY),
-                    ellipseFalloff(u - RIGHT_EYE_CX, v - EYE_CY, EYE_RX, EYE_RY),
-                )
-                if (eyeInfluence > 0f) {
-                    // Upper eyelid pulled down, lower eyelid pulled up — the
-                    // eye visually pinches shut instead of the whole region
-                    // just sliding, which read as the eye "melting".
-                    val lidSign = if (v < EYE_CY) 1f else -1f
-                    dy += eyeInfluence * eyeClosePx * lidSign
-                }
+                // Left/right regions are spatially disjoint, so a vertex only
+                // ever gets influence from (at most) one of them — no need to
+                // pick a max, both contributions can just be added.
+                val lidSign = if (v < EYE_CY) 1f else -1f
+                val leftEyeInfluence = ellipseFalloff(u - LEFT_EYE_CX, v - EYE_CY, EYE_RX, EYE_RY)
+                if (leftEyeInfluence > 0f) dy += leftEyeInfluence * leftEyePx * lidSign
+                val rightEyeInfluence = ellipseFalloff(u - RIGHT_EYE_CX, v - EYE_CY, EYE_RX, EYE_RY)
+                if (rightEyeInfluence > 0f) dy += rightEyeInfluence * rightEyePx * lidSign
 
                 warpVerts[vi] = baseVerts[vi] + dx
                 warpVerts[vi + 1] = baseVerts[vi + 1] + dy
                 vi += 2
             }
         }
+    }
+
+    private fun eyeAmplitudePx(amount: Float): Float {
+        val clamped = amount.coerceIn(-1f, 1f)
+        val fraction = if (clamped >= 0f) MAX_BLINK_FRACTION else MAX_EYE_WIDE_FRACTION
+        return clamped * fraction * drawHeightPx
     }
 
     // Smoothstep falloff on normalized elliptical distance: 1 at the region's
@@ -245,5 +310,21 @@ class AvatarView @JvmOverloads constructor(
         const val MAX_MOUTH_OPEN_FRACTION = 0.09f
         const val MAX_MOUTH_WIDTH_FRACTION = 0.05f
         const val MAX_BLINK_FRACTION = 0.028f
+        // Larger than MAX_BLINK_FRACTION on purpose — eyes widening open is
+        // a subtler visual change than eyes shutting, so it needs more room
+        // to read as "surprised" rather than just a slightly bigger blink.
+        const val MAX_EYE_WIDE_FRACTION = 0.045f
     }
+}
+
+/**
+ * A short, timed expression [AvatarView.playGesture] plays on top of
+ * whatever [AvatarState] speech is currently driving — see
+ * [ai.localstudio.app.AvatarTestActivity], the only caller today.
+ */
+enum class AvatarGesture(val durationMs: Long) {
+    BLINK(220L),
+    WINK_LEFT(650L),
+    WINK_RIGHT(650L),
+    SURPRISE(900L),
 }

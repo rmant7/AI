@@ -3,6 +3,7 @@ package ai.localstudio.app.avatar
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import java.util.Locale
 import java.util.UUID
 
@@ -75,8 +76,22 @@ class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
 
     val isReady: Boolean get() = ready
 
+    // Set only from AvatarTestActivity's voice picker — every other caller
+    // (the real chat pipeline, via AvatarSpeechController) leaves this null
+    // and gets preferMaleVoice()'s own automatic pick instead.
+    @Volatile
+    private var manualVoice: Voice? = null
+
     /** The text actually behind an in-flight utterance's [Event.Range]/[Event.Audio] — null once it's [Event.Done]/[Event.Failed]. */
     fun textFor(utteranceId: String): String? = utteranceText[utteranceId]
+
+    /** Every voice this device's TTS engine(s) currently expose — empty until [isReady]. */
+    fun availableVoices(): List<Voice> = tts.voices?.toList().orEmpty()
+
+    /** Overrides [preferMaleVoice]'s own pick for every call after this one — null reverts to automatic. */
+    fun setManualVoice(voice: Voice?) {
+        manualVoice = voice
+    }
 
     /**
      * Queues [text] to speak once whatever is already queued finishes
@@ -87,9 +102,14 @@ class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
      */
     fun speak(text: String, locale: Locale?): String? {
         if (!ready || text.isBlank()) return null
-        if (locale != null && tts.isLanguageAvailable(locale) < TextToSpeech.LANG_AVAILABLE) return null
-        if (locale != null) tts.language = locale
-        preferMaleVoice()
+        val voice = manualVoice
+        if (voice != null) {
+            tts.voice = voice
+        } else {
+            if (locale != null && tts.isLanguageAvailable(locale) < TextToSpeech.LANG_AVAILABLE) return null
+            if (locale != null) tts.language = locale
+            preferMaleVoice()
+        }
         val utteranceId = UUID.randomUUID().toString()
         utteranceText[utteranceId] = text
         val result = tts.speak(text, TextToSpeech.QUEUE_ADD, null, utteranceId)

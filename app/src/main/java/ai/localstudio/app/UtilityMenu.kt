@@ -63,6 +63,7 @@ object UtilityMenu {
     private val MORE_ENTRIES = listOf(
         Entry(9009, R.string.menu_phrasebook, PhrasebookActivity::class.java),
         Entry(9007, R.string.menu_benchmark, BenchmarkActivity::class.java),
+        Entry(9010, R.string.menu_avatar_test, AvatarTestActivity::class.java),
     )
 
     // Log stays its own last row, not folded into "More" — an error log is

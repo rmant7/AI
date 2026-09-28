@@ -113,6 +113,13 @@
             android:label="@string/menu_phrasebook"
             android:parentActivityName=".ChatActivity" />
 
+        <activity
+            android:name=".AvatarTestActivity"
+            android:exported="false"
+            android:label="@string/menu_avatar_test"
+            android:parentActivityName=".ChatActivity"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".models.ModelDownloadService"
             android:exported="false"

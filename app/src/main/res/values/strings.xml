@@ -21,7 +21,7 @@
     <string name="settings_compare_mode">Compare answers (in parallel)</string>
     <string name="settings_compare_mode_hint">If several sources are enabled, the request is sent to all of them at once and answers appear as they arrive. Normally (off) — local model first, cloud only if it fails.</string>
     <string name="settings_avatar_enabled">Talking avatar (experimental)</string>
-    <string name="settings_avatar_enabled_hint">Shows a placeholder animated face above the chat that speaks the assistant\'s answers out loud, mouth roughly synced to the words. Early skeleton — plain shapes, not real artwork yet.</string>
+    <string name="settings_avatar_enabled_hint">Shows an animated photo above the chat that speaks the assistant\'s answers out loud, mouth roughly synced to the words.</string>
     <string name="chat_compare_waiting">Waiting for answers…</string>
     <string name="menu_settings">Settings</string>
     <string name="menu_chat">Chat</string>
@@ -35,6 +35,19 @@
     <string name="menu_benchmark">STT Benchmark</string>
     <string name="menu_translation">Translation</string>
     <string name="menu_phrasebook">Phrasebook</string>
+    <string name="menu_avatar_test">Avatar test</string>
+
+    <string name="avatar_test_hint">Test page for the talking-avatar pipeline — independent of Settings\' avatarEnabled and of the chat screen. Type something, pick a voice, hit Play; the gesture buttons trigger a short expression on top of whatever\'s already animating.</string>
+    <string name="avatar_test_text_hint">Text to speak</string>
+    <string name="avatar_test_play">Play</string>
+    <string name="avatar_test_stop">Stop</string>
+    <string name="avatar_test_voice_label">Voice</string>
+    <string name="avatar_test_voice_auto">Auto (male preference)</string>
+    <string name="avatar_test_gestures_label">Gestures</string>
+    <string name="avatar_test_gesture_wink_left">Wink (left)</string>
+    <string name="avatar_test_gesture_wink_right">Wink (right)</string>
+    <string name="avatar_test_gesture_surprise">Surprise</string>
+    <string name="avatar_test_gesture_blink">Blink</string>
 
     <string name="benchmark_hint">Picks a folder of audio files and runs every registered speech-to-text backend against every file, so their speed and output can be compared on identical input. See docs/16-stt-benchmark.md.</string>
     <string name="benchmark_pick_folder">Pick folder</string>
