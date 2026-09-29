@@ -32,6 +32,42 @@ object WavFiles {
         return dst
     }
 
+    /**
+     * Like [trimmedCopy], but cuts at the quietest 40 ms in the last 40% of the allowed length — a pause
+     * between words — instead of mid-word. Returns the file and how many seconds of the source it holds.
+     */
+    fun trimAtPause(src: File, dst: File, maxSeconds: Double): Pair<File, Double> {
+        val bytes = src.readBytes()
+        if (bytes.size < 44) return src to 0.0
+        val rate = ByteBuffer.wrap(bytes, 24, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        val total = bytes.size - 44
+        val limit = (rate * 2L * maxSeconds).toLong() and 1L.inv()
+        if (total <= limit) return src to total / 2.0 / rate
+        val frame = (rate * 2L * 0.04).toInt() and 1.inv()
+        val from = (limit * 0.6).toLong().toInt() and 1.inv()
+        val buf = ByteBuffer.wrap(bytes, 44, total).order(ByteOrder.LITTLE_ENDIAN)
+        var bestStart = (limit - frame).toInt()
+        var bestEnergy = Double.MAX_VALUE
+        var pos = from
+        while (pos + frame <= limit) {
+            var sum = 0.0
+            var i = 0
+            while (i < frame) {
+                val v = buf.getShort(44 + pos + i).toDouble()
+                sum += v * v
+                i += 2
+            }
+            if (sum < bestEnergy) {
+                bestEnergy = sum
+                bestStart = pos
+            }
+            pos += frame / 2 and 1.inv()
+        }
+        val cut = bestStart + frame / 2
+        write(dst, bytes.copyOfRange(44, 44 + cut), rate)
+        return dst to cut / 2.0 / rate
+    }
+
     /** Length of a PCM16 WAV in milliseconds, or null if it isn't one. Tolerates engines that leave the data size at 0. */
     fun durationMs(file: File): Long? {
         if (!file.exists() || file.length() < 44) return null

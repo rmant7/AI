@@ -149,7 +149,7 @@ object QwenTtsRuntimeManager {
         val usedSeconds = if (maxSeconds != null) minOf(maxSeconds, fullSeconds) else fullSeconds
 
         val key = "${referenceWav.absolutePath}:${referenceWav.length()}:${referenceWav.lastModified()}:" +
-            "${referenceText.hashCode()}:${maxSeconds ?: 0.0}"
+            "${referenceText.hashCode()}:${maxSeconds ?: 0.0}:pause-trim-v2"
         val onDisk = keyFile.takeIf { it.exists() }?.readText()
         if (prompt.exists() && (key == preparedKey || key == onDisk)) {
             preparedKey = key
@@ -157,15 +157,35 @@ object QwenTtsRuntimeManager {
             return@withLock PrepInfo(0, true, fullSeconds, usedSeconds, "")
         }
 
-        val source = if (maxSeconds != null) WavFiles.trimmedCopy(referenceWav, File(dir, "reference_trimmed.wav"), maxSeconds) else referenceWav
+        // The transcript must describe exactly the audio that is used: audio cut at 6 s with the text of the
+        // whole 30 s recording makes the model lose track of where the reference ends, and it then never
+        // emits its end token. So the text is cut at the same relative point, at a word boundary.
+        var source = referenceWav
+        var promptText = referenceText
+        if (maxSeconds != null && fullSeconds > maxSeconds) {
+            val (file, keptSeconds) = WavFiles.trimAtPause(referenceWav, File(dir, "reference_trimmed.wav"), maxSeconds)
+            source = file
+            promptText = trimTextToFraction(referenceText, keptSeconds / fullSeconds)
+        }
         val started = SystemClock.elapsedRealtime()
-        val ok = runNative(null) { Qwen3TtsNative.prepareVoice(handle, source.absolutePath, referenceText, prompt.absolutePath) }
+        val ok = runNative(null) { Qwen3TtsNative.prepareVoice(handle, source.absolutePath, promptText, prompt.absolutePath) }
         val log = Qwen3TtsNative.takeLog(handle)
         if (!ok) throw QwenTtsException("Voice preparation failed: ${Qwen3TtsNative.lastError(handle)}", log)
         keyFile.writeText(key)
         preparedKey = key
         promptFile = prompt
         PrepInfo(SystemClock.elapsedRealtime() - started, false, fullSeconds, usedSeconds, log)
+    }
+
+    /** The first [fraction] of [text] by length, ended at the nearest word boundary at or before that point. */
+    internal fun trimTextToFraction(text: String, fraction: Double): String {
+        val trimmed = text.trim()
+        if (fraction >= 1.0) return trimmed
+        val target = (trimmed.length * fraction).toInt().coerceIn(1, trimmed.length)
+        if (target >= trimmed.length) return trimmed
+        val boundary = trimmed.lastIndexOf(' ', target)
+        val end = if (boundary > 0) boundary else target
+        return trimmed.substring(0, end).trim().trimEnd(',', ';', ':', '-', '—')
     }
 
     /** Forgets the prepared voice (memory and disk), so the next run analyses the reference again. */
