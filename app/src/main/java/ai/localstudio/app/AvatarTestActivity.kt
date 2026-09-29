@@ -47,6 +47,7 @@ class AvatarTestActivity : AppCompatActivity() {
         binding.avatarTestWinkRightButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.WINK_RIGHT) }
         binding.avatarTestSurpriseButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.SURPRISE) }
         binding.avatarTestBlinkButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.BLINK) }
+        binding.avatarTestSmileButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.SMILE) }
 
         populateVoicesWhenReady()
     }

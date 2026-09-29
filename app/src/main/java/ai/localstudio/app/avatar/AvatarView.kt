@@ -1,60 +1,77 @@
 package ai.localstudio.app.avatar
 
-import ai.localstudio.app.R
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.min
+import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Phase 2 face — the user's own photo ([R.drawable.avatar_face]), animated by
- * warping a mesh of points laid over it (via [Canvas.drawBitmapMesh]) instead
- * of drawing cartoon shapes on top of it. There's no face-landmark detection
- * here: the mouth/eye regions below are a fixed guess at where those are in
- * *this specific* photo, expressed as fractions of its width/height — if the
- * photo is ever swapped for a different one, those constants need re-eyeballing
- * too. The warp itself stays purely local (smoothstep falloff around each
- * region) so the rest of the face never moves.
+ * Layered 2D avatar: a clean head plus independent eye and mouth layers, all
+ * full-size PNGs in the source photo's own pixel coordinates (see
+ * `scripts/avatar/generate_layers.py`, which builds them from
+ * `avatar_face.jpg`). Because every layer shares one coordinate system,
+ * a single [Matrix] registers all of them — head motion is just that matrix
+ * changing, never a per-layer offset, so eyes and mouth cannot drift off the
+ * face and no pixel is ever resampled through a deformed mesh.
+ *
+ * Draw order: head, eyes (open, then the closed version faded in over it),
+ * neutral mouth, then whichever viseme mouths currently have weight. Blinks
+ * and mouth changes are alpha cross-fades between full-size layers, not
+ * geometry changes.
  *
  * Owns two loops, both independent of whatever [AvatarSpeechController]
- * feeds it: a per-frame smoothing loop (so mouth-open jumps from
- * [AvatarTtsEngine] callbacks read as motion, not a flicker between two
- * fixed states) and an idle blink timer (so the face still looks alive with
- * nothing being spoken at all). Both start in [onAttachedToWindow] and stop
- * in [onDetachedFromWindow] — this view must never keep animating (or
- * holding a callback the framework can't collect) after it's off-screen.
+ * feeds it: a per-frame loop (smoothing, blink timer, idle micro-motion) and
+ * the asynchronous layer decode. The frame loop starts in
+ * [onAttachedToWindow] and stops in [onDetachedFromWindow] — this view must
+ * never keep animating after it's off-screen.
  */
 class AvatarView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
 
-    // decodeResource, not a Bitmap.createBitmap round-trip — this is a fixed
-    // photo baked into the APK, never generated or replaced at runtime.
-    private val faceBitmap: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.avatar_face)
-    private val meshPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
+    private enum class Viseme(val asset: String) {
+        A("a"), E("e"), I("i"), O("o"), U("u"), SMILE("smile"),
+    }
 
-    // Rebuilt in onSizeChanged: the mesh's rest position (bitmap
-    // center-cropped to this view's current bounds), before any per-frame
-    // mouth/eye offset is added.
-    private var baseVerts = FloatArray(0)
-    private var warpVerts = FloatArray(0)
-    private var drawWidthPx = 0f
-    private var drawHeightPx = 0f
+    private class Layers(
+        val head: Bitmap,
+        val leftOpen: Bitmap,
+        val leftClosed: Bitmap,
+        val rightOpen: Bitmap,
+        val rightClosed: Bitmap,
+        val mouthNeutral: Bitmap,
+        val mouths: Map<Viseme, Bitmap>,
+    )
+
+    // Decoded off the main thread (a dozen 640x640 PNGs); nothing is drawn
+    // until it lands.
+    @Volatile
+    private var layers: Layers? = null
+    private var loadStarted = false
+
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val baseMatrix = Matrix()
+    private val drawMatrix = Matrix()
+    private val pivot = FloatArray(2)
+    private var drawnSizePx = 0f
 
     private var targetState = AvatarState()
     private var currentMouthOpen = 0f
-    private var currentMouthShape = MouthShape.CLOSED
+    private val visemeWeights = FloatArray(Viseme.entries.size)
 
-    // -1..1: positive closes the eye (a blink), negative widens it (e.g.
-    // [AvatarGesture.SURPRISE]) — see applyWarp's own comment on why the
-    // same warp direction handles both.
-    private var currentLeftEyeAmount = 0f
-    private var currentRightEyeAmount = 0f
+    // 0..1 = how far the closed-eye layer is faded in over the open one.
+    private var leftClosed = 0f
+    private var rightClosed = 0f
 
     private var nextBlinkAtMs = 0L
     private var blinkPhaseStartMs = 0L
@@ -62,6 +79,12 @@ class AvatarView @JvmOverloads constructor(
 
     private var gesture: AvatarGesture? = null
     private var gestureStartMs = 0L
+
+    // Head motion, applied identically to every layer — see onDraw.
+    private var headRotationDeg = 0f
+    private var headScale = 1f
+    private var headShiftX = 0f
+    private var headShiftY = 0f
 
     private val frameCallback = object : Runnable {
         override fun run() {
@@ -77,8 +100,7 @@ class AvatarView @JvmOverloads constructor(
 
     /**
      * One-shot, timed expression, independent of whatever [updateState] is
-     * currently driving (speech keeps animating the mouth underneath a
-     * [AvatarGesture.SURPRISE], for instance) — see [AvatarTestActivity] for
+     * currently driving — see [ai.localstudio.app.AvatarTestActivity] for
      * where this is triggered from. Replaces any gesture already playing
      * rather than queuing, so mashing a button restarts it instead of piling
      * up.
@@ -92,6 +114,10 @@ class AvatarView @JvmOverloads constructor(
         super.onAttachedToWindow()
         nextBlinkAtMs = System.currentTimeMillis() + nextBlinkDelayMs()
         postOnAnimation(frameCallback)
+        if (!loadStarted) {
+            loadStarted = true
+            loadLayersAsync()
+        }
     }
 
     override fun onDetachedFromWindow() {
@@ -101,93 +127,166 @@ class AvatarView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        rebuildBaseMesh(w, h)
+        rebuildBaseMatrix()
     }
 
-    // Center-crop the photo into the view's bounds (it's rarely the same
-    // aspect ratio as the AvatarView, e.g. a square photo in a short wide
-    // strip), then lay an evenly spaced grid of rest positions over it —
-    // this is the mesh applyWarp() perturbs per frame, not the bitmap's own
-    // pixels.
-    private fun rebuildBaseMesh(w: Int, h: Int) {
-        if (w <= 0 || h <= 0) return
-        val scale = maxOf(w.toFloat() / faceBitmap.width, h.toFloat() / faceBitmap.height)
-        drawWidthPx = faceBitmap.width * scale
-        drawHeightPx = faceBitmap.height * scale
-        val left = (w - drawWidthPx) / 2f
-        val top = (h - drawHeightPx) / 2f
-
-        val verts = FloatArray((MESH_COLS + 1) * (MESH_ROWS + 1) * 2)
-        var vi = 0
-        for (row in 0..MESH_ROWS) {
-            val v = row / MESH_ROWS.toFloat()
-            for (col in 0..MESH_COLS) {
-                val u = col / MESH_COLS.toFloat()
-                verts[vi] = left + u * drawWidthPx
-                verts[vi + 1] = top + v * drawHeightPx
-                vi += 2
+    private fun loadLayersAsync() {
+        val assets = context.applicationContext.assets
+        Thread({
+            fun load(path: String): Bitmap =
+                checkNotNull(assets.open("$ASSET_DIR/$path").use { BitmapFactory.decodeStream(it) }) { "missing avatar layer $path" }
+            val loaded = Layers(
+                head = load("avatar_head.png"),
+                leftOpen = load("eyes/left_open.png"),
+                leftClosed = load("eyes/left_closed.png"),
+                rightOpen = load("eyes/right_open.png"),
+                rightClosed = load("eyes/right_closed.png"),
+                mouthNeutral = load("mouth/neutral.png"),
+                mouths = Viseme.entries.associateWith { load("mouth/${it.asset}.png") },
+            )
+            post {
+                layers = loaded
+                rebuildBaseMatrix()
+                invalidate()
             }
-        }
-        baseVerts = verts
-        warpVerts = verts.copyOf()
+        }, "avatar-layers").start()
+    }
+
+    // Fit the (square) head bitmap into this view and centre it, with a small
+    // overscan so the ±2% head motion below never exposes the photo's own
+    // top/bottom edge. Every layer is the same size as the head, so this one
+    // matrix is all any of them ever needs.
+    private fun rebuildBaseMatrix() {
+        val head = layers?.head ?: return
+        if (width <= 0 || height <= 0) return
+        val scale = min(width.toFloat() / head.width, height.toFloat() / head.height) * OVERSCAN
+        val dx = (width - head.width * scale) / 2f
+        val dy = (height - head.height * scale) / 2f
+        baseMatrix.reset()
+        baseMatrix.postScale(scale, scale)
+        baseMatrix.postTranslate(dx, dy)
+        drawnSizePx = head.width * scale
+        // The head turns about the neck, not the middle of the picture.
+        pivot[0] = head.width * 0.5f
+        pivot[1] = head.height * 0.88f
+        baseMatrix.mapPoints(pivot)
     }
 
     private fun step() {
+        val now = System.currentTimeMillis()
         // Exponential smoothing toward the target — a fixed-fraction catch-up
         // per frame, not a fixed-duration tween: it reacts immediately to a
         // new target (no ramp-up lag chasing fast speech) while still never
-        // jumping instantly (see this class's own doc comment on why the
-        // raw callback values alone would read as a flicker).
+        // jumping instantly.
         currentMouthOpen += (targetState.mouthOpen - currentMouthOpen) * SMOOTHING
-        currentMouthShape = targetState.mouthShape
 
-        val now = System.currentTimeMillis()
         if (!blinking && now >= nextBlinkAtMs) {
             blinking = true
             blinkPhaseStartMs = now
         }
-        val autoBlink = if (blinking) {
+        var blinkPulse = 0f
+        if (blinking) {
             val elapsed = now - blinkPhaseStartMs
             if (elapsed >= BLINK_DURATION_MS) {
                 blinking = false
                 nextBlinkAtMs = now + nextBlinkDelayMs()
-                0f
             } else {
-                trianglePulse(elapsed, BLINK_DURATION_MS)
+                blinkPulse = trianglePulse(elapsed, BLINK_DURATION_MS)
             }
-        } else {
-            0f
         }
+        var left = blinkPulse
+        var right = blinkPulse
 
-        var leftEye = autoBlink
-        var rightEye = autoBlink
-        val activeGesture = gesture
-        if (activeGesture != null) {
+        var viseme = visemeFor(targetState.mouthShape, currentMouthOpen)
+        var visemeTarget = smoothstep(MOUTH_OPEN_MIN, MOUTH_OPEN_FULL, currentMouthOpen)
+        var popPulse = 0f
+
+        val active = gesture
+        if (active != null) {
             val elapsed = now - gestureStartMs
-            if (elapsed >= activeGesture.durationMs) {
+            if (elapsed >= active.durationMs) {
                 gesture = null
             } else {
-                when (activeGesture) {
+                val pulse = trianglePulse(elapsed, active.durationMs)
+                when (active) {
                     AvatarGesture.BLINK -> {
-                        leftEye = trianglePulse(elapsed, activeGesture.durationMs)
-                        rightEye = leftEye
+                        left = pulse
+                        right = pulse
                     }
-                    AvatarGesture.WINK_LEFT -> leftEye = trianglePulse(elapsed, activeGesture.durationMs)
-                    AvatarGesture.WINK_RIGHT -> rightEye = trianglePulse(elapsed, activeGesture.durationMs)
+                    AvatarGesture.WINK_LEFT -> left = pulse
+                    AvatarGesture.WINK_RIGHT -> right = pulse
                     AvatarGesture.SURPRISE -> {
-                        // Negative = widened, not closed — see applyWarp.
-                        val pulse = trianglePulse(elapsed, activeGesture.durationMs)
-                        leftEye = -pulse
-                        rightEye = -pulse
-                        currentMouthShape = MouthShape.ROUND
-                        currentMouthOpen = pulse
+                        viseme = Viseme.O
+                        visemeTarget = min(1f, pulse * 1.6f)
+                        popPulse = pulse
+                    }
+                    AvatarGesture.SMILE -> {
+                        viseme = Viseme.SMILE
+                        visemeTarget = min(1f, pulse * 2f)
                     }
                 }
             }
         }
-        currentLeftEyeAmount = leftEye
-        currentRightEyeAmount = rightEye
+
+        // A triangular pulse is closed only at its very peak; this widens the
+        // closed plateau so a blink reads as shut, not as a half-faded ghost.
+        leftClosed = min(1f, left * CLOSED_PLATEAU)
+        rightClosed = min(1f, right * CLOSED_PLATEAU)
+
+        for (v in Viseme.entries) {
+            val target = if (v == viseme) visemeTarget else 0f
+            visemeWeights[v.ordinal] += (target - visemeWeights[v.ordinal]) * VISEME_SMOOTHING
+        }
+
+        // Idle micro-motion, incommensurate periods so it never visibly loops.
+        // Bounded well inside the ±1–3% translation, ±2° rotation, 0.98–1.02
+        // scale envelope; speech adds a slight nod, surprise a quick pop.
+        val t = now / 1000.0
+        val speech = currentMouthOpen.coerceIn(0f, 1f)
+        headRotationDeg = (0.9 * sin(2 * PI * t / 6.3) + 0.5 * sin(2 * PI * t / 3.1 + 1.0)).toFloat()
+        headShiftX = (0.012 * sin(2 * PI * t / 7.1 + 0.7)).toFloat()
+        headShiftY = (0.014 * sin(2 * PI * t / 5.3) + 0.006 * speech - 0.012 * popPulse).toFloat()
+        headScale = (1.0 + 0.008 * sin(2 * PI * t / 8.9) + 0.006 * speech + 0.02 * popPulse).toFloat()
         invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val l = layers ?: return
+
+        // One matrix for every layer: fit/centre, then rotation, scale and
+        // translation about the neck pivot.
+        drawMatrix.set(baseMatrix)
+        drawMatrix.postRotate(headRotationDeg, pivot[0], pivot[1])
+        drawMatrix.postScale(headScale, headScale, pivot[0], pivot[1])
+        drawMatrix.postTranslate(headShiftX * drawnSizePx, headShiftY * drawnSizePx)
+
+        drawLayer(canvas, l.head, 1f)
+        drawLayer(canvas, l.leftOpen, 1f)
+        drawLayer(canvas, l.rightOpen, 1f)
+        if (leftClosed > 0f) drawLayer(canvas, l.leftClosed, leftClosed)
+        if (rightClosed > 0f) drawLayer(canvas, l.rightClosed, rightClosed)
+        drawLayer(canvas, l.mouthNeutral, 1f)
+        for (v in Viseme.entries) {
+            val w = visemeWeights[v.ordinal]
+            if (w > MIN_LAYER_ALPHA) drawLayer(canvas, l.mouths.getValue(v), w)
+        }
+    }
+
+    private fun drawLayer(canvas: Canvas, bitmap: Bitmap, alpha: Float) {
+        paint.alpha = (alpha.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        canvas.drawBitmap(bitmap, drawMatrix, paint)
+    }
+
+    // Existing MouthShape buckets -> the six mouth PNGs. CLOSED (bilabials,
+    // punctuation) is just the neutral mouth. The two-way splits (ROUND ->
+    // o/u, WIDE -> e/i) use loudness: a louder syllable opens wider.
+    private fun visemeFor(shape: MouthShape, open: Float): Viseme? = when (shape) {
+        MouthShape.CLOSED -> null
+        MouthShape.OPEN -> Viseme.A
+        MouthShape.ROUND -> if (open >= WIDE_OPEN_THRESHOLD) Viseme.O else Viseme.U
+        MouthShape.WIDE -> if (open >= WIDE_OPEN_THRESHOLD) Viseme.E else Viseme.I
+        MouthShape.TEETH, MouthShape.SIBILANT, MouthShape.NARROW -> Viseme.I
     }
 
     // A triangular pulse (0 -> 1 -> 0), not a step — an instant open/closed
@@ -195,142 +294,32 @@ class AvatarView @JvmOverloads constructor(
     // auto-blink timer and every timed [AvatarGesture].
     private fun trianglePulse(elapsedMs: Long, durationMs: Long): Float {
         val phase = elapsedMs.toFloat() / durationMs
-        return 1f - kotlin.math.abs(phase - 0.5f) * 2f
+        return 1f - abs(phase - 0.5f) * 2f
+    }
+
+    private fun smoothstep(edge0: Float, edge1: Float, x: Float): Float {
+        val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
     }
 
     private fun nextBlinkDelayMs(): Long = Random.nextLong(MIN_BLINK_GAP_MS, MAX_BLINK_GAP_MS)
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        if (baseVerts.isEmpty()) return
-        applyWarp()
-        canvas.drawBitmapMesh(faceBitmap, MESH_COLS, MESH_ROWS, warpVerts, 0, null, 0, meshPaint)
-    }
-
-    private fun applyWarp() {
-        val openAmount = currentMouthOpen.coerceIn(0f, 1f)
-        // Rough, not measured — see this class's own doc comment: real lips
-        // move mostly via the jaw (the "below center" half of the mouth
-        // region), the upper lip barely at all, which is why these two
-        // fractions aren't symmetric.
-        val (openScale, widthScale) = when (currentMouthShape) {
-            MouthShape.CLOSED -> 0f to 0f
-            MouthShape.OPEN -> 1f to 0f
-            MouthShape.ROUND -> 0.8f to -0.4f
-            MouthShape.WIDE -> 0.5f to 0.5f
-            MouthShape.TEETH -> 0.4f to 0.2f
-            MouthShape.SIBILANT -> 0.3f to -0.2f
-            MouthShape.NARROW -> 0.5f to -0.15f
-        }
-        val mouthOpenPx = openAmount * openScale * MAX_MOUTH_OPEN_FRACTION * drawHeightPx
-        val mouthWidthPx = openAmount * widthScale * MAX_MOUTH_WIDTH_FRACTION * drawWidthPx
-        // Same displacement, opposite direction depending on sign — a
-        // negative amount (only ever from AvatarGesture.SURPRISE) pushes the
-        // lids apart instead of together, which is why this isn't just
-        // `.coerceIn(0f, 1f)` the way a plain blink amount would be. Widening
-        // reads clearly at a slightly larger fraction than a blink's own —
-        // see MAX_EYE_WIDE_FRACTION's own comment.
-        val leftEyePx = eyeAmplitudePx(currentLeftEyeAmount)
-        val rightEyePx = eyeAmplitudePx(currentRightEyeAmount)
-
-        var vi = 0
-        for (row in 0..MESH_ROWS) {
-            val v = row / MESH_ROWS.toFloat()
-            for (col in 0..MESH_COLS) {
-                val u = col / MESH_COLS.toFloat()
-                var dx = 0f
-                var dy = 0f
-
-                val mouthInfluence = ellipseFalloff(u - MOUTH_CX, v - MOUTH_CY, MOUTH_RX, MOUTH_RY)
-                if (mouthInfluence > 0f) {
-                    val jawSign = if (v >= MOUTH_CY) 1f else -0.4f
-                    dy += mouthInfluence * mouthOpenPx * jawSign
-                    val cornerSign = if (u >= MOUTH_CX) 1f else -1f
-                    dx += mouthInfluence * mouthWidthPx * cornerSign
-                }
-
-                // Left/right regions are spatially disjoint, so a vertex only
-                // ever gets influence from (at most) one of them — no need to
-                // pick a max, both contributions can just be added. Separate
-                // *_EYE_CY per eye, not one shared value, because the two
-                // eyes in this specific photo don't sit at quite the same
-                // height (a real device report showed the left one warping
-                // visibly worse than the right with a single shared center).
-                val leftEyeInfluence = ellipseFalloff(u - LEFT_EYE_CX, v - LEFT_EYE_CY, EYE_RX, EYE_RY)
-                if (leftEyeInfluence > 0f) {
-                    val lidSign = if (v < LEFT_EYE_CY) 1f else -1f
-                    dy += leftEyeInfluence * leftEyePx * lidSign
-                }
-                val rightEyeInfluence = ellipseFalloff(u - RIGHT_EYE_CX, v - RIGHT_EYE_CY, EYE_RX, EYE_RY)
-                if (rightEyeInfluence > 0f) {
-                    val lidSign = if (v < RIGHT_EYE_CY) 1f else -1f
-                    dy += rightEyeInfluence * rightEyePx * lidSign
-                }
-
-                warpVerts[vi] = baseVerts[vi] + dx
-                warpVerts[vi + 1] = baseVerts[vi + 1] + dy
-                vi += 2
-            }
-        }
-    }
-
-    private fun eyeAmplitudePx(amount: Float): Float {
-        val clamped = amount.coerceIn(-1f, 1f)
-        val fraction = if (clamped >= 0f) MAX_BLINK_FRACTION else MAX_EYE_WIDE_FRACTION
-        return clamped * fraction * drawHeightPx
-    }
-
-    // Smoothstep falloff on normalized elliptical distance: 1 at the region's
-    // center, 0 at/beyond its radius, with no hard edge in between — a linear
-    // falloff instead would show as a visible crease where influence hits 0.
-    private fun ellipseFalloff(du: Float, dv: Float, rx: Float, ry: Float): Float {
-        val nx = du / rx
-        val ny = dv / ry
-        val d = kotlin.math.sqrt(nx * nx + ny * ny)
-        val t = (1f - d).coerceIn(0f, 1f)
-        return t * t * (3f - 2f * t)
-    }
-
     private companion object {
+        const val ASSET_DIR = "avatar"
+        const val OVERSCAN = 1.04f
+
         const val SMOOTHING = 0.25f
+        const val VISEME_SMOOTHING = 0.4f
+        const val MIN_LAYER_ALPHA = 0.02f
+
         const val BLINK_DURATION_MS = 180L
         const val MIN_BLINK_GAP_MS = 2000L
         const val MAX_BLINK_GAP_MS = 6000L
+        const val CLOSED_PLATEAU = 2.2f
 
-        // 16 (the original value) made the eye ellipses only 2-3 vertices
-        // wide/tall — coarse enough that a fraction of a mesh cell's
-        // difference in exactly where an eye's center landed relative to the
-        // grid lines was visibly worse for one eye than the other. Higher
-        // resolution costs nothing meaningful (a few hundred more verts is
-        // still trivial for drawBitmapMesh once per frame) and removes that
-        // sensitivity for both eyes and the mouth alike.
-        const val MESH_COLS = 28
-        const val MESH_ROWS = 28
-
-        // Fractions of avatar_face.jpg's own width/height (0..1) — eyeballed
-        // against that specific photo, not derived from any detector.
-        const val MOUTH_CX = 0.51f
-        const val MOUTH_CY = 0.77f
-        const val MOUTH_RX = 0.17f
-        const val MOUTH_RY = 0.11f
-        const val LEFT_EYE_CX = 0.39f
-        const val LEFT_EYE_CY = 0.53f
-        const val RIGHT_EYE_CX = 0.66f
-        const val RIGHT_EYE_CY = 0.52f
-        const val EYE_RX = 0.075f
-        const val EYE_RY = 0.06f
-
-        // How far a fully-open mouth/fully-closed eye is allowed to displace
-        // the mesh, as a fraction of the drawn photo's own size — kept small
-        // on purpose: this is a real photo, not a caricature, and a few
-        // percent of displacement already reads clearly at 200dp height.
-        const val MAX_MOUTH_OPEN_FRACTION = 0.09f
-        const val MAX_MOUTH_WIDTH_FRACTION = 0.05f
-        const val MAX_BLINK_FRACTION = 0.028f
-        // Closer to MAX_BLINK_FRACTION than before (was 0.045) — that much
-        // more displacement than a blink's own read as the skin stretching
-        // rather than an eye widening, on a real device.
-        const val MAX_EYE_WIDE_FRACTION = 0.032f
+        const val MOUTH_OPEN_MIN = 0.04f
+        const val MOUTH_OPEN_FULL = 0.35f
+        const val WIDE_OPEN_THRESHOLD = 0.4f
     }
 }
 
@@ -344,4 +333,5 @@ enum class AvatarGesture(val durationMs: Long) {
     WINK_LEFT(650L),
     WINK_RIGHT(650L),
     SURPRISE(900L),
+    SMILE(1400L),
 }
