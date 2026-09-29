@@ -72,12 +72,29 @@ object QwenTtsRuntimeManager {
     @Volatile
     var referenceMaxSeconds: Double? = null
 
+    /**
+     * Default thread count for Qwen: every core within ~70% of the fastest core's clock (prime + big
+     * cores). [LlamaBridge.defaultThreads] counts only the single top-clocked core, which on a
+     * 1+3+4 SoC (e.g. Snapdragon 865) means one thread — measured ~20-200x slower than realtime.
+     */
+    fun defaultThreads(): Int {
+        val total = Runtime.getRuntime().availableProcessors()
+        val freqs = (0 until total).mapNotNull { core ->
+            runCatching {
+                File("/sys/devices/system/cpu/cpu$core/cpufreq/cpuinfo_max_freq").readText().trim().toLong()
+            }.getOrNull()
+        }
+        if (freqs.size < total) return LlamaBridge.defaultThreads()
+        val top = freqs.max()
+        return freqs.count { it * 10 >= top * 7 }.coerceIn(1, 8)
+    }
+
     /** Free RAM needed before loading: ~0.9 GB of weights plus graph buffers and the vocoder. */
     private const val MIN_AVAILABLE_MB = 1400L
 
     suspend fun ensureLoaded(context: Context, provider: QwenTtsModelProvider): LoadInfo = lock.withLock {
         val app = context.applicationContext
-        val wantedThreads = threadsOverride ?: LlamaBridge.defaultThreads()
+        val wantedThreads = threadsOverride ?: defaultThreads()
         // A different thread count needs a fresh context.
         if (handle != 0L && loadedThreads != wantedThreads) {
             val old = handle

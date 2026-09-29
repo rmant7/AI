@@ -2,7 +2,6 @@ package ai.localstudio.app
 
 import ai.localstudio.app.databinding.ActivityVoiceBenchmarkBinding
 import ai.localstudio.app.databinding.ItemVoiceBenchmarkResultBinding
-import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.voicebenchmark.QwenModelState
 import ai.localstudio.app.voicebenchmark.QwenTtsModelDescriptor
 import ai.localstudio.app.voicebenchmark.QwenTtsModelProvider
@@ -302,7 +301,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         }
         val choices = listOf<Int?>(null, 1, 2, 4, 6, 8)
         val labels = choices.map { n ->
-            if (n == null) getString(R.string.voice_bench_qwen_threads_auto, LlamaBridge.defaultThreads())
+            if (n == null) getString(R.string.voice_bench_qwen_threads_auto, QwenTtsRuntimeManager.defaultThreads())
             else getString(R.string.voice_bench_qwen_threads_n, n)
         }
         binding.voiceBenchQwenThreads.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
