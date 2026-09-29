@@ -58,6 +58,11 @@ class AvatarTestActivity : AppCompatActivity() {
             settings.avatarVoiceBackend = if (checked) AvatarVoiceBackend.QWEN.key else AvatarVoiceBackend.ANDROID.key
             buildController()
         }
+        binding.avatarTestQwenParallelCheck.isChecked = settings.qwenParallel
+        binding.avatarTestQwenParallelCheck.setOnCheckedChangeListener { _, checked ->
+            settings.qwenParallel = checked
+            buildController()
+        }
         buildController()
 
         binding.avatarTestPlayButton.setOnClickListener { play() }

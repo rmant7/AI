@@ -326,6 +326,14 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_QWEN_TALKER_VARIANT, "q4_k_m") ?: "q4_k_m"
         set(value) = prefs.edit().putString(KEY_QWEN_TALKER_VARIANT, value).apply()
 
+    /**
+     * Experimental: synthesize two avatar sentences at once on a second model context. Off by default:
+     * it crashed the native library (NaN assertion in ggml with two syntheses running) and was not faster.
+     */
+    var qwenParallel: Boolean
+        get() = prefs.getBoolean(KEY_QWEN_PARALLEL, false)
+        set(value) = prefs.edit().putBoolean(KEY_QWEN_PARALLEL, value).apply()
+
     var voiceReferenceText: String
         get() = prefs.getString(KEY_VOICE_REFERENCE_TEXT, "") ?: ""
         set(value) = prefs.edit().putString(KEY_VOICE_REFERENCE_TEXT, value).apply()
@@ -434,6 +442,7 @@ class Settings(context: Context) {
         const val KEY_AVATAR_BACKEND = "avatarVoiceBackend"
         const val KEY_VOICE_REFERENCE_TEXT = "voiceReferenceText"
         const val KEY_QWEN_TALKER_VARIANT = "qwenTalkerVariant"
+        const val KEY_QWEN_PARALLEL = "qwenParallel"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_DOWNLOAD_POLICY = "downloadPolicy"

@@ -45,7 +45,7 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
 
     // On a phone with RAM and cores to spare, a second context synthesizes the next sentence at the same
     // time (the audio is put back in order by AvatarTtsEngine). Otherwise one worker, as before.
-    private val parallel = parallelAllowed(app)
+    private val parallel = AppContainer.get(app).settings.qwenParallel && parallelAllowed(app)
     private val second = QwenTtsSecondWorker()
     private val threadsEach = if (parallel) PARALLEL_THREADS else null
 

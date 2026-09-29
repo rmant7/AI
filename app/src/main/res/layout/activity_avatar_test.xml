@@ -72,6 +72,12 @@
                 android:layout_marginTop="16dp"
                 android:text="@string/avatar_test_qwen" />
 
+            <CheckBox
+                android:id="@+id/avatarTestQwenParallelCheck"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/avatar_test_qwen_parallel" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

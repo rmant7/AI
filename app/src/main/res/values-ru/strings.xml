@@ -593,4 +593,5 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_q8_ready">Talker Q8_0: скачан</string>
     <string name="voice_bench_qwen_q8_failed">Talker Q8_0: ошибка загрузки: %1$s</string>
     <string name="voice_bench_qwen_q8_needed">Сначала скачайте Talker Q8_0</string>
+    <string name="avatar_test_qwen_parallel">Эксперимент: два предложения одновременно (роняло приложение на Pixel, по умолчанию выключено)</string>
 </resources>
