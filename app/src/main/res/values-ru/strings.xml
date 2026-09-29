@@ -538,4 +538,19 @@ RTF: %3$.2f</string>
     <string name="voice_bench_status_not_installed">Не установлен локально</string>
     <string name="voice_bench_status_unsupported">Язык не поддерживается</string>
     <string name="voice_bench_status_error">Ошибка: %1$s</string>
+
+    <string name="voice_bench_qwen_model_title">Модель Qwen3-TTS 0.6B</string>
+    <string name="voice_bench_qwen_not_downloaded">Не скачана (около %1$.1f ГБ, хранится только на этом устройстве)</string>
+    <string name="voice_bench_qwen_downloading">Загрузка %1$d%%</string>
+    <string name="voice_bench_qwen_ready">Готова</string>
+    <string name="voice_bench_qwen_failed">Ошибка загрузки: %1$s</string>
+    <string name="voice_bench_qwen_download">Скачать</string>
+    <string name="voice_bench_qwen_cancel_download">Отменить загрузку</string>
+    <string name="voice_bench_qwen_delete">Удалить модель</string>
+    <string name="voice_bench_status_model_missing">Модель не скачана — нажми «Скачать» под списком движков</string>
+    <string name="voice_bench_status_unsupported_device">У этого процессора нет инструкций dotprod/fp16, нужных сборке модели</string>
+    <string name="voice_bench_result_prep">Подготовка голоса: %1$.1f с</string>
+    <string name="voice_bench_result_prep_reused">Подготовка голоса: взята из предыдущего запуска</string>
+    <string name="voice_bench_result_first">Первое аудио: %1$.1f с</string>
+    <string name="voice_bench_result_memory">Память: %1$d → %2$d МБ (свободно до загрузки: %3$d МБ)</string>
 </resources>

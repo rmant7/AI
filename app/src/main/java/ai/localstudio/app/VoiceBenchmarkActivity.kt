@@ -5,6 +5,10 @@ import ai.localstudio.app.databinding.ItemVoiceBenchmarkResultBinding
 import ai.localstudio.app.voicebenchmark.AndroidTtsBenchmarkEngine
 import ai.localstudio.app.voicebenchmark.ChatterboxBenchmarkEngine
 import ai.localstudio.app.voicebenchmark.Qwen3TtsBenchmarkEngine
+import ai.localstudio.app.voicebenchmark.QwenModelState
+import ai.localstudio.app.voicebenchmark.QwenTtsModelDescriptor
+import ai.localstudio.app.voicebenchmark.QwenTtsModelProvider
+import ai.localstudio.app.voicebenchmark.QwenTtsRuntimeManager
 import ai.localstudio.app.voicebenchmark.ReferenceVoiceRecorder
 import ai.localstudio.app.voicebenchmark.VoiceBenchmarkEngine
 import ai.localstudio.app.voicebenchmark.VoiceBenchmarkResult
@@ -97,8 +101,8 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         runner = VoiceBenchmarkRunner(
             listOf(
                 AndroidTtsBenchmarkEngine(this, resultsDir),
-                Qwen3TtsBenchmarkEngine(Qwen3TtsBenchmarkEngine.Size.SMALL),
-                Qwen3TtsBenchmarkEngine(Qwen3TtsBenchmarkEngine.Size.LARGE),
+                Qwen3TtsBenchmarkEngine(this, Qwen3TtsBenchmarkEngine.Size.SMALL, resultsDir),
+                Qwen3TtsBenchmarkEngine(this, Qwen3TtsBenchmarkEngine.Size.LARGE, resultsDir),
                 ChatterboxBenchmarkEngine(),
             ),
         )
@@ -106,6 +110,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         setupReference()
         setupTest()
         setupEngines()
+        setupQwenModel()
 
         binding.voiceBenchGenerateButton.setOnClickListener { runSelected() }
         binding.voiceBenchCancelButton.setOnClickListener { runJob?.cancel() }
@@ -122,6 +127,8 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         super.onDestroy()
         if (recorder.isRecording) recorder.stop()
         stopPlayback()
+        // ~1 GB of model weights must not stay resident once the benchmark screen is gone.
+        if (isFinishing) QwenTtsRuntimeManager.releaseAsync()
     }
 
     // ── reference voice ───────────────────────────────────────────────────
@@ -242,6 +249,39 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         }
     }
 
+    // ── Qwen model download ───────────────────────────────────────────────
+
+    private fun setupQwenModel() {
+        val provider = QwenTtsModelProvider.get(this)
+        binding.voiceBenchQwenDownload.setOnClickListener {
+            when (provider.state.value) {
+                is QwenModelState.Downloading -> provider.cancelDownload()
+                QwenModelState.Ready -> Unit
+                else -> NetworkPolicy.confirmIfNeeded(this, AppContainer.get(this).settings) { provider.download() }
+            }
+        }
+        binding.voiceBenchQwenDelete.setOnClickListener { provider.delete() }
+        lifecycleScope.launch {
+            provider.state.collect { state ->
+                binding.voiceBenchQwenModelStatus.text = when (state) {
+                    QwenModelState.NotDownloaded -> getString(
+                        R.string.voice_bench_qwen_not_downloaded, QwenTtsModelDescriptor.totalExpectedBytes / 1e9,
+                    )
+                    is QwenModelState.Downloading ->
+                        getString(R.string.voice_bench_qwen_downloading, (state.fraction * 100).toInt())
+                    QwenModelState.Ready -> getString(R.string.voice_bench_qwen_ready)
+                    is QwenModelState.Failed -> getString(R.string.voice_bench_qwen_failed, state.message)
+                }
+                val downloading = state is QwenModelState.Downloading
+                binding.voiceBenchQwenDownload.isEnabled = state !is QwenModelState.Ready
+                binding.voiceBenchQwenDownload.setText(
+                    if (downloading) R.string.voice_bench_qwen_cancel_download else R.string.voice_bench_qwen_download,
+                )
+                binding.voiceBenchQwenDelete.isEnabled = !downloading && state is QwenModelState.Ready
+            }
+        }
+    }
+
     // ── running ───────────────────────────────────────────────────────────
 
     private fun buildRequest(): VoiceBenchmarkRunner.Request? {
@@ -267,6 +307,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         val request = buildRequest() ?: return
         stopPlayback()
         launchRun {
+            if (ids.any { it.startsWith("qwen3_tts") }) AppContainer.get(this).releaseLocalModels()
             runner.runAll(ids, request, onStarted = { markRunning(it) }, onFinished = { showResult(it) })
         }
     }
@@ -275,6 +316,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         val request = buildRequest() ?: return
         stopPlayback()
         launchRun {
+            if (engineId.startsWith("qwen3_tts")) AppContainer.get(this).releaseLocalModels()
             markRunning(engineId)
             showResult(runner.runOne(engineId, request))
         }
@@ -338,23 +380,37 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         item.voiceBenchResultTitle.text =
             getString(R.string.voice_bench_result_meta, engineName(result.engineId), getString(language))
         item.voiceBenchResultDetails.text = when {
-            result.success -> buildString {
-                append(
-                    getString(
-                        R.string.voice_bench_result_timing,
-                        (result.generationMs ?: 0L) / 1000.0,
-                        (result.audioDurationMs ?: 0L) / 1000.0,
-                        result.rtf ?: 0.0,
-                    ),
-                )
-                result.loadMs?.let { append('\n').append(getString(R.string.voice_bench_result_load, it / 1000.0)) }
-            }
+            result.success -> resultLines(result).joinToString("\n")
             result.status == VoiceBenchmarkStatus.NOT_INSTALLED -> getString(R.string.voice_bench_status_not_installed)
+            result.status == VoiceBenchmarkStatus.MODEL_NOT_DOWNLOADED -> getString(R.string.voice_bench_status_model_missing)
+            result.status == VoiceBenchmarkStatus.UNSUPPORTED_DEVICE -> getString(R.string.voice_bench_status_unsupported_device)
             result.status == VoiceBenchmarkStatus.UNSUPPORTED_LANGUAGE -> getString(R.string.voice_bench_status_unsupported)
             else -> getString(R.string.voice_bench_status_error, result.error ?: "")
         }
         item.voiceBenchResultPlay.isEnabled = result.success && result.audioFile != null
         item.voiceBenchResultRepeat.isEnabled = runJob?.isActive != true
+    }
+
+    // Load and voice preparation come first and are reported apart from
+    // generation: generation time and RTF cover neither.
+    private fun resultLines(result: VoiceBenchmarkResult): List<String> = buildList {
+        result.loadMs?.let { add(getString(R.string.voice_bench_result_load, it / 1000.0)) }
+        result.voicePrepMs?.let {
+            add(if (it == 0L) getString(R.string.voice_bench_result_prep_reused) else getString(R.string.voice_bench_result_prep, it / 1000.0))
+        }
+        add(
+            getString(
+                R.string.voice_bench_result_timing,
+                (result.generationMs ?: 0L) / 1000.0,
+                (result.audioDurationMs ?: 0L) / 1000.0,
+                result.rtf ?: 0.0,
+            ),
+        )
+        result.firstAudioMs?.let { add(getString(R.string.voice_bench_result_first, it / 1000.0)) }
+        val after = result.memoryAfterMb
+        val before = result.memoryBeforeMb
+        val free = result.availRamMb
+        if (before != null && after != null && free != null) add(getString(R.string.voice_bench_result_memory, before, after, free))
     }
 
     private fun clearResults() {

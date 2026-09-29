@@ -44,11 +44,16 @@ class VoiceBenchmarkRunner(val engines: List<VoiceBenchmarkEngine>) {
         return lock.withLock {
             withContext(Dispatchers.Default) {
                 try {
+                    val availability = if (request.language in engine.supportedLanguages) engine.availability() else null
                     when {
                         request.language !in engine.supportedLanguages ->
                             VoiceBenchmarkResult.failed(engine.id, VoiceBenchmarkStatus.UNSUPPORTED_LANGUAGE)
-                        engine.availability() == EngineAvailability.NOT_INSTALLED ->
+                        availability == EngineAvailability.NOT_INSTALLED ->
                             VoiceBenchmarkResult.failed(engine.id, VoiceBenchmarkStatus.NOT_INSTALLED)
+                        availability == EngineAvailability.MODEL_NOT_DOWNLOADED ->
+                            VoiceBenchmarkResult.failed(engine.id, VoiceBenchmarkStatus.MODEL_NOT_DOWNLOADED)
+                        availability == EngineAvailability.UNSUPPORTED_DEVICE ->
+                            VoiceBenchmarkResult.failed(engine.id, VoiceBenchmarkStatus.UNSUPPORTED_DEVICE)
                         else -> engine.synthesize(request.text, request.language, request.referenceAudio, request.referenceText)
                     }
                 } catch (e: CancellationException) {

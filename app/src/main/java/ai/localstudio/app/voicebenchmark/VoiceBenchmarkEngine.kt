@@ -2,7 +2,7 @@ package ai.localstudio.app.voicebenchmark
 
 import java.io.File
 
-enum class EngineAvailability { AVAILABLE, NOT_INSTALLED }
+enum class EngineAvailability { AVAILABLE, NOT_INSTALLED, MODEL_NOT_DOWNLOADED, UNSUPPORTED_DEVICE }
 
 /**
  * One text-to-speech backend as the Voice Benchmark screen sees it. The
@@ -20,7 +20,7 @@ interface VoiceBenchmarkEngine {
     /** BCP-47 language codes ("ru", "en", "he") this engine can speak. */
     val supportedLanguages: Set<String>
 
-    /** [EngineAvailability.NOT_INSTALLED] when the backend is not present on this device. */
+    /** Anything other than [EngineAvailability.AVAILABLE] says why the backend cannot run right now. */
     suspend fun availability(): EngineAvailability
 
     /**

@@ -31,6 +31,7 @@ val hasAndroidSdk = System.getenv("ANDROID_HOME") != null ||
 if (hasAndroidSdk) {
     include(":app")
     include(":whisper")
+    include(":qwen3tts")
 
     // Extra CPU-feature builds of :app's llama_jni and :whisper's whisper_jni
     // (dotprod, i8mm) — no sources of their own, just a different CMake

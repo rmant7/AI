@@ -189,6 +189,7 @@ dependencies {
     implementation(project(":commercial-memory"))
     implementation(project(":openai"))
     implementation(project(":whisper"))
+    implementation(project(":qwen3tts"))
     // CPU-feature variants of the native libraries (dotprod, i8mm) — packaged
     // next to the baseline ones, picked at runtime by CpuVariant.
     implementation(project(":llama-dotprod"))

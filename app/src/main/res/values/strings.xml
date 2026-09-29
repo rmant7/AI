@@ -551,4 +551,19 @@ RTF: %3$.2f</string>
     <string name="voice_bench_text_en_question" translatable="false">Have you had breakfast yet, or should we go for a walk first?</string>
     <string name="voice_bench_text_he_normal" translatable="false">שלום, קוראים לי רומן. היום אנחנו בודקים איך הקול שלי נשמע.</string>
     <string name="voice_bench_text_he_long" translatable="false">היום בבוקר קמתי מוקדם, שתיתי קפה והלכתי לטייל ליד הים. האוויר היה נקי והשמש זרחה, ופתאום הבנתי כמה חשוב לפעמים לעצור ולהקשיב לכל מה שקורה סביבנו.</string>
+
+    <string name="voice_bench_qwen_model_title">Qwen3-TTS 0.6B model</string>
+    <string name="voice_bench_qwen_not_downloaded">Not downloaded (about %1$.1f GB, stored only on this device)</string>
+    <string name="voice_bench_qwen_downloading">Downloading %1$d%%</string>
+    <string name="voice_bench_qwen_ready">Ready</string>
+    <string name="voice_bench_qwen_failed">Download failed: %1$s</string>
+    <string name="voice_bench_qwen_download">Download</string>
+    <string name="voice_bench_qwen_cancel_download">Cancel download</string>
+    <string name="voice_bench_qwen_delete">Delete model</string>
+    <string name="voice_bench_status_model_missing">Model not downloaded — use the Download button under Engines</string>
+    <string name="voice_bench_status_unsupported_device">This CPU lacks the dotprod/fp16 instructions the model build needs</string>
+    <string name="voice_bench_result_prep">Voice preparation: %1$.1f s</string>
+    <string name="voice_bench_result_prep_reused">Voice preparation: reused from an earlier run</string>
+    <string name="voice_bench_result_first">First audio: %1$.1f s</string>
+    <string name="voice_bench_result_memory">Memory: %1$d → %2$d MB (%3$d MB free before)</string>
 </resources>

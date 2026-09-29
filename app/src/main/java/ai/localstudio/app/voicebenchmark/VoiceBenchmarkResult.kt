@@ -3,7 +3,7 @@ package ai.localstudio.app.voicebenchmark
 import java.io.File
 
 /** Why a benchmark result has no audio, in terms the screen can turn into a localized message. */
-enum class VoiceBenchmarkStatus { OK, NOT_INSTALLED, UNSUPPORTED_LANGUAGE, ERROR }
+enum class VoiceBenchmarkStatus { OK, NOT_INSTALLED, MODEL_NOT_DOWNLOADED, UNSUPPORTED_DEVICE, UNSUPPORTED_LANGUAGE, ERROR }
 
 /**
  * One engine's answer to one [VoiceBenchmarkRunner.Request]. Only objective
@@ -24,6 +24,14 @@ data class VoiceBenchmarkResult(
     val status: VoiceBenchmarkStatus = if (success) VoiceBenchmarkStatus.OK else VoiceBenchmarkStatus.ERROR,
     /** Model/engine start-up before generation began, when the engine can tell. */
     val loadMs: Long? = null,
+    /** Building the reusable voice from the reference recording; 0 when an earlier run's was reused. */
+    val voicePrepMs: Long? = null,
+    /** Time from the start of generation to the first audio chunk. */
+    val firstAudioMs: Long? = null,
+    /** App PSS in MB before and after loading the model, and free device RAM before it. */
+    val memoryBeforeMb: Long? = null,
+    val memoryAfterMb: Long? = null,
+    val availRamMb: Long? = null,
 ) {
     companion object {
         fun ok(engineId: String, file: File, generationMs: Long, audioDurationMs: Long, loadMs: Long? = null) =

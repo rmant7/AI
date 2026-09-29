@@ -1,0 +1,49 @@
+package ai.localstudio.qwen3tts
+
+/**
+ * The JNI surface over qwen3-tts.cpp (see qwen3_tts_bridge.cpp) — nothing
+ * else. One [create]d handle is one loaded model; callers must not run two
+ * native calls on the same handle at once, with the single exception of
+ * [cancel], which is safe from any thread while [synthesize] runs.
+ *
+ * Prepare-then-synthesize is split on purpose: [prepareVoice] is the costly
+ * part (speaker encoder plus reference speech codes) and writes a reusable
+ * prompt file, so every following [synthesize] pays only for generation.
+ */
+object Qwen3TtsNative {
+
+    const val STATUS_OK = 0
+    const val STATUS_CANCELLED = 1
+    const val STATUS_ERROR = 2
+
+    /** Whether libqwen3_tts_bridge.so could be loaded on this device. */
+    val isLoaded: Boolean by lazy { runCatching { System.loadLibrary("qwen3_tts_bridge") }.isSuccess }
+
+    /** A new context using [threads] CPU threads, or 0 if it could not be created. */
+    external fun create(threads: Int): Long
+
+    external fun destroy(handle: Long)
+
+    /** Loads the talker and tokenizer GGUFs found in [modelDir]; [talkerFile] selects the talker among them. */
+    external fun loadModels(handle: Long, modelDir: String, talkerFile: String): Boolean
+
+    /** Encodes [referenceWav] + its transcript into a reusable voice prompt file at [promptPath]. */
+    external fun prepareVoice(handle: Long, referenceWav: String, referenceText: String, promptPath: String): Boolean
+
+    /** [STATUS_OK] writes a 24 kHz mono 16-bit WAV to [outputWav]. */
+    external fun synthesize(
+        handle: Long,
+        promptPath: String,
+        text: String,
+        languageId: Int,
+        maxAudioTokens: Int,
+        outputWav: String,
+    ): Int
+
+    external fun cancel(handle: Long)
+
+    /** Milliseconds from the start of the last [synthesize] to its first audio chunk, or -1. */
+    external fun firstChunkMs(handle: Long): Long
+
+    external fun lastError(handle: Long): String
+}
