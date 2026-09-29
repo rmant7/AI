@@ -25,6 +25,7 @@ class AvatarTestActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityAvatarTestBinding
     private lateinit var controller: AvatarSpeechController
+    private lateinit var settings: Settings
 
     // Index-aligned with the spinner's own items; index 0 is always the
     // null "Auto" entry, everything after is a real device voice — see
@@ -39,7 +40,8 @@ class AvatarTestActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         title = getString(R.string.menu_avatar_test)
 
-        controller = AvatarSpeechController(this, binding.avatarView)
+        settings = AppContainer.get(this).settings
+        controller = AvatarSpeechController(this, binding.avatarView, settings.avatarVoiceName)
 
         binding.avatarTestPlayButton.setOnClickListener { play() }
         binding.avatarTestStopButton.setOnClickListener { controller.onInterrupted() }
@@ -101,9 +103,17 @@ class AvatarTestActivity : AppCompatActivity() {
         }
         binding.avatarTestVoiceSpinner.adapter =
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+        // Restore the remembered voice before the listener exists, so the
+        // spinner's initial selection callback confirms it instead of
+        // overwriting it with "Auto".
+        val remembered = settings.avatarVoiceName
+        val savedIndex = voices.indexOfFirst { it != null && it.name == remembered }
+        if (savedIndex > 0) binding.avatarTestVoiceSpinner.setSelection(savedIndex, false)
         binding.avatarTestVoiceSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                controller.setVoice(voices.getOrNull(position))
+                val voice = voices.getOrNull(position)
+                controller.setVoice(voice)
+                settings.avatarVoiceName = voice?.name
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit

@@ -19,6 +19,11 @@ import os
 import numpy as np
 from PIL import Image, ImageFilter
 
+try:
+    import cv2  # only for the background matte (classical GrabCut, no ML)
+except ImportError:  # pragma: no cover
+    cv2 = None
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SRC = os.path.join(ROOT, "app/src/main/res/drawable-nodpi/avatar_face.jpg")
 OUT = os.path.join(ROOT, "app/src/main/assets/avatar")
@@ -190,6 +195,46 @@ def wide_eye(rgb, eye, k=1.32):
     return out
 
 
+def compute_matte(rgb):
+    """Person/background alpha via GrabCut seeded from hand-placed regions, then edge clean-up.
+    Returns (alpha 0..1, rgb with background colour bleed removed from the edge)."""
+    if cv2 is None:
+        raise SystemExit("background removal needs opencv-python-headless (pip install opencv-python-headless)")
+    h, w = rgb.shape[:2]
+    bgr = np.ascontiguousarray(rgb[..., ::-1].astype(np.uint8))
+    mask = np.full((h, w), cv2.GC_PR_BGD, np.uint8)
+    # hand-placed regions (photo px): head+hair+shoulders outline, face/torso core, known background
+    outline = np.array([(60, 330), (80, 160), (190, 40), (330, 8), (455, 35), (525, 190), (535, 330),
+                        (500, 470), (560, 500), (640, 635), (0, 640), (0, 510), (140, 480)], np.int32)
+    cv2.fillPoly(mask, [outline], cv2.GC_PR_FGD)
+    cv2.ellipse(mask, (320, 340), (140, 215), 0, 0, 360, cv2.GC_FGD, -1)
+    mask[545:, :540] = cv2.GC_FGD
+    mask[:480, :15] = cv2.GC_BGD
+    mask[:480, 625:] = cv2.GC_BGD
+    mask[:5, :120] = cv2.GC_BGD
+    cv2.fillPoly(mask, [np.array([(560, 440), (640, 440), (640, 600), (575, 495)], np.int32)], cv2.GC_BGD)
+    bgm, fgm = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)
+    cv2.grabCut(bgr, mask, None, bgm, fgm, 8, cv2.GC_INIT_WITH_MASK)
+    hard = ((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD)).astype(np.uint8)
+
+    core = cv2.erode(hard, np.ones((3, 3), np.uint8), iterations=3)
+    alpha = cv2.GaussianBlur(cv2.erode(hard, np.ones((3, 3), np.uint8)).astype(np.float32), (0, 0), 1.3)
+    # colour of the person just inside the edge, spread outward, replaces the bleed at the rim
+    cf = core.astype(np.float32)
+    num = cv2.GaussianBlur(rgb * cf[..., None], (0, 0), 5)
+    den = cv2.GaussianBlur(cf, (0, 0), 5)[..., None]
+    inner = num / np.maximum(den, 1e-3)
+    edge = np.clip(1.0 - cv2.GaussianBlur(cf, (0, 0), 1.5), 0.0, 1.0)[..., None]
+    clean = np.where(den > 0.02, rgb * (1 - edge) + inner * edge, rgb)
+    # the photo is cropped through the shoulders: fade those cut edges instead of a hard line
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    fade = 34.0
+    f = smoothstep((h - 1 - ys) / fade)
+    f = np.where(ys > 430, np.minimum(f, np.minimum(smoothstep(xs / fade), smoothstep((w - 1 - xs) / fade))), f)
+    f = np.minimum(f, smoothstep(ys / 22.0))  # the hair tuft cut by the top edge
+    return np.clip(alpha * f, 0.0, 1.0), clean
+
+
 def lipless(rgb):
     """The photo with the closed-lip line painted out: the band around it is refilled
     from the lower-lip skin a few rows below (real texture, not an interpolation)."""
@@ -338,7 +383,9 @@ def main():
     head = head * (1 - fl[..., None]) + closed_l * fl[..., None]
     head = head * (1 - fr[..., None]) + closed_r * fr[..., None]
     head = head * (1 - fm[..., None]) + lipless_rgb * fm[..., None]
-    save_rgba(os.path.join(OUT, "avatar_head.png"), head, np.ones((h, w), np.float32))
+    matte, clean = compute_matte(rgb)
+    head_out = np.where(matte[..., None] > 0.99, head, head * 0.0 + np.where(np.abs(head - rgb).max(axis=2, keepdims=True) > 0.5, head, clean))
+    save_rgba(os.path.join(OUT, "avatar_head.png"), head_out, matte)
 
     lash_col = np.array([62, 44, 40], np.float32)
     layers = {}
@@ -375,7 +422,8 @@ def main():
             im = Image.open(os.path.join(OUT, "avatar_head.png")).convert("RGBA")
             for n in names:
                 im = Image.alpha_composite(im, Image.open(os.path.join(OUT, n)).convert("RGBA"))
-            return im.convert("RGB")
+            bg = Image.new("RGBA", im.size, (28, 24, 34, 255))
+            return Image.alpha_composite(bg, im).convert("RGB")
 
         combos = {
             "static": ["eyes/left_open.png", "eyes/right_open.png", "mouth/neutral.png"],
@@ -393,7 +441,8 @@ def main():
                     a = layer.getchannel("A").point(lambda v, k=weights[i]: int(v * k))
                     layer.putalpha(a)
                 im = Image.alpha_composite(im, layer)
-            return im.convert("RGB")
+            bg = Image.new("RGBA", im.size, (28, 24, 34, 255))
+            return Image.alpha_composite(bg, im).convert("RGB")
         E = ["eyes/left_open.png", "eyes/right_open.png"]
         AE = ["eyes/left_angry.png", "eyes/right_angry.png"]
         combos_w = {
@@ -410,8 +459,9 @@ def main():
             combo(parts, wts).save(os.path.join(args.preview, name + ".png"))
         for name, parts in combos.items():
             composite(*parts).save(os.path.join(args.preview, name + ".png"))
-        diff = np.abs(np.asarray(composite(*combos["static"]), np.float32) - rgb).max()
-        print("static composite max abs diff vs original:", diff)
+        inside = matte > 0.99
+        diff = np.abs(np.asarray(composite(*combos["static"]), np.float32) - rgb)[inside].max()
+        print("static composite max abs diff vs original (inside the matte):", diff)
 
 
 if __name__ == "__main__":

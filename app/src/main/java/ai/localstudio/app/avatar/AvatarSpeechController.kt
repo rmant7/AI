@@ -24,10 +24,10 @@ import android.speech.tts.Voice
  * is exactly the kind of thing [ai.localstudio.app.models.TtsVoiceFallback]
  * exists for, once this needs it.
  */
-class AvatarSpeechController(context: Context, private val view: AvatarView) {
+class AvatarSpeechController(context: Context, private val view: AvatarView, preferredVoiceName: String? = null) {
 
     private val chunker = SentenceChunker()
-    private val engine = AvatarTtsEngine(context, onEvent = ::handleEvent)
+    private val engine = AvatarTtsEngine(context, onEvent = ::handleEvent).also { it.setPreferredVoiceName(preferredVoiceName) }
 
     // The shape the most recent Range event named, kept across Audio events
     // for the same utterance — onAudioAvailable's own chunks carry no text
@@ -35,6 +35,11 @@ class AvatarSpeechController(context: Context, private val view: AvatarView) {
     // comment on why the two callbacks report different things).
     @Volatile
     private var currentShape = MouthShape.CLOSED
+
+    // Loudness of the audio being played right now; a new letter changes only
+    // the shape, not how open the mouth is.
+    @Volatile
+    private var currentLevel = 0f
 
     /** Called on every growing-text update from the LLM's own stream — see this class's own doc comment. */
     fun onPartialText(fullText: String) {
@@ -60,6 +65,7 @@ class AvatarSpeechController(context: Context, private val view: AvatarView) {
     fun onInterrupted() {
         engine.stop()
         currentShape = MouthShape.CLOSED
+        currentLevel = 0f
         view.updateState(AvatarState(mouthOpen = 0f, mouthShape = MouthShape.CLOSED))
     }
 
@@ -79,7 +85,10 @@ class AvatarSpeechController(context: Context, private val view: AvatarView) {
     fun availableVoices(): List<Voice> = engine.availableVoices()
 
     /** Delegates to [AvatarTtsEngine.setManualVoice] — see [AvatarTestActivity]. */
-    fun setVoice(voice: Voice?) = engine.setManualVoice(voice)
+    fun setVoice(voice: Voice?) {
+        engine.setManualVoice(voice)
+        engine.setPreferredVoiceName(null)
+    }
 
     private fun enqueue(sentence: String) {
         engine.speak(sentence, locale = null)
@@ -91,27 +100,21 @@ class AvatarSpeechController(context: Context, private val view: AvatarView) {
             is AvatarTtsEngine.Event.Range -> {
                 val text = engine.textFor(event.utteranceId) ?: return
                 currentShape = VisemeMapper.shapeForRange(text, event.start, event.end)
-                view.updateState(AvatarState(mouthOpen = OPEN_ON_RANGE, mouthShape = currentShape))
+                view.updateState(AvatarState(mouthOpen = currentLevel, mouthShape = currentShape))
             }
             is AvatarTtsEngine.Event.Audio -> {
-                val level = PcmEnvelopeAnalyzer.rms(event.pcm)
-                view.updateState(AvatarState(mouthOpen = level, mouthShape = currentShape))
+                currentLevel = PcmEnvelopeAnalyzer.rms(event.pcm)
+                view.updateState(AvatarState(mouthOpen = currentLevel, mouthShape = currentShape))
             }
             is AvatarTtsEngine.Event.Done, is AvatarTtsEngine.Event.Failed -> {
                 currentShape = MouthShape.CLOSED
+                currentLevel = 0f
                 view.updateState(AvatarState(mouthOpen = 0f, mouthShape = MouthShape.CLOSED))
             }
         }
     }
 
     private companion object {
-        // Used only when onRangeStart fires but the engine this device runs
-        // never delivers onAudioAvailable (not every TTS engine implements
-        // it — see AvatarTtsEngine's own doc comment) — a fixed, moderate
-        // open amount so the mouth still visibly moves per range instead of
-        // sitting shut for the whole utterance.
-        const val OPEN_ON_RANGE = 0.45f
-
         const val ATTRIBUTION_MARKER = "\n\n---"
     }
 }

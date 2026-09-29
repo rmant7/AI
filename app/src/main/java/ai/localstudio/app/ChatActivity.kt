@@ -205,7 +205,7 @@ class ChatActivity : AppCompatActivity() {
         val enabled = container.settings.avatarEnabled
         if (enabled && avatarController == null) {
             binding.avatarView.visibility = android.view.View.VISIBLE
-            avatarController = AvatarSpeechController(this, binding.avatarView)
+            avatarController = AvatarSpeechController(this, binding.avatarView, container.settings.avatarVoiceName)
         } else if (!enabled && avatarController != null) {
             avatarController?.shutdown()
             avatarController = null

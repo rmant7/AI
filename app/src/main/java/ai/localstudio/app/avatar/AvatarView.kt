@@ -180,10 +180,11 @@ class AvatarView @JvmOverloads constructor(
         }, "avatar-layers").start()
     }
 
-    // Fit the (square) head bitmap into this view and centre it, with a small
-    // overscan so the ±2% head motion below never exposes the photo's own
-    // top/bottom edge. Every layer is the same size as the head, so this one
-    // matrix is all any of them ever needs.
+    // Fit the (square) head bitmap into this view and centre it. The head layer
+    // is a cut-out (transparent background, cut edges faded), so head motion
+    // never exposes a photo edge and no overscan is needed. Every layer is
+    // the same size as the head, so this one matrix is all any of them ever
+    // needs.
     private fun rebuildBaseMatrix() {
         val head = layers?.head ?: return
         if (width <= 0 || height <= 0) return
@@ -347,7 +348,7 @@ class AvatarView @JvmOverloads constructor(
 
     private companion object {
         const val ASSET_DIR = "avatar"
-        const val OVERSCAN = 1.04f
+        const val OVERSCAN = 1f
 
         const val SMOOTHING = 0.25f
         const val VISEME_SMOOTHING = 0.4f

@@ -315,6 +315,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_AVATAR_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_AVATAR_ENABLED, value).apply()
 
+    /** Name of the TTS voice picked for the avatar; null = automatic. */
+    var avatarVoiceName: String?
+        get() = prefs.getString(KEY_AVATAR_VOICE, null)
+        set(value) = prefs.edit().putString(KEY_AVATAR_VOICE, value).apply()
+
     val hasEndpoint: Boolean get() = endpoint.isNotBlank()
 
     // Sampling: how the model picks its next token. Exposed because a fixed
@@ -410,6 +415,7 @@ class Settings(context: Context) {
         const val KEY_SEMANTIC_MEMORY = "semanticMemoryEnabled"
         const val KEY_COMPARE_MODE = "compareMode"
         const val KEY_AVATAR_ENABLED = "avatarEnabled"
+        const val KEY_AVATAR_VOICE = "avatarVoiceName"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_DOWNLOAD_POLICY = "downloadPolicy"
