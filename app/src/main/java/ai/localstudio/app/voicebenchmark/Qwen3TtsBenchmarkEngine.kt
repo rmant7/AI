@@ -138,8 +138,11 @@ class Qwen3TtsBenchmarkEngine(
 
     // The app log is where a phone-only investigation looks: without this the
     // native side's timings went to stderr, which Android discards.
+    // Only the summary goes there: the full native report is long enough to be cut off in the
+    // log, and it is already on the result card of the benchmark screen.
     private fun record(details: String) {
-        runCatching { AppContainer.get(appContext).appLog.record("QWEN_TTS", details) }
+        val summary = details.substringBefore("\n--- native").trim()
+        runCatching { AppContainer.get(appContext).appLog.record("QWEN_TTS", summary) }
     }
 
     private companion object {

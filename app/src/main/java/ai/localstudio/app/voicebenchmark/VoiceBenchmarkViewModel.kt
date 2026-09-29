@@ -183,7 +183,6 @@ class VoiceBenchmarkViewModel private constructor(application: Application) : An
                         if (end > liveOffset) {
                             val fresh = live.substring(liveOffset, end).lines().filter { it.isNotBlank() }
                             liveOffset = end
-                            fresh.forEach { AppContainer.get(app).appLog.record("QWEN_NATIVE", it.trim()) }
                             fresh.lastOrNull()?.let { line -> _state.update { it.copy(status = Status.Native(line.trim())) } }
                         }
                     }
