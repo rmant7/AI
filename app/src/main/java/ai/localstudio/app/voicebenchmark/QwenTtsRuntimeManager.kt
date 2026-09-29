@@ -295,10 +295,10 @@ object QwenTtsRuntimeManager {
 
     private const val MAX_AUDIO_TOKENS = 1024
 
-    // Speech is ~12.5 codec frames a second; even slow speech is under ~2.5 frames per character. A model that
-    // never emits its end token (seen on a Pixel: 25 characters, an hour and still generating) is cut off
-    // at a length the text can plausibly need instead of at 1024 frames (82 s of audio).
-    internal fun maxFramesFor(text: String): Int = (text.length * 3 + 24).coerceIn(48, MAX_AUDIO_TOKENS)
+    // Speech is ~12.5 codec frames a second, ~13-15 characters a second: about 0.9 frames per character. A
+    // model that never emits its end token (still happens now and then with sampling: 37 characters ran on
+    // to 10.8 s of babble) is cut off at roughly twice that instead of running on for a minute.
+    internal fun maxFramesFor(text: String): Int = (text.length * 2 + 16).coerceIn(40, MAX_AUDIO_TOKENS)
 
     internal suspend fun <T> runNative(cancelHandle: Long?, block: () -> T): T = coroutineScope {
         val call = async(Dispatchers.IO + NonCancellable) { block() }
