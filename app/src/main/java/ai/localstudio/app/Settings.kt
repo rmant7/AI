@@ -321,6 +321,11 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putString(KEY_AVATAR_BACKEND, value).apply()
 
     /** Transcript of the reference recording (Voice Benchmark) the cloned voice is made from. */
+    /** Qwen3-TTS talker quantization, [ai.localstudio.app.voicebenchmark.QwenTtsModelDescriptor.TalkerVariant.key]. */
+    var qwenTalkerVariant: String
+        get() = prefs.getString(KEY_QWEN_TALKER_VARIANT, "q4_k_m") ?: "q4_k_m"
+        set(value) = prefs.edit().putString(KEY_QWEN_TALKER_VARIANT, value).apply()
+
     var voiceReferenceText: String
         get() = prefs.getString(KEY_VOICE_REFERENCE_TEXT, "") ?: ""
         set(value) = prefs.edit().putString(KEY_VOICE_REFERENCE_TEXT, value).apply()
@@ -428,6 +433,7 @@ class Settings(context: Context) {
         const val KEY_AVATAR_VOICE = "avatarVoiceName"
         const val KEY_AVATAR_BACKEND = "avatarVoiceBackend"
         const val KEY_VOICE_REFERENCE_TEXT = "voiceReferenceText"
+        const val KEY_QWEN_TALKER_VARIANT = "qwenTalkerVariant"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_DOWNLOAD_POLICY = "downloadPolicy"

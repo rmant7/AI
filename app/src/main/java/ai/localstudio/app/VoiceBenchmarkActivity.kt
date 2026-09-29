@@ -300,6 +300,63 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
                 binding.voiceBenchQwenDelete.isEnabled = !downloading && state is QwenModelState.Ready
             }
         }
+
+        // Talker quantization: Q4_K_M (default download) or the optional Q8_0 — see TalkerVariant.
+        val settings = AppContainer.get(this).settings
+        val variants = QwenTtsModelDescriptor.TalkerVariant.entries
+        binding.voiceBenchQwenVariant.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item,
+            listOf(getString(R.string.voice_bench_qwen_variant_q4), getString(R.string.voice_bench_qwen_variant_q8)),
+        )
+        val current = QwenTtsModelDescriptor.TalkerVariant.fromKey(settings.qwenTalkerVariant)
+        QwenTtsRuntimeManager.talkerVariant = current
+        binding.voiceBenchQwenVariant.setSelection(variants.indexOf(current), false)
+        binding.voiceBenchQwenVariant.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val chosen = variants[position]
+                if (chosen == QwenTtsModelDescriptor.TalkerVariant.Q8_0 && !provider.isVariantReady(chosen)) {
+                    Toast.makeText(this@VoiceBenchmarkActivity, R.string.voice_bench_qwen_q8_needed, Toast.LENGTH_SHORT).show()
+                    binding.voiceBenchQwenVariant.setSelection(variants.indexOf(QwenTtsRuntimeManager.talkerVariant), false)
+                    return
+                }
+                QwenTtsRuntimeManager.talkerVariant = chosen
+                settings.qwenTalkerVariant = chosen.key
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        binding.voiceBenchQwenQ8Download.setOnClickListener {
+            when (provider.q8State.value) {
+                is QwenModelState.Downloading -> provider.cancelQ8Download()
+                QwenModelState.Ready -> Unit
+                else -> NetworkPolicy.confirmIfNeeded(this, settings) { provider.downloadQ8() }
+            }
+        }
+        binding.voiceBenchQwenQ8Delete.setOnClickListener {
+            if (QwenTtsRuntimeManager.talkerVariant == QwenTtsModelDescriptor.TalkerVariant.Q8_0) {
+                QwenTtsRuntimeManager.talkerVariant = QwenTtsModelDescriptor.TalkerVariant.Q4_K_M
+                settings.qwenTalkerVariant = QwenTtsModelDescriptor.TalkerVariant.Q4_K_M.key
+                binding.voiceBenchQwenVariant.setSelection(0, false)
+            }
+            QwenTtsRuntimeManager.releaseAsync()
+            provider.deleteQ8()
+        }
+        lifecycleScope.launch {
+            provider.q8State.collect { state ->
+                binding.voiceBenchQwenQ8Status.text = when (state) {
+                    QwenModelState.NotDownloaded -> getString(R.string.voice_bench_qwen_q8_not_downloaded)
+                    is QwenModelState.Downloading -> getString(R.string.voice_bench_qwen_q8_downloading, (state.fraction * 100).toInt())
+                    QwenModelState.Ready -> getString(R.string.voice_bench_qwen_q8_ready)
+                    is QwenModelState.Failed -> getString(R.string.voice_bench_qwen_q8_failed, state.message)
+                }
+                val downloading = state is QwenModelState.Downloading
+                binding.voiceBenchQwenQ8Download.isEnabled = state !is QwenModelState.Ready
+                binding.voiceBenchQwenQ8Download.setText(
+                    if (downloading) R.string.voice_bench_qwen_cancel_download else R.string.voice_bench_qwen_q8_download,
+                )
+                binding.voiceBenchQwenQ8Delete.isEnabled = state is QwenModelState.Ready
+            }
+        }
     }
 
     // ── Qwen diagnostics ──────────────────────────────────────────────────

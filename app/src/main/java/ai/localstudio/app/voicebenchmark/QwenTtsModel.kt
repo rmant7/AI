@@ -27,18 +27,49 @@ import java.io.IOException
  */
 object QwenTtsModelDescriptor {
 
-    data class ModelFile(val name: String, val url: String, val expectedBytes: Long)
+    /** [minBytes]/[maxBytes] override the ±[SIZE_TOLERANCE] check for a file whose exact size is not pinned. */
+    data class ModelFile(
+        val name: String,
+        val url: String,
+        val expectedBytes: Long,
+        val minBytes: Long? = null,
+        val maxBytes: Long? = null,
+    )
+
+    /**
+     * Which quantization of the talker (which also holds the Code Predictor) to run. Q4_K_M is the
+     * default download; Q8_0 is qwen3-tts.cpp's own main, validated path. The Code Predictor re-reads
+     * its weights 15 times per audio frame and ARM dot-product kernels for Q8_0 are simpler than for
+     * Q4_K, so Q8_0 may well be faster on a phone despite being bigger — which is what this option
+     * is for measuring.
+     */
+    enum class TalkerVariant(val key: String, val label: String, val file: ModelFile) {
+        Q4_K_M(
+            "q4_k_m", "Q4_K_M",
+            ModelFile(TALKER_FILE, "$BASE_URL/$TALKER_FILE?download=true", 628_905_056L),
+        ),
+        Q8_0(
+            "q8_0", "Q8_0",
+            // Size not pinned (not verifiable from the build environment): any GGUF between 0.6 and 1.8 GB.
+            ModelFile(TALKER_Q8_FILE, "$BASE_URL/$TALKER_Q8_FILE?download=true", 1_000_000_000L, 600_000_000L, 1_800_000_000L),
+        );
+
+        companion object {
+            fun fromKey(key: String?): TalkerVariant = entries.firstOrNull { it.key == key } ?: Q4_K_M
+        }
+    }
 
     private const val BASE_URL = "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/main"
 
     const val DISPLAY_NAME = "Qwen3-TTS 0.6B Base (Q4_K_M)"
     const val TALKER_FILE = "qwen-talker-0.6b-base-Q4_K_M.gguf"
+    const val TALKER_Q8_FILE = "qwen-talker-0.6b-base-Q8_0.gguf"
     private const val TOKENIZER_FILE = "qwen-tokenizer-12hz-Q4_K_M.gguf"
     const val SIZE_TOLERANCE = 0.05
 
     val files: List<ModelFile> = listOf(
         ModelFile(TOKENIZER_FILE, "$BASE_URL/$TOKENIZER_FILE?download=true", 254_974_752L),
-        ModelFile(TALKER_FILE, "$BASE_URL/$TALKER_FILE?download=true", 628_905_056L),
+        TalkerVariant.Q4_K_M.file,
     )
 
     val totalExpectedBytes: Long get() = files.sumOf { it.expectedBytes }
@@ -68,7 +99,63 @@ class QwenTtsModelProvider private constructor(context: Context) {
     private val _state = MutableStateFlow<QwenModelState>(if (isReady()) QwenModelState.Ready else QwenModelState.NotDownloaded)
     val state: StateFlow<QwenModelState> = _state
 
-    fun isReady(): Boolean = QwenTtsModelDescriptor.files.all { isValid(File(modelDir, it.name), it.expectedBytes) }
+    fun isReady(): Boolean = QwenTtsModelDescriptor.files.all { isValid(File(modelDir, it.name), it) }
+
+    private val _q8State = MutableStateFlow<QwenModelState>(
+        if (isVariantReady(QwenTtsModelDescriptor.TalkerVariant.Q8_0)) QwenModelState.Ready else QwenModelState.NotDownloaded,
+    )
+
+    /** Download state of the optional Q8_0 talker. */
+    val q8State: StateFlow<QwenModelState> = _q8State
+    private var q8Job: Job? = null
+    private var q8Downloader: ModelDownloader? = null
+
+    /** The base files plus this variant's talker are on disk. */
+    fun isVariantReady(variant: QwenTtsModelDescriptor.TalkerVariant): Boolean = isValid(File(modelDir, variant.file.name), variant.file)
+
+    /** Downloads the optional Q8_0 talker (the tokenizer comes with the base download). */
+    fun downloadQ8() {
+        val file = QwenTtsModelDescriptor.TalkerVariant.Q8_0.file
+        if (q8Job?.isActive == true) return
+        if (isValid(File(modelDir, file.name), file)) {
+            _q8State.value = QwenModelState.Ready
+            return
+        }
+        _q8State.value = QwenModelState.Downloading(0f)
+        q8Job = scope.launch {
+            val target = File(modelDir, file.name)
+            try {
+                val dl = ModelDownloader().also { q8Downloader = it }
+                dl.download(file.url, target, File(modelDir, file.name + ".part")) { p: DownloadProgress ->
+                    val fraction = if (p.bytesTotal > 0) p.fraction else p.bytesDownloaded.toFloat() / file.expectedBytes
+                    _q8State.value = QwenModelState.Downloading(fraction.coerceIn(0f, 1f))
+                }
+                if (!isValid(target, file)) {
+                    val got = target.length()
+                    target.delete()
+                    throw IOException("${file.name} is not a valid GGUF (got $got bytes)")
+                }
+                _q8State.value = QwenModelState.Ready
+            } catch (e: Exception) {
+                _q8State.value = if (e.message == "Download cancelled") QwenModelState.NotDownloaded
+                else QwenModelState.Failed(e.message ?: e.javaClass.simpleName)
+            } finally {
+                q8Downloader = null
+            }
+        }
+    }
+
+    fun cancelQ8Download() {
+        q8Downloader?.cancel()
+    }
+
+    fun deleteQ8() {
+        cancelQ8Download()
+        val name = QwenTtsModelDescriptor.TalkerVariant.Q8_0.file.name
+        File(modelDir, name).delete()
+        File(modelDir, "$name.part").delete()
+        _q8State.value = QwenModelState.NotDownloaded
+    }
 
     fun download() {
         if (job?.isActive == true || isReady()) {
@@ -83,7 +170,7 @@ class QwenTtsModelProvider private constructor(context: Context) {
             try {
                 for (file in files) {
                     val target = File(modelDir, file.name)
-                    if (isValid(target, file.expectedBytes)) {
+                    if (isValid(target, file)) {
                         doneBefore += target.length()
                         continue
                     }
@@ -92,7 +179,7 @@ class QwenTtsModelProvider private constructor(context: Context) {
                     dl.download(file.url, target, File(modelDir, file.name + ".part")) { p: DownloadProgress ->
                         _state.value = QwenModelState.Downloading(((base + p.bytesDownloaded) / total).toFloat().coerceIn(0f, 1f))
                     }
-                    if (!isValid(target, file.expectedBytes)) {
+                    if (!isValid(target, file)) {
                         target.delete()
                         throw IOException("${file.name} is not a valid GGUF of the expected size (got ${target.length()} bytes)")
                     }
@@ -115,14 +202,16 @@ class QwenTtsModelProvider private constructor(context: Context) {
     /** Deletes the model files (and any partial download), freeing about 900 MB. */
     fun delete() {
         cancelDownload()
+        cancelQ8Download()
         modelDir.listFiles()?.forEach { it.delete() }
         _state.value = QwenModelState.NotDownloaded
+        _q8State.value = QwenModelState.NotDownloaded
     }
 
-    private fun isValid(file: File, expectedBytes: Long): Boolean {
+    private fun isValid(file: File, spec: QwenTtsModelDescriptor.ModelFile): Boolean {
         if (!file.isFile) return false
-        val low = (expectedBytes * (1 - QwenTtsModelDescriptor.SIZE_TOLERANCE)).toLong()
-        val high = (expectedBytes * (1 + QwenTtsModelDescriptor.SIZE_TOLERANCE)).toLong()
+        val low = spec.minBytes ?: (spec.expectedBytes * (1 - QwenTtsModelDescriptor.SIZE_TOLERANCE)).toLong()
+        val high = spec.maxBytes ?: (spec.expectedBytes * (1 + QwenTtsModelDescriptor.SIZE_TOLERANCE)).toLong()
         if (file.length() !in low..high) return false
         return runCatching { file.inputStream().use { s -> ByteArray(4).also { s.read(it) }.decodeToString() == "GGUF" } }
             .getOrDefault(false)

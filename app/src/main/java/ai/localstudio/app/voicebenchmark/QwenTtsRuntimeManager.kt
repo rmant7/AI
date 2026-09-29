@@ -74,6 +74,16 @@ object QwenTtsRuntimeManager {
 
     private var loadedVocoderThreads = 0
 
+    /** Which talker quantization to load (see [QwenTtsModelDescriptor.TalkerVariant]); applied on the next load. */
+    @Volatile
+    var talkerVariant: QwenTtsModelDescriptor.TalkerVariant = QwenTtsModelDescriptor.TalkerVariant.Q4_K_M
+
+    @Volatile
+    private var loadedVariant: QwenTtsModelDescriptor.TalkerVariant? = null
+
+    /** The talker quantization currently loaded, or null. */
+    fun currentVariant(): QwenTtsModelDescriptor.TalkerVariant? = if (handle != 0L) loadedVariant else null
+
     /** Diagnostics: streaming chunk length / vocoder left context in ms (default 3 s / 0.5 s: measured about 2x faster than upstream's 1 s / 2 s). */
     @Volatile
     var streamingChunkMs: Int = 3000
@@ -124,7 +134,8 @@ object QwenTtsRuntimeManager {
         val wantedThreads = threadsOverride ?: threadsHint ?: defaultThreads()
         // A different thread count needs a fresh context.
         val wantedVocoder = vocoderThreadsOverride ?: vocoderHint ?: defaultVocoderThreads()
-        if (handle != 0L && (loadedThreads != wantedThreads || loadedVocoderThreads != wantedVocoder)) {
+        val wantedVariant = talkerVariant
+        if (handle != 0L && (loadedThreads != wantedThreads || loadedVocoderThreads != wantedVocoder || loadedVariant != wantedVariant)) {
             val old = handle
             handle = 0L
             preparedKey = null
@@ -132,6 +143,9 @@ object QwenTtsRuntimeManager {
         }
         if (handle != 0L) return@withLock LoadInfo(0, true, availMb(app), pssMb(), pssMb(), loadedThreads, "")
         if (!Qwen3TtsNative.isLoaded) throw QwenTtsException("Native Qwen3-TTS library could not be loaded")
+        if (!provider.isVariantReady(wantedVariant)) {
+            throw QwenTtsException("Talker ${wantedVariant.label} is not downloaded")
+        }
 
         val avail = availMb(app)
         if (avail < MIN_AVAILABLE_MB) {
@@ -142,7 +156,7 @@ object QwenTtsRuntimeManager {
         val newHandle = runNative(null) { Qwen3TtsNative.create(wantedThreads) }
         if (newHandle == 0L) throw QwenTtsException("Could not create the Qwen3-TTS context")
         val ok = runNative(null) {
-            Qwen3TtsNative.loadModels(newHandle, provider.modelDir.absolutePath, QwenTtsModelDescriptor.TALKER_FILE)
+            Qwen3TtsNative.loadModels(newHandle, provider.modelDir.absolutePath, wantedVariant.file.name)
         }
         val log = Qwen3TtsNative.takeLog(newHandle)
         if (!ok) {
@@ -153,6 +167,7 @@ object QwenTtsRuntimeManager {
         handle = newHandle
         loadedThreads = wantedThreads
         loadedVocoderThreads = wantedVocoder
+        loadedVariant = wantedVariant
         LoadInfo(SystemClock.elapsedRealtime() - started, false, avail, pssBefore, pssMb(), wantedThreads, log)
     }
 

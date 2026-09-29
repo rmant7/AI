@@ -602,4 +602,12 @@ RTF: %3$.2f</string>
     <string name="avatar_qwen_failed">Cloned voice failed: %1$s</string>
     <string name="voice_bench_qwen_vocoder_same">Vocoder threads: automatic</string>
     <string name="voice_bench_qwen_vocoder_n">Vocoder threads: %1$d</string>
+    <string name="voice_bench_qwen_variant_q4">Talker: Q4_K_M (default)</string>
+    <string name="voice_bench_qwen_variant_q8">Talker: Q8_0 (experiment: faster Code Predictor?)</string>
+    <string name="voice_bench_qwen_q8_download">Download Q8_0</string>
+    <string name="voice_bench_qwen_q8_not_downloaded">Q8_0 talker: not downloaded (about 1 GB, exact size unknown)</string>
+    <string name="voice_bench_qwen_q8_downloading">Q8_0 talker: downloading %1$d%%</string>
+    <string name="voice_bench_qwen_q8_ready">Q8_0 talker: downloaded</string>
+    <string name="voice_bench_qwen_q8_failed">Q8_0 talker: download failed: %1$s</string>
+    <string name="voice_bench_qwen_q8_needed">Download the Q8_0 talker first</string>
 </resources>

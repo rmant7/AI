@@ -19,6 +19,7 @@ internal class QwenTtsSecondWorker {
     private val lock = Mutex()
     @Volatile
     private var handle = 0L
+    private var loadedFile: String? = null
 
     suspend fun synthesize(
         context: Context,
@@ -30,12 +31,19 @@ internal class QwenTtsSecondWorker {
         languageId: Int,
         output: File,
     ) = lock.withLock {
+        // Same talker quantization as the main context.
+        val talkerFile = (QwenTtsRuntimeManager.currentVariant() ?: QwenTtsRuntimeManager.talkerVariant).file.name
+        if (handle != 0L && loadedFile != talkerFile) {
+            val old = handle
+            handle = 0L
+            QwenTtsRuntimeManager.runNative(null) { Qwen3TtsNative.destroy(old) }
+        }
         if (handle == 0L) {
             if (!Qwen3TtsNative.isLoaded) throw QwenTtsException("Native Qwen3-TTS library could not be loaded")
             val created = QwenTtsRuntimeManager.runNative(null) { Qwen3TtsNative.create(threads) }
             if (created == 0L) throw QwenTtsException("Could not create the second Qwen3-TTS context")
             val ok = QwenTtsRuntimeManager.runNative(null) {
-                Qwen3TtsNative.loadModels(created, provider.modelDir.absolutePath, QwenTtsModelDescriptor.TALKER_FILE)
+                Qwen3TtsNative.loadModels(created, provider.modelDir.absolutePath, talkerFile)
             }
             if (!ok) {
                 val error = Qwen3TtsNative.lastError(created)
@@ -43,6 +51,7 @@ internal class QwenTtsSecondWorker {
                 throw QwenTtsException("Second model load failed: $error")
             }
             handle = created
+            loadedFile = talkerFile
         }
         val h = handle
         val status = QwenTtsRuntimeManager.runNative(h) {

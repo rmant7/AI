@@ -53,6 +53,12 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
     private var generation = 0
 
     init {
+        val provider = QwenTtsModelProvider.get(app)
+        val wanted = ai.localstudio.app.voicebenchmark.QwenTtsModelDescriptor.TalkerVariant.fromKey(
+            AppContainer.get(app).settings.qwenTalkerVariant,
+        )
+        QwenTtsRuntimeManager.talkerVariant =
+            if (provider.isVariantReady(wanted)) wanted else ai.localstudio.app.voicebenchmark.QwenTtsModelDescriptor.TalkerVariant.Q4_K_M
         scope.launch { for (request in requests) process(request, second = false) }
         if (parallel) {
             scope.launch {
