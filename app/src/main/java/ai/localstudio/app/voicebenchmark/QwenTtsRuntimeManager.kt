@@ -82,7 +82,7 @@ object QwenTtsRuntimeManager {
 
     /** Diagnostics: use only the first N seconds of the reference recording for the voice prompt (null = all of it; default 6 s like the upstream benchmarks — a long reference makes every step slower). */
     @Volatile
-    var referenceMaxSeconds: Double? = 6.0
+    var referenceMaxSeconds: Double? = DEFAULT_REFERENCE_SECONDS
 
     /**
      * Default thread count for Qwen: every core within ~70% of the fastest core's clock (prime + big
@@ -100,6 +100,9 @@ object QwenTtsRuntimeManager {
         val top = freqs.max()
         return freqs.count { it * 10 >= top * 7 }.coerceIn(1, 8)
     }
+
+    /** Reference length used by default: a 8-12 s recording is used whole, so its transcript matches exactly. */
+    const val DEFAULT_REFERENCE_SECONDS = 12.0
 
     /** Free RAM needed before loading: ~0.9 GB of weights plus graph buffers and the vocoder. */
     private const val MIN_AVAILABLE_MB = 1400L

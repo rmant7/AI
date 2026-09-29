@@ -27,6 +27,11 @@ import android.speech.tts.Voice
 class AvatarSpeechController(context: Context, private val view: AvatarView, voice: AvatarVoiceConfig = AvatarVoiceConfig()) {
 
     private val chunker = SentenceChunker()
+
+    // A voice slower than real time keeps the avatar silent until the first piece is fully synthesized:
+    // make that first piece short so speech starts sooner; later pieces can be longer.
+    private val shortFirstPiece = voice.backend == AvatarVoiceBackend.QWEN
+    private var firstPieceOfTurn = true
     private val engine = AvatarTtsEngine(context, voice, onEvent = ::handleEvent)
 
     // The shape the most recent Range event named, kept across Audio events
@@ -64,6 +69,7 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
     /** The user hit Stop, or a new turn is starting — drops anything still queued/speaking and resets for the next turn. */
     fun onInterrupted() {
         engine.stop()
+        firstPieceOfTurn = true
         currentShape = MouthShape.CLOSED
         currentLevel = 0f
         view.updateState(AvatarState(mouthOpen = 0f, mouthShape = MouthShape.CLOSED))
@@ -72,6 +78,7 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
     /** Must be called before [onPartialText] sees a new turn's text (which starts shorter than the previous turn's final text). */
     fun onNewTurn() {
         chunker.reset()
+        firstPieceOfTurn = true
     }
 
     fun shutdown() {
@@ -91,7 +98,14 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
     }
 
     private fun enqueue(sentence: String) {
-        SentenceChunker.splitLong(sentence).forEach { engine.speak(it, locale = null) }
+        var text = sentence
+        if (shortFirstPiece && firstPieceOfTurn && text.length > FIRST_PIECE_CHARS) {
+            val first = SentenceChunker.splitLong(text, FIRST_PIECE_CHARS).first()
+            engine.speak(first, locale = null)
+            text = text.removePrefix(first).trim()
+        }
+        firstPieceOfTurn = false
+        SentenceChunker.splitLong(text).forEach { engine.speak(it, locale = null) }
     }
 
     private fun handleEvent(event: AvatarTtsEngine.Event) {
@@ -103,7 +117,7 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
                 view.updateState(AvatarState(mouthOpen = currentLevel, mouthShape = currentShape))
             }
             is AvatarTtsEngine.Event.Audio -> {
-                currentLevel = PcmEnvelopeAnalyzer.rms(event.pcm)
+                currentLevel = (PcmEnvelopeAnalyzer.rms(event.pcm) * event.gain).coerceAtMost(1f)
                 view.updateState(AvatarState(mouthOpen = currentLevel, mouthShape = currentShape))
             }
             is AvatarTtsEngine.Event.Done, is AvatarTtsEngine.Event.Failed -> {
@@ -116,5 +130,6 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
 
     private companion object {
         const val ATTRIBUTION_MARKER = "\n\n---"
+        const val FIRST_PIECE_CHARS = 60
     }
 }

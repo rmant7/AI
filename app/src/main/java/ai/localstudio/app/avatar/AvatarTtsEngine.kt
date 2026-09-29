@@ -42,7 +42,8 @@ class AvatarTtsEngine(
         data class Started(val utteranceId: String) : Event
         /** [start]/[end] index into whatever text [speak] was given for [utteranceId] — see [VisemeMapper.shapeForRange]. */
         data class Range(val utteranceId: String, val start: Int, val end: Int) : Event
-        data class Audio(val utteranceId: String, val pcm: ByteArray) : Event
+        /** [gain] scales the loudness measured from [pcm] so that a quiet voice still opens the mouth fully. */
+        data class Audio(val utteranceId: String, val pcm: ByteArray, val gain: Float = 1f) : Event
         data class Done(val utteranceId: String) : Event
         data class Failed(val utteranceId: String) : Event
     }
@@ -196,6 +197,7 @@ class AvatarTtsEngine(
             onEvent(Event.Failed(job.id))
             return
         }
+        boostQuietAudio(wav.pcm)
         val bytesPerFrame = 2 * wav.channels
         val totalFrames = wav.pcm.size / bytesPerFrame
         val stepFrames = maxOf(1, wav.sampleRate / ENVELOPE_HZ)
@@ -205,6 +207,12 @@ class AvatarTtsEngine(
             PcmEnvelopeAnalyzer.rms(wav.pcm.copyOfRange(from, to))
         }
         val timeline = SpeechAlignment.build(job.text, envelope, stepFrames.toFloat() / wav.sampleRate)
+        // A quiet voice would open the mouth only a little: scale so that its typical loud passages
+        // (the 90th percentile of the voiced frames) land at a clearly open mouth.
+        val voiced = envelope.filter { it > VOICED_FLOOR }.sorted()
+        val mouthGain = if (voiced.size < 5) 1f else {
+            (TARGET_LOUD_LEVEL / voiced[(voiced.size * 9) / 10].coerceAtLeast(0.01f)).coerceIn(1f, MAX_MOUTH_GAIN)
+        }
 
         val audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -244,7 +252,7 @@ class AvatarTtsEngine(
                 // synthesized so far — that is what ties the mouth to the sound.
                 val from = minOf(wav.pcm.size, position * bytesPerFrame)
                 val to = minOf(wav.pcm.size, from + 2 * stepFrames * bytesPerFrame)
-                onEvent(Event.Audio(job.id, wav.pcm.copyOfRange(from, to)))
+                onEvent(Event.Audio(job.id, wav.pcm.copyOfRange(from, to), mouthGain))
                 Thread.sleep(TICK_MS)
             }
             if (job.generation == generation) {
@@ -269,6 +277,30 @@ class AvatarTtsEngine(
             append(if (gap != null) ", silence before it ${"%.1f".format(gap)} s" else ", first of the answer")
         }
         runCatching { ai.localstudio.app.AppContainer.get(appContext).appLog.record("AVATAR_TTS", line) }
+    }
+
+    // Cloned-voice audio comes out quiet. Peak-normalise it (boost only, never attenuate, and never
+    // past ~0.89 of full scale), which also makes the voice easier to hear.
+    private fun boostQuietAudio(pcm: ByteArray) {
+        var peak = 0
+        var i = 0
+        while (i + 1 < pcm.size) {
+            val v = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort().toInt()
+            val a = if (v < 0) -v else v
+            if (a > peak) peak = a
+            i += 2
+        }
+        if (peak < 200) return
+        val gain = (TARGET_PEAK * Short.MAX_VALUE / peak).coerceAtMost(MAX_BOOST)
+        if (gain < 1.15f) return
+        i = 0
+        while (i + 1 < pcm.size) {
+            val v = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort().toInt()
+            val scaled = (v * gain).toInt().coerceIn(-32768, 32767)
+            pcm[i] = (scaled and 0xFF).toByte()
+            pcm[i + 1] = ((scaled shr 8) and 0xFF).toByte()
+            i += 2
+        }
     }
 
     private fun readWav(file: File): Wav? {
@@ -302,6 +334,11 @@ class AvatarTtsEngine(
 
     private companion object {
         const val ENVELOPE_HZ = 50
+        const val TARGET_PEAK = 0.89f
+        const val MAX_BOOST = 4f
+        const val VOICED_FLOOR = 0.05f
+        const val TARGET_LOUD_LEVEL = 0.5f
+        const val MAX_MOUTH_GAIN = 3f
         const val TICK_MS = 16L
         const val IDLE_EXIT_SECONDS = 20L
     }

@@ -306,10 +306,10 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
 
     private fun setupQwenTuning() {
         binding.voiceBenchQwenTrim.isChecked = vm.trimReference
-        QwenTtsRuntimeManager.referenceMaxSeconds = if (vm.trimReference) 6.0 else null
+        QwenTtsRuntimeManager.referenceMaxSeconds = if (vm.trimReference) QwenTtsRuntimeManager.DEFAULT_REFERENCE_SECONDS else null
         binding.voiceBenchQwenTrim.setOnCheckedChangeListener { _, checked ->
             vm.trimReference = checked
-            QwenTtsRuntimeManager.referenceMaxSeconds = if (checked) 6.0 else null
+            QwenTtsRuntimeManager.referenceMaxSeconds = if (checked) QwenTtsRuntimeManager.DEFAULT_REFERENCE_SECONDS else null
         }
         val choices = listOf<Int?>(null, 1, 2, 3, 4, 5, 6, 8)
         val labels = choices.map { n ->

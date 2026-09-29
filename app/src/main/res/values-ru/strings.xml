@@ -566,7 +566,7 @@ RTF: %3$.2f</string>
     <string name="avatar_qwen_problem_transcript">Сначала введи транскрипт образца (Ещё → Голосовой бенчмарк).</string>
 
     <string name="voice_bench_qwen_tuning_title">Диагностика Qwen</string>
-    <string name="voice_bench_qwen_trim">Использовать только первые 6 с записи образца</string>
+    <string name="voice_bench_qwen_trim">Использовать только первые 12 с записи образца</string>
     <string name="voice_bench_qwen_threads_auto">Потоки: авто (%1$d)</string>
     <string name="voice_bench_qwen_threads_n">Потоки: %1$d</string>
     <string name="voice_bench_qwen_profile">Профиль скорости: 2 запуска (холодный, затем тот же голос и новый текст)</string>
