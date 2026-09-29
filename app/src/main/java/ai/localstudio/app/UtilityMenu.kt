@@ -64,6 +64,7 @@ object UtilityMenu {
         Entry(9009, R.string.menu_phrasebook, PhrasebookActivity::class.java),
         Entry(9007, R.string.menu_benchmark, BenchmarkActivity::class.java),
         Entry(9010, R.string.menu_avatar_test, AvatarTestActivity::class.java),
+        Entry(9011, R.string.menu_voice_benchmark, VoiceBenchmarkActivity::class.java),
     )
 
     // Log stays its own last row, not folded into "More" — an error log is

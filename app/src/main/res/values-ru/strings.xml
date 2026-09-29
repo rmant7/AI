@@ -493,4 +493,49 @@
     <string name="phrasebook_badge_verified">проверено</string>
     <string name="phrasebook_badge_unverified">не проверено</string>
     <string name="phrasebook_load_failed">Не удалось загрузить разговорник. Подробности — в журнале ошибок.</string>
+
+    <string name="menu_voice_benchmark">Голосовой бенчмарк</string>
+    <string name="voice_bench_hint">Сравнивает движки синтеза речи, прежде всего клонирование голоса, на слух и по скорости. Запиши короткий образец своего голоса, выбери язык и фразу — каждый выбранный движок получит абсолютно одинаковые входные данные. Движки, которых нет на этом устройстве, показываются в списке, но ничего не генерируют. Ничего не уходит с телефона.</string>
+    <string name="voice_bench_section_reference">Образец голоса</string>
+    <string name="voice_bench_record">Запись</string>
+    <string name="voice_bench_rerecord">Перезаписать</string>
+    <string name="voice_bench_stop">Стоп</string>
+    <string name="voice_bench_play">Играть</string>
+    <string name="voice_bench_stop_playing">Стоп</string>
+    <string name="voice_bench_ref_none">Образец ещё не записан. Говори 10–20 секунд на языке, который будешь проверять.</string>
+    <string name="voice_bench_ref_recording">Запись… %1$.1f с (максимум 30 с)</string>
+    <string name="voice_bench_ref_saved">Образец сохранён: %1$.1f с, mono 24 кГц 16 бит WAV, хранится только на этом устройстве.</string>
+    <string name="voice_bench_mic_denied">Для записи образца нужен доступ к микрофону.</string>
+    <string name="voice_bench_mic_failed">Не удалось открыть микрофон.</string>
+    <string name="voice_bench_transcript_hint">Транскрипт образца (что ты сказал, слово в слово)</string>
+    <string name="voice_bench_section_test">Тест</string>
+    <string name="voice_bench_text_hint">Текст для синтеза</string>
+    <string name="voice_bench_lang_ru">Русский</string>
+    <string name="voice_bench_lang_en">Английский</string>
+    <string name="voice_bench_lang_he">Иврит</string>
+    <string name="voice_bench_preset_custom">Свой текст</string>
+    <string name="voice_bench_preset_normal">Обычная речь</string>
+    <string name="voice_bench_preset_question">Вопрос</string>
+    <string name="voice_bench_preset_emotional">Эмоциональная фраза</string>
+    <string name="voice_bench_preset_long">Длинное предложение</string>
+    <string name="voice_bench_section_engines">Движки</string>
+    <string name="voice_bench_engine_unsupported">%1$s — язык не поддерживается</string>
+    <string name="voice_bench_generate">Сгенерировать всё</string>
+    <string name="voice_bench_cancel">Отмена</string>
+    <string name="voice_bench_section_results">Результаты</string>
+    <string name="voice_bench_clear">Очистить</string>
+    <string name="voice_bench_repeat">Повторить</string>
+    <string name="voice_bench_no_text">Сначала введи текст.</string>
+    <string name="voice_bench_no_engines">Выбери хотя бы один движок.</string>
+    <string name="voice_bench_running">Выполняется: %1$s…</string>
+    <string name="voice_bench_done">Готово.</string>
+    <string name="voice_bench_cancelled">Отменено.</string>
+    <string name="voice_bench_result_meta">%1$s · %2$s</string>
+    <string name="voice_bench_result_timing">Генерация: %1$.1f с
+Аудио: %2$.1f с
+RTF: %3$.2f</string>
+    <string name="voice_bench_result_load">Загрузка модели: %1$.1f с</string>
+    <string name="voice_bench_status_not_installed">Не установлен локально</string>
+    <string name="voice_bench_status_unsupported">Язык не поддерживается</string>
+    <string name="voice_bench_status_error">Ошибка: %1$s</string>
 </resources>

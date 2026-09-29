@@ -114,6 +114,13 @@
             android:parentActivityName=".ChatActivity" />
 
         <activity
+            android:name=".VoiceBenchmarkActivity"
+            android:exported="false"
+            android:label="@string/menu_voice_benchmark"
+            android:parentActivityName=".ChatActivity"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".AvatarTestActivity"
             android:exported="false"
             android:label="@string/menu_avatar_test"
