@@ -66,7 +66,30 @@ class SentenceChunker(private val maxChars: Int = 160) {
         return -1
     }
 
-    private companion object {
-        val SENTENCE_END_CHARS = charArrayOf('.', '!', '?', '\n')
+    companion object {
+        private val SENTENCE_END_CHARS = charArrayOf('.', '!', '?', '\n')
+        private val CLAUSE_END_CHARS = charArrayOf(',', ';', ':', '—')
+        private const val MIN_PIECE = 40
+
+        /**
+         * [text] cut into pieces of at most [maxChars], at the latest sentence end, else clause end, else
+         * space before the limit. One utterance is synthesized whole, so a paragraph without a full stop
+         * (or a final flush of a long answer) would keep a slow voice silent for minutes.
+         */
+        fun splitLong(text: String, maxChars: Int = 160): List<String> {
+            val pieces = mutableListOf<String>()
+            var rest = text.trim()
+            while (rest.length > maxChars) {
+                val window = rest.substring(0, maxChars + 1)
+                var cut = window.lastIndexOfAny(SENTENCE_END_CHARS)
+                if (cut < MIN_PIECE) cut = window.lastIndexOfAny(CLAUSE_END_CHARS)
+                if (cut < MIN_PIECE) cut = window.lastIndexOf(' ') - 1
+                if (cut < MIN_PIECE) cut = maxChars - 1
+                pieces += rest.substring(0, cut + 1).trim()
+                rest = rest.substring(cut + 1).trim()
+            }
+            if (rest.isNotEmpty()) pieces += rest
+            return pieces.filter { it.isNotBlank() }
+        }
     }
 }

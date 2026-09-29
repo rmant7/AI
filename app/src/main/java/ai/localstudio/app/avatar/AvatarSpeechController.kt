@@ -91,7 +91,7 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
     }
 
     private fun enqueue(sentence: String) {
-        engine.speak(sentence, locale = null)
+        SentenceChunker.splitLong(sentence).forEach { engine.speak(it, locale = null) }
     }
 
     private fun handleEvent(event: AvatarTtsEngine.Event) {
