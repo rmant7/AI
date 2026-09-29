@@ -595,4 +595,8 @@ RTF: %3$.2f</string>
 
     <string name="voice_bench_qwen_profile_need_recording">No reference recording yet — record one first.</string>
     <string name="voice_bench_qwen_profile_need_transcript">The recording is fine; type its transcript (what you said) into the transcript field. No need to re-record.</string>
+    <string name="voice_bench_qwen_stream_0">Streaming: 1 s chunks, 2 s context (default)</string>
+    <string name="voice_bench_qwen_stream_1">Streaming: 3 s chunks, 0.5 s context</string>
+    <string name="voice_bench_qwen_stream_2">Streaming: 8 s chunks, 0.5 s context</string>
+    <string name="voice_bench_qwen_stream_3">No streaming: decode the whole utterance once</string>
 </resources>

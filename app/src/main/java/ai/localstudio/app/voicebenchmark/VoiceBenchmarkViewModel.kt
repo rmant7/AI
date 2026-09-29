@@ -61,6 +61,7 @@ class VoiceBenchmarkViewModel private constructor(application: Application) : An
     val engineChecked = HashMap<String, Boolean>()
     var trimReference = true
     var threadsIndex = 0
+    var streamingIndex = 0
 
     private val app = application
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

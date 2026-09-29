@@ -68,6 +68,12 @@ object QwenTtsRuntimeManager {
     @Volatile
     var threadsOverride: Int? = null
 
+    /** Diagnostics: streaming chunk length / vocoder left context in ms (defaults = upstream's). */
+    @Volatile
+    var streamingChunkMs: Int = 1000
+    @Volatile
+    var streamingLeftMs: Int = 2000
+
     /** Diagnostics: use only the first N seconds of the reference recording for the voice prompt (null = all of it; default 6 s like the upstream benchmarks — a long reference makes every step slower). */
     @Volatile
     var referenceMaxSeconds: Double? = 6.0
@@ -175,6 +181,7 @@ object QwenTtsRuntimeManager {
         val h = handle
         val started = SystemClock.elapsedRealtime()
         val status = runNative(h) {
+            Qwen3TtsNative.setStreaming(streamingChunkMs, streamingLeftMs)
             Qwen3TtsNative.synthesize(h, prompt.absolutePath, text, languageId, MAX_AUDIO_TOKENS, output.absolutePath)
         }
         val elapsed = SystemClock.elapsedRealtime() - started

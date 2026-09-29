@@ -327,6 +327,27 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        // chunk ms to vocoder left-context ms; "whole utterance" is one chunk longer than any answer.
+        val streaming = listOf(1000 to 2000, 3000 to 500, 8000 to 500, 600_000 to 0)
+        val streamLabels = listOf(
+            R.string.voice_bench_qwen_stream_0, R.string.voice_bench_qwen_stream_1,
+            R.string.voice_bench_qwen_stream_2, R.string.voice_bench_qwen_stream_3,
+        ).map { getString(it) }
+        binding.voiceBenchQwenStreaming.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, streamLabels)
+        binding.voiceBenchQwenStreaming.setSelection(vm.streamingIndex.coerceIn(streaming.indices), false)
+        streaming[vm.streamingIndex.coerceIn(streaming.indices)].let {
+            QwenTtsRuntimeManager.streamingChunkMs = it.first
+            QwenTtsRuntimeManager.streamingLeftMs = it.second
+        }
+        binding.voiceBenchQwenStreaming.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                vm.streamingIndex = position
+                QwenTtsRuntimeManager.streamingChunkMs = streaming[position].first
+                QwenTtsRuntimeManager.streamingLeftMs = streaming[position].second
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         binding.voiceBenchQwenProfile.setOnClickListener { runQwenProfile() }
     }
 

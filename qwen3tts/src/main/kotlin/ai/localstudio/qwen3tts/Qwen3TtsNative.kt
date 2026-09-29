@@ -40,6 +40,9 @@ object Qwen3TtsNative {
         outputWav: String,
     ): Int
 
+    /** Streaming: audio chunk length and how much earlier audio the vocoder re-decodes as context. Applies to the next [synthesize]. */
+    external fun setStreaming(chunkMs: Int, leftContextMs: Int)
+
     external fun cancel(handle: Long)
 
     /** Milliseconds from the start of the last [synthesize] to its first audio chunk, or -1. */

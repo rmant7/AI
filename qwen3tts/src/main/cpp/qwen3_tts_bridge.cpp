@@ -22,6 +22,10 @@
 
 namespace {
 
+// Streaming parameters, set from Kotlin (diagnostics): audio chunk length and vocoder left context.
+std::atomic<int32_t> g_chunk_ms{1000};
+std::atomic<int32_t> g_left_ms{2000};
+
 struct Handle {
     qwen3_tts_context_t* ctx = nullptr;
     int32_t threads = 4;
@@ -284,8 +288,8 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
 
     qwen3_tts_streaming_params_t params{};
     params.generation = {max_audio_tokens, 0.9f, 1.0f, 50, h->threads, 0, 1, 1.05f, language_id, nullptr, nullptr, 2.0f};
-    params.chunk_sec = 1.0f;
-    params.left_context_sec = 2.0f;
+    params.chunk_sec = static_cast<float>(g_chunk_ms.load()) / 1000.0f;
+    params.left_context_sec = static_cast<float>(g_left_ms.load()) / 1000.0f;
     params.collect_audio = 1;
 
     Stream stream{h, now_ms()};
@@ -324,8 +328,8 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
     snprintf(line, sizeof(line), "  Threads:         %d\n  Native call:     %lld ms\n  WAV writing:     %lld ms\n",
              static_cast<int>(h->threads), static_cast<long long>(native_ms), static_cast<long long>(wav_ms));
     extra += line;
-    snprintf(line, sizeof(line), "  Audio chunks:    %d (chunk 1.0 s, vocoder left context 2.0 s)\n",
-             static_cast<int>(stream.chunks.size()));
+    snprintf(line, sizeof(line), "  Audio chunks:    %d (chunk %.1f s, vocoder left context %.1f s)\n",
+             static_cast<int>(stream.chunks.size()), g_chunk_ms.load() / 1000.0, g_left_ms.load() / 1000.0);
     extra += line;
     const size_t shown = stream.chunks.size() < 40 ? stream.chunks.size() : 40;
     for (size_t i = 0; i < shown; ++i) {
@@ -340,6 +344,11 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
 }
 
 // The only call allowed to overlap another native call on the same handle.
+JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_setStreaming(JNIEnv*, jobject, jint chunkMs, jint leftMs) {
+    g_chunk_ms.store(chunkMs > 0 ? chunkMs : 1000);
+    g_left_ms.store(leftMs >= 0 ? leftMs : 2000);
+}
+
 JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_cancel(JNIEnv*, jobject, jlong handle) {
     Handle* h = handle_of(handle);
     if (h != nullptr) h->cancel.store(true);

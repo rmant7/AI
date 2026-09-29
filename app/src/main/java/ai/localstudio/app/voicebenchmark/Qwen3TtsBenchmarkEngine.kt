@@ -123,6 +123,8 @@ class Qwen3TtsBenchmarkEngine(
         return buildString {
             append("Qwen3-TTS ${size.label} Base · ${text.length} chars\n")
             append("Threads:            ${load.threads}\n")
+            append("Streaming:          chunk ${QwenTtsRuntimeManager.streamingChunkMs} ms, vocoder context ${QwenTtsRuntimeManager.streamingLeftMs} ms\n")
+            append("Device state:       ${deviceState()}\n")
             append("Reference:          ${"%.1f".format(prep.referenceSeconds)} s recorded, ${"%.1f".format(prep.usedSeconds)} s used\n")
             append("1 Model load:       ").append(if (load.alreadyLoaded) "0 (already loaded)" else s(load.loadMs)).append('\n')
             append("2 Voice prep:       ").append(if (prep.cached) "0 (cached prompt reused, reference NOT re-analysed)" else s(prep.prepMs)).append('\n')
@@ -143,5 +145,24 @@ class Qwen3TtsBenchmarkEngine(
     private companion object {
         // Codec language ids from qwen3-tts.cpp (qwen3_tts.h).
         val LANGUAGE_IDS = mapOf("en" to 2050, "ru" to 2069)
+    }
+
+    // Thermal throttling and low free memory both make the same work several times slower, so they go into every report.
+    private fun deviceState(): String {
+        val pm = appContext.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+        val thermal = if (android.os.Build.VERSION.SDK_INT >= 29) {
+            when (pm?.currentThermalStatus) {
+                android.os.PowerManager.THERMAL_STATUS_NONE -> "none"
+                android.os.PowerManager.THERMAL_STATUS_LIGHT -> "light"
+                android.os.PowerManager.THERMAL_STATUS_MODERATE -> "MODERATE"
+                android.os.PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE"
+                android.os.PowerManager.THERMAL_STATUS_CRITICAL, android.os.PowerManager.THERMAL_STATUS_EMERGENCY,
+                android.os.PowerManager.THERMAL_STATUS_SHUTDOWN -> "CRITICAL"
+                else -> "unknown"
+            }
+        } else "n/a"
+        val am = appContext.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val info = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        return "thermal=$thermal, free RAM ${info.availMem / (1024 * 1024)} MB${if (info.lowMemory) " (LOW)" else ""}"
     }
 }
