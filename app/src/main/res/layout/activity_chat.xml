@@ -14,16 +14,6 @@
         android:paddingVertical="8dp"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="12sp" />
-
-    <!-- GONE unless Settings.avatarEnabled — see ChatActivity.onCreate. A
-         Phase 1 placeholder face (plain Canvas shapes, see AvatarView's own
-         doc comment), not artwork; costs nothing while hidden. -->
-    <ai.localstudio.app.avatar.AvatarView
-        android:id="@+id/avatarView"
-        android:layout_width="match_parent"
-        android:layout_height="200dp"
-        android:visibility="gone" />
-
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/messages"
         android:layout_width="match_parent"

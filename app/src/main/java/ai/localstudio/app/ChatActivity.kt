@@ -20,7 +20,6 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import ai.localstudio.app.attach.DocumentIngest
-import ai.localstudio.app.avatar.AvatarSpeechController
 import ai.localstudio.app.databinding.ActivityChatBinding
 import ai.localstudio.app.history.ChatHistoryStore
 import ai.localstudio.app.history.Conversation
@@ -74,14 +73,6 @@ class ChatActivity : AppCompatActivity() {
     // updates the field repeatedly while recording, and each update must
     // still be "the old text plus what's been said so far", not overwrite it.
     private var recordingPrefix = ""
-
-    // Null unless Settings.avatarEnabled — created/torn down on each
-    // onResume() by syncAvatarEnabled() as the setting is flipped, and only
-    // ever driven from send()'s own single-answer path, not sendCompare()'s
-    // multiple simultaneous sources (see AvatarSpeechController's own doc
-    // comment).
-    private var avatarController: AvatarSpeechController? = null
-    private var avatarVoiceKey: String? = null
 
     // Staged for exactly one turn, then cleared — an attached image is a
     // question about *this* photo, not something to keep resending on every
@@ -189,39 +180,11 @@ class ChatActivity : AppCompatActivity() {
         super.onDestroy()
         container.whisperEngine.release()
         container.whisperPreviewEngine.release()
-        avatarController?.shutdown()
     }
 
     override fun onResume() {
         super.onResume()
         updateStatus()
-        syncAvatarEnabled()
-    }
-
-    // Re-checked on every resume, not just onCreate — flipping the setting on
-    // the Settings screen and pressing Back only triggers onResume() here,
-    // never a fresh onCreate(), so onCreate-only used to leave the avatar
-    // missing until the whole activity was killed and relaunched.
-    private fun syncAvatarEnabled() {
-        val enabled = container.settings.avatarEnabled
-        // Rebuilt when the chosen voice (Android TTS / cloned Qwen voice)
-        // changed on another screen, not just when the avatar is toggled.
-        val voice = if (enabled) ai.localstudio.app.avatar.AvatarVoiceAvailability.config(this, container.settings) else null
-        val voiceKey = voice?.let { "${it.backend.key}:${it.preferredVoiceName}:${it.qwenReferenceText.hashCode()}" }
-        if (avatarController != null && voiceKey != avatarVoiceKey) {
-            avatarController?.shutdown()
-            avatarController = null
-        }
-        if (enabled && avatarController == null && voice != null) {
-            binding.avatarView.visibility = android.view.View.VISIBLE
-            avatarController = AvatarSpeechController(this, binding.avatarView, voice)
-            avatarVoiceKey = voiceKey
-        } else if (!enabled && avatarController != null) {
-            avatarController?.shutdown()
-            avatarController = null
-            avatarVoiceKey = null
-            binding.avatarView.visibility = android.view.View.GONE
-        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -435,7 +398,6 @@ class ChatActivity : AppCompatActivity() {
         val hasAttachment = pendingImage != null || sessionDocumentNames.isNotEmpty()
         if (text.isEmpty() && !hasAttachment) return
 
-        avatarController?.onNewTurn()
         binding.input.setText("")
         adapter.add(Message.user(text, imageDataUri = pendingImage?.uri))
         binding.messages.scrollToPosition(adapter.itemCount - 1)
@@ -571,7 +533,6 @@ class ChatActivity : AppCompatActivity() {
                                 ),
                                 onPartialText = {
                                     partial.value = it
-                                    avatarController?.onPartialText(it)
                                 },
                             )
                         } }
@@ -586,7 +547,6 @@ class ChatActivity : AppCompatActivity() {
             setBusy(false)
             if (stoppedByUser) {
                 stoppedByUser = false
-                avatarController?.onInterrupted()
                 adapter.update(placeholderIndex, Message.error(body = getString(R.string.chat_stopped), details = null))
                 binding.messages.scrollToPosition(adapter.itemCount - 1)
                 persist()
@@ -594,7 +554,6 @@ class ChatActivity : AppCompatActivity() {
             }
             result
                 .onSuccess { answer ->
-                    avatarController?.onGenerationDone(answer.text)
                     // FallbackTextRuntime already embeds "Ответ от: <label>"
                     // whenever 2+ candidates are configured (any cloud
                     // provider, via its own model rotation, counts as 2+).
@@ -639,13 +598,11 @@ class ChatActivity : AppCompatActivity() {
                     // noted underneath instead of overwriting it.
                     val partialText = partial.value
                     if (!partialText.isNullOrBlank()) {
-                        avatarController?.onGenerationDone(partialText)
                         adapter.update(
                             placeholderIndex,
                             Message.assistant(body = "$partialText\n\n---\n⚠ $body", details = error.javaClass.simpleName),
                         )
                     } else {
-                        avatarController?.onInterrupted()
                         adapter.update(placeholderIndex, Message.error(body = body, details = error.javaClass.simpleName))
                     }
                 }

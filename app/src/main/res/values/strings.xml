@@ -20,8 +20,6 @@
     <string name="chat_stopped">Stopped by user.</string>
     <string name="settings_compare_mode">Compare answers (in parallel)</string>
     <string name="settings_compare_mode_hint">If several sources are enabled, the request is sent to all of them at once and answers appear as they arrive. Normally (off) — local model first, cloud only if it fails.</string>
-    <string name="settings_avatar_enabled">Talking avatar (experimental)</string>
-    <string name="settings_avatar_enabled_hint">Shows an animated photo above the chat that speaks the assistant\'s answers out loud, mouth roughly synced to the words.</string>
     <string name="chat_compare_waiting">Waiting for answers…</string>
     <string name="menu_settings">Settings</string>
     <string name="menu_chat">Chat</string>
