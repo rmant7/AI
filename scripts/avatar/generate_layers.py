@@ -43,11 +43,11 @@ VISEMES = {
     "i": (38.0, 6.0, 1.0, 0.80, False, False, 0.0),
     "o": (27.0, 16.0, 2.0, 0.0, False, True, 0.0),
     "u": (17.0, 9.0, 1.0, 0.0, False, True, 0.0),
-    "smile": (52.0, 10.0, 2.0, 0.62, False, False, 7.0),
+    "smile": (58.0, 14.0, 2.0, 0.55, False, False, 11.0),
     # the "surprised" mouth: a big round opening, much larger than the speech "o"
-    "wow": (30.0, 30.0, 5.0, 0.0, True, True, 0.0),
+    "wow": (34.0, 34.0, 5.0, 0.0, True, True, 0.0),
     # clenched teeth, corners pulled down
-    "anger": (46.0, 9.0, 1.0, 1.0, False, False, -6.0),
+    "anger": (48.0, 12.0, 1.0, 1.0, False, False, -9.0),
 }
 BITE_LINE = {"anger"}
 
@@ -151,7 +151,7 @@ def brow_hair_mask(rgb, brow):
     return np.clip(m * 1.6, 0.0, 1.0) * rect_mask(h, w, x0, y0, x1, y1, 5.0)
 
 
-def angry_brow(rgb, brow, out, alpha):
+def move_brow(rgb, brow, out, alpha, angle, drop):
     """Paints the old brow hairs out of `out` (forehead skin) and re-draws them lower and tilted.
     `alpha` accumulates exactly the pixels this changes, so the layer never covers the eyes."""
     h, w = rgb.shape[:2]
@@ -164,17 +164,30 @@ def angry_brow(rgb, brow, out, alpha):
     grow = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(2)), np.float32) / 255.0
     out = out * (1 - grow[..., None]) + skin * grow[..., None]
     # the same hairs, rotated about the outer end and dropped
-    rgba = np.dstack([rgb * 0.84, mask * 255]).astype(np.uint8)
-    rot = Image.fromarray(rgba, "RGBA").rotate(brow["angle"], resample=Image.BICUBIC, center=(brow["pivot_x"], (y0 + y1) / 2))
+    rgba = np.dstack([rgb * (0.84 if drop > 0 else 0.95), mask * 255]).astype(np.uint8)
+    rot = Image.fromarray(rgba, "RGBA").rotate(angle, resample=Image.BICUBIC, center=(brow["pivot_x"], (y0 + y1) / 2))
     rot = np.asarray(rot, np.float32)
-    rmask = np.roll(rot[..., 3] / 255.0, int(BROW_DROP), axis=0)
-    rcol = np.roll(rot[..., :3], int(BROW_DROP), axis=0)
+    rmask = np.roll(rot[..., 3] / 255.0, drop, axis=0)
+    rcol = np.roll(rot[..., :3], drop, axis=0)
     # soft shadow just under the lowered brow so the frown reads
-    shadow = np.asarray(Image.fromarray((np.roll(rmask, 5, axis=0) * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(3.5)), np.float32) / 255.0
+    shadow = np.asarray(Image.fromarray((np.roll(rmask, 5 if drop > 0 else 0, axis=0) * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(3.5)), np.float32) / 255.0
     out = out * (1 - 0.14 * shadow[..., None])
     touched = np.maximum(np.maximum(grow, rmask), shadow * 0.9)
     touched = np.asarray(Image.fromarray((touched * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3)), np.float32) / 255.0
     return out * (1 - rmask[..., None]) + rcol * rmask[..., None], np.maximum(alpha, touched)
+
+
+def wide_eye(rgb, eye, k=1.32):
+    """The eye stretched vertically about its centre (fading out with distance): a startled, wide-open look."""
+    out = rgb.copy()
+    r2 = (eye["h_top"] + eye["h_bot"]) * 1.35
+    for x in range(int(eye["xc"] - eye["a"] - 8), int(eye["xc"] + eye["a"] + 9)):
+        env = eye_profile(x, eye)
+        ys = np.arange(int(eye["yc"] - r2 - 2), int(eye["yc"] + r2 + 3), dtype=np.float32)
+        d = ys - eye["yc"]
+        kk = 1.0 + (k - 1.0) * (1.0 - smoothstep(np.abs(d) / r2)) * min(1.0, 0.35 + env)
+        out[ys.astype(int), x] = sample_rows(rgb, x, eye["yc"] + d / kk)
+    return out
 
 
 def lipless(rgb):
@@ -340,9 +353,14 @@ def main():
         ang, lash = angry_eye(rgb, eye, inner)
         soft = lash_soft(lash)
         layers[f"eyes/{side}_angry.png"] = (ang * (1 - soft[..., None]) + lash_col * soft[..., None], fp)
-    brows_rgb, brow_alpha = angry_brow(rgb, LEFT_BROW, rgb.copy(), np.zeros((h, w), np.float32))
-    brows_rgb, brow_alpha = angry_brow(rgb, RIGHT_BROW, brows_rgb, brow_alpha)
+    brows_rgb, brow_alpha = move_brow(rgb, LEFT_BROW, rgb.copy(), np.zeros((h, w), np.float32), LEFT_BROW["angle"], int(BROW_DROP))
+    brows_rgb, brow_alpha = move_brow(rgb, RIGHT_BROW, brows_rgb, brow_alpha, RIGHT_BROW["angle"], int(BROW_DROP))
     layers["eyebrows/angry.png"] = (brows_rgb, brow_alpha)
+    up_rgb, up_alpha = move_brow(rgb, LEFT_BROW, rgb.copy(), np.zeros((h, w), np.float32), -LEFT_BROW["angle"] * 0.6, -13)
+    up_rgb, up_alpha = move_brow(rgb, RIGHT_BROW, up_rgb, up_alpha, -RIGHT_BROW["angle"] * 0.6, -13)
+    layers["eyebrows/raised.png"] = (up_rgb, up_alpha)
+    layers["eyes/left_wide.png"] = (wide_eye(rgb, LEFT_EYE), fl)
+    layers["eyes/right_wide.png"] = (wide_eye(rgb, RIGHT_EYE), fr)
     layers["mouth/neutral.png"] = (rgb, fm)
     for name in VISEMES:
         layers[f"mouth/{name}.png"] = (mouth_variant(rgb, lipless_rgb, name), fm)
@@ -383,6 +401,7 @@ def main():
             "anger_a": (E + AE + ["eyebrows/angry.png", "mouth/neutral.png", "mouth/anger.png", "mouth/a.png"], [1, 1, 1, 1, 1, 1, 1, .6]),
             "anger_blink": (E + AE + ["eyes/left_closed.png", "eyes/right_closed.png", "eyebrows/angry.png", "mouth/neutral.png", "mouth/anger.png"], None),
             "anger_wink_l": (E + AE + ["eyes/left_closed.png", "eyebrows/angry.png", "mouth/neutral.png", "mouth/anger.png"], None),
+            "wow": (["eyes/left_open.png", "eyes/right_open.png", "eyes/left_wide.png", "eyes/right_wide.png", "eyebrows/raised.png", "mouth/neutral.png", "mouth/wow.png"], None),
             "smile_a": (E + ["mouth/neutral.png", "mouth/smile.png", "mouth/a.png"], [1, 1, 1, 1, .6]),
             "wow_o": (E + ["mouth/neutral.png", "mouth/wow.png", "mouth/o.png"], [1, 1, 1, 1, .6]),
             "smile_wink": (["eyes/left_closed.png", "eyes/right_open.png", "mouth/neutral.png", "mouth/smile.png"], None),

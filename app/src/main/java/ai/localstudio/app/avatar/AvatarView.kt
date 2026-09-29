@@ -57,6 +57,9 @@ class AvatarView @JvmOverloads constructor(
         val rightClosed: Bitmap,
         val rightAngry: Bitmap,
         val browsAngry: Bitmap,
+        val leftWide: Bitmap,
+        val rightWide: Bitmap,
+        val browsRaised: Bitmap,
         val mouthNeutral: Bitmap,
         val speech: Map<Speech, Bitmap>,
         val expression: Map<Expression, Bitmap>,
@@ -162,6 +165,9 @@ class AvatarView @JvmOverloads constructor(
                 rightClosed = load("eyes/right_closed.png"),
                 rightAngry = load("eyes/right_angry.png"),
                 browsAngry = load("eyebrows/angry.png"),
+                leftWide = load("eyes/left_wide.png"),
+                rightWide = load("eyes/right_wide.png"),
+                browsRaised = load("eyebrows/raised.png"),
                 mouthNeutral = load("mouth/neutral.png"),
                 speech = Speech.entries.associateWith { load("mouth/${it.asset}.png") },
                 expression = Expression.entries.associateWith { load("mouth/${it.mouthAsset}.png") },
@@ -279,6 +285,7 @@ class AvatarView @JvmOverloads constructor(
         drawMatrix.postTranslate(headShiftX * drawnSizePx, headShiftY * drawnSizePx)
 
         val anger = expressionWeights[Expression.ANGER.ordinal]
+        val wow = expressionWeights[Expression.WOW.ordinal]
         drawLayer(canvas, l.head, 1f)
         drawLayer(canvas, l.leftOpen, 1f)
         drawLayer(canvas, l.rightOpen, 1f)
@@ -286,11 +293,16 @@ class AvatarView @JvmOverloads constructor(
             drawLayer(canvas, l.leftAngry, anger)
             drawLayer(canvas, l.rightAngry, anger)
         }
+        if (wow > MIN_LAYER_ALPHA) {
+            drawLayer(canvas, l.leftWide, wow)
+            drawLayer(canvas, l.rightWide, wow)
+        }
         // Closed eyes over open/angry ones, then brows over everything on the
         // eyes: a blink or wink under anger keeps the lowered brows.
         if (leftClosed > 0f) drawLayer(canvas, l.leftClosed, leftClosed)
         if (rightClosed > 0f) drawLayer(canvas, l.rightClosed, rightClosed)
         if (anger > MIN_LAYER_ALPHA) drawLayer(canvas, l.browsAngry, anger)
+        if (wow > MIN_LAYER_ALPHA) drawLayer(canvas, l.browsRaised, wow)
         drawLayer(canvas, l.mouthNeutral, 1f)
         for (e in Expression.entries) {
             val w = expressionWeights[e.ordinal]
