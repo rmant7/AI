@@ -107,9 +107,9 @@ object QwenTtsRuntimeManager {
     /** Free RAM needed before loading: ~0.9 GB of weights plus graph buffers and the vocoder. */
     private const val MIN_AVAILABLE_MB = 1400L
 
-    suspend fun ensureLoaded(context: Context, provider: QwenTtsModelProvider): LoadInfo = lock.withLock {
+    suspend fun ensureLoaded(context: Context, provider: QwenTtsModelProvider, threadsHint: Int? = null): LoadInfo = lock.withLock {
         val app = context.applicationContext
-        val wantedThreads = threadsOverride ?: defaultThreads()
+        val wantedThreads = threadsOverride ?: threadsHint ?: defaultThreads()
         // A different thread count needs a fresh context.
         val wantedVocoder = vocoderThreadsOverride ?: 0
         if (handle != 0L && (loadedThreads != wantedThreads || loadedVocoderThreads != wantedVocoder)) {
@@ -263,14 +263,17 @@ object QwenTtsRuntimeManager {
         scope.launch { release() }
     }
 
+    /** The prepared voice prompt file, if any — a second context can synthesize from it without touching this one's lock. */
+    fun currentPromptFile(): File? = promptFile
+
     private const val MAX_AUDIO_TOKENS = 1024
 
     // Speech is ~12.5 codec frames a second; even slow speech is under ~2.5 frames per character. A model that
     // never emits its end token (seen on a Pixel: 25 characters, an hour and still generating) is cut off
     // at a length the text can plausibly need instead of at 1024 frames (82 s of audio).
-    private fun maxFramesFor(text: String): Int = (text.length * 3 + 24).coerceIn(48, MAX_AUDIO_TOKENS)
+    internal fun maxFramesFor(text: String): Int = (text.length * 3 + 24).coerceIn(48, MAX_AUDIO_TOKENS)
 
-    private suspend fun <T> runNative(cancelHandle: Long?, block: () -> T): T = coroutineScope {
+    internal suspend fun <T> runNative(cancelHandle: Long?, block: () -> T): T = coroutineScope {
         val call = async(Dispatchers.IO + NonCancellable) { block() }
         try {
             call.await()
@@ -283,13 +286,13 @@ object QwenTtsRuntimeManager {
         }
     }
 
-    private fun availMb(context: Context): Long {
+    internal fun availMb(context: Context): Long {
         val info = ActivityManager.MemoryInfo()
         (context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(info)
         return info.availMem / (1024 * 1024)
     }
 
-    private fun pssMb(): Long {
+    internal fun pssMb(): Long {
         val info = Debug.MemoryInfo()
         Debug.getMemoryInfo(info)
         return info.totalPss / 1024L

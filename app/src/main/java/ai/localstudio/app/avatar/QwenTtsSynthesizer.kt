@@ -18,7 +18,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import ai.localstudio.app.voicebenchmark.QwenTtsSecondWorker
 import java.io.File
 
 /**
@@ -41,11 +43,35 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val requests = Channel<Request>(Channel.UNLIMITED)
 
+    // On a phone with RAM and cores to spare, a second context synthesizes the next sentence at the same
+    // time (the audio is put back in order by AvatarTtsEngine). Otherwise one worker, as before.
+    private val parallel = parallelAllowed(app)
+    private val second = QwenTtsSecondWorker()
+    private val threadsEach = if (parallel) PARALLEL_THREADS else null
+
     @Volatile
     private var generation = 0
 
     init {
-        scope.launch { for (request in requests) process(request) }
+        scope.launch { for (request in requests) process(request, second = false) }
+        if (parallel) {
+            scope.launch {
+                // Only once the first context has prepared the voice: the second one reuses that prompt.
+                while (QwenTtsRuntimeManager.currentPromptFile() == null) delay(200)
+                note("second synthesis context enabled")
+                var loaded = false
+                while (true) {
+                    // Loading it takes ~1 GB: do not take a sentence while that is not available.
+                    if (!loaded && QwenTtsRuntimeManager.availMb(app) < SECOND_CONTEXT_MIN_FREE_MB) {
+                        delay(1000)
+                        continue
+                    }
+                    val request = requests.receiveCatching().getOrNull() ?: break
+                    process(request, second = true)
+                    loaded = true
+                }
+            }
+        }
     }
 
     override val isReady: Boolean get() = true
@@ -60,6 +86,7 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
         // Stops the sentence being generated, between audio chunks; the model
         // stays loaded for the next answer.
         QwenTtsRuntimeManager.requestCancel()
+        second.requestCancel()
     }
 
     override fun shutdown() {
@@ -67,20 +94,29 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
         requests.close()
         scope.cancel()
         QwenTtsRuntimeManager.releaseAsync()
+        CoroutineScope(Dispatchers.Default).launch { second.release() }
     }
 
-    private suspend fun process(request: Request) {
+    private suspend fun process(request: Request, second: Boolean) {
         if (request.generation != generation) return
         val started = SystemClock.elapsedRealtime()
         fun since() = "%.1f s".format((SystemClock.elapsedRealtime() - started) / 1000.0)
-        note("sentence started (${request.text.length} chars)")
+        note("sentence started (${request.text.length} chars, worker ${if (second) 2 else 1})")
         val ok = try {
-            val reference = ReferenceVoiceRecorder.referenceFile(app)
-            val load = QwenTtsRuntimeManager.ensureLoaded(app, QwenTtsModelProvider.get(app))
-            note("model ${if (load.alreadyLoaded) "already loaded" else "loaded"}, threads=${load.threads}, after ${since()}")
-            QwenTtsRuntimeManager.prepareVoice(app, reference, referenceText)
-            note("voice ready after ${since()}")
-            QwenTtsRuntimeManager.synthesize(request.text, languageIdFor(request.text), request.file)
+            if (second) {
+                val prompt = QwenTtsRuntimeManager.currentPromptFile() ?: throw QwenTtsException("Voice not prepared")
+                this.second.synthesize(
+                    app, QwenTtsModelProvider.get(app), prompt, threadsEach ?: QwenTtsRuntimeManager.defaultThreads(),
+                    request.text, languageIdFor(request.text), request.file,
+                )
+            } else {
+                val reference = ReferenceVoiceRecorder.referenceFile(app)
+                val load = QwenTtsRuntimeManager.ensureLoaded(app, QwenTtsModelProvider.get(app), threadsEach)
+                note("model ${if (load.alreadyLoaded) "already loaded" else "loaded"}, threads=${load.threads}, after ${since()}")
+                QwenTtsRuntimeManager.prepareVoice(app, reference, referenceText)
+                note("voice ready after ${since()}")
+                QwenTtsRuntimeManager.synthesize(request.text, languageIdFor(request.text), request.file)
+            }
             note("sentence synthesized in ${since()}")
             true
         } catch (e: CancellationException) {
@@ -106,6 +142,13 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
         runCatching { AppContainer.get(app).appLog.record("AVATAR_QWEN", message) }
     }
 
+    // Two contexts need about 1 GB more and cores to run on: only big phones.
+    private fun parallelAllowed(context: Context): Boolean {
+        val info = android.app.ActivityManager.MemoryInfo()
+        (context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(info)
+        return info.totalMem >= 10L * 1024 * 1024 * 1024 && Runtime.getRuntime().availableProcessors() >= 8
+    }
+
     // Codec language ids from qwen3-tts.cpp: Cyrillic text is Russian, anything else English.
     private fun languageIdFor(text: String): Int {
         val cyrillic = text.count { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
@@ -114,6 +157,8 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
     }
 
     private companion object {
+        const val PARALLEL_THREADS = 3
+        const val SECOND_CONTEXT_MIN_FREE_MB = 2500L
         const val TAG = "QwenTtsSynthesizer"
         const val RUSSIAN = 2069
         const val ENGLISH = 2050

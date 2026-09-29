@@ -78,6 +78,14 @@ class AvatarTtsEngine(
     @Volatile
     private var generation = 0
     private val queue = LinkedBlockingQueue<Job>()
+
+    // Sentences may finish synthesizing out of order (two contexts at once); they are played in the
+    // order they were spoken. [ready] holds finished ones (null = failed) until every earlier one is in.
+    private val orderLock = Any()
+    private var nextSeq = 0L
+    private var nextPlay = 0L
+    private val ready = java.util.TreeMap<Long, Job?>()
+    private val seqOf = ConcurrentHashMap<String, Long>()
     private val workerLock = Any()
     private var worker: Thread? = null
 
@@ -115,6 +123,7 @@ class AvatarTtsEngine(
         utteranceText[utteranceId] = text
         utteranceFile[utteranceId] = file
         queuedAt[utteranceId] = SystemClock.elapsedRealtime()
+        synchronized(orderLock) { seqOf[utteranceId] = nextSeq++ }
         synthesizer.synthesize(text, file) { ok -> onSynthesized(utteranceId, ok) }
         return utteranceId
     }
@@ -122,13 +131,37 @@ class AvatarTtsEngine(
     private fun onSynthesized(utteranceId: String, ok: Boolean) {
         val text = utteranceText[utteranceId]
         val file = utteranceFile[utteranceId]
+        val seq = seqOf.remove(utteranceId)
         if (!ok || text == null || file == null || !file.exists()) {
             discard(utteranceId)
             if (!ok) onEvent(Event.Failed(utteranceId))
+            if (seq != null) deliver(seq, null)
             return
         }
-        queue.put(Job(utteranceId, text, file, generation))
+        val job = Job(utteranceId, text, file, generation)
+        if (seq == null) queue.put(job) else deliver(seq, job)
         startWorker()
+    }
+
+    // Puts finished sentences into the play queue strictly in the order they were spoken.
+    private fun deliver(seq: Long, job: Job?) {
+        var added = false
+        synchronized(orderLock) {
+            if (seq < nextPlay) {
+                job?.file?.delete()
+                return
+            }
+            ready[seq] = job
+            while (ready.isNotEmpty() && ready.firstKey() == nextPlay) {
+                val next = ready.pollFirstEntry().value
+                nextPlay++
+                if (next != null) {
+                    queue.put(next)
+                    added = true
+                }
+            }
+        }
+        if (added) startWorker()
     }
 
     /** Drops everything queued or playing — a new turn starting, or the user hitting Stop. */
@@ -141,6 +174,12 @@ class AvatarTtsEngine(
         utteranceFile.clear()
         queuedAt.clear()
         lastEndAt = 0L
+        synchronized(orderLock) {
+            ready.values.forEach { it?.file?.delete() }
+            ready.clear()
+            seqOf.clear()
+            nextPlay = nextSeq
+        }
     }
 
     fun shutdown() {

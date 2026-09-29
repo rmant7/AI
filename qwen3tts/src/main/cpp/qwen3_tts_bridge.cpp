@@ -96,6 +96,10 @@ int32_t on_chunk(const qwen3_tts_audio_chunk_t* chunk, void* user) {
 // encode, code generation, vocoder, memory ...) with fprintf(stderr), which on
 // Android goes nowhere. While one of its calls runs, fd 2 is redirected into a
 // pipe, so the text can be handed to Kotlin (and the app log) instead.
+// Only one capture at a time: fd 2 is process-wide, so with two contexts generating at once the second
+// one simply runs without a capture (its report is empty) instead of tangling the redirection.
+std::atomic<bool> g_capture_busy{false};
+
 class StderrCapture {
 public:
     explicit StderrCapture(Handle* h) : h_(h) {
@@ -104,11 +108,16 @@ public:
     }
 
     void start() {
-        if (pipe(fds_) != 0) return;
+        if (g_capture_busy.exchange(true)) return;
+        if (pipe(fds_) != 0) {
+            g_capture_busy.store(false);
+            return;
+        }
         saved_ = dup(2);
         if (saved_ < 0) {
             close(fds_[0]);
             close(fds_[1]);
+            g_capture_busy.store(false);
             return;
         }
         fflush(stderr);
@@ -137,6 +146,7 @@ public:
         reader_.join();
         close(fds_[0]);
         active_ = false;
+        g_capture_busy.store(false);
         return std::move(text_);
     }
 
