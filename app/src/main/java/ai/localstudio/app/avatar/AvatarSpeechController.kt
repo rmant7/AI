@@ -105,7 +105,7 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
             text = text.removePrefix(first).trim()
         }
         firstPieceOfTurn = false
-        SentenceChunker.splitLong(text).forEach { engine.speak(it, locale = null) }
+        SentenceChunker.splitLong(text, if (shortFirstPiece) QWEN_PIECE_CHARS else 160).forEach { engine.speak(it, locale = null) }
     }
 
     private fun handleEvent(event: AvatarTtsEngine.Event) {
@@ -131,5 +131,7 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
     private companion object {
         const val ATTRIBUTION_MARKER = "\n\n---"
         const val FIRST_PIECE_CHARS = 60
+        // The cloned voice stops or drifts less on shorter pieces.
+        const val QWEN_PIECE_CHARS = 100
     }
 }

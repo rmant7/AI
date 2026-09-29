@@ -109,21 +109,22 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
         fun since() = "%.1f s".format((SystemClock.elapsedRealtime() - started) / 1000.0)
         note("sentence started (${request.text.length} chars, worker ${if (second) 2 else 1})")
         val ok = try {
-            if (second) {
-                val prompt = QwenTtsRuntimeManager.currentPromptFile() ?: throw QwenTtsException("Voice not prepared")
-                this.second.synthesize(
-                    app, QwenTtsModelProvider.get(app), prompt, threadsEach ?: QwenTtsRuntimeManager.defaultThreads(),
-                    PARALLEL_VOCODER_THREADS, request.text, languageIdFor(request.text), request.file,
-                )
-            } else {
-                val reference = ReferenceVoiceRecorder.referenceFile(app)
-                val load = QwenTtsRuntimeManager.ensureLoaded(
-                    app, QwenTtsModelProvider.get(app), threadsEach, if (parallel) PARALLEL_VOCODER_THREADS else null,
-                )
-                note("model ${if (load.alreadyLoaded) "already loaded" else "loaded"}, threads=${load.threads}, after ${since()}")
-                QwenTtsRuntimeManager.prepareVoice(app, reference, referenceText)
-                note("voice ready after ${since()}")
-                QwenTtsRuntimeManager.synthesize(request.text, languageIdFor(request.text), request.file)
+            var attempt = 0
+            while (true) {
+                synthesizeOnce(request, second, ::since)
+                // The model decides itself when to stop, and sometimes gets it wrong: too early (the sentence
+                // is cut off half way) or never (babble up to the frame cap). One retry usually fixes it.
+                val seconds = (ai.localstudio.app.voicebenchmark.WavFiles.durationMs(request.file) ?: 0L) / 1000.0
+                val chars = request.text.length
+                val cap = QwenTtsRuntimeManager.maxFramesFor(request.text)
+                val tooShort = chars >= 20 && seconds < chars * MIN_SECONDS_PER_CHAR
+                val ranOn = seconds >= (cap - 3) * FRAME_SECONDS
+                if ((tooShort || ranOn) && attempt == 0 && request.generation == generation) {
+                    attempt++
+                    note("audio ${"%.1f".format(seconds)} s for $chars chars looks ${if (tooShort) "cut off" else "run on"}, retrying once")
+                    continue
+                }
+                break
             }
             note("sentence synthesized in ${since()}")
             true
@@ -146,6 +147,25 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
         if (request.generation == generation) request.onResult(ok)
     }
 
+    private suspend fun synthesizeOnce(request: Request, second: Boolean, since: () -> String) {
+        if (second) {
+            val prompt = QwenTtsRuntimeManager.currentPromptFile() ?: throw QwenTtsException("Voice not prepared")
+            this.second.synthesize(
+                app, QwenTtsModelProvider.get(app), prompt, threadsEach ?: QwenTtsRuntimeManager.defaultThreads(),
+                PARALLEL_VOCODER_THREADS, request.text, languageIdFor(request.text), request.file,
+            )
+        } else {
+            val reference = ReferenceVoiceRecorder.referenceFile(app)
+            val load = QwenTtsRuntimeManager.ensureLoaded(
+                app, QwenTtsModelProvider.get(app), threadsEach, if (parallel) PARALLEL_VOCODER_THREADS else null,
+            )
+            note("model ${if (load.alreadyLoaded) "already loaded" else "loaded"}, threads=${load.threads}, after ${since()}")
+            QwenTtsRuntimeManager.prepareVoice(app, reference, referenceText)
+            note("voice ready after ${since()}")
+            QwenTtsRuntimeManager.synthesize(request.text, languageIdFor(request.text), request.file)
+        }
+    }
+
     private fun note(message: String) {
         runCatching { AppContainer.get(app).appLog.record("AVATAR_QWEN", message) }
     }
@@ -165,6 +185,9 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
     }
 
     private companion object {
+        // Codec frames are 80 ms; even quick Russian speech needs ~0.04 s per character.
+        const val FRAME_SECONDS = 0.08
+        const val MIN_SECONDS_PER_CHAR = 0.04
         const val PARALLEL_THREADS = 2
         const val PARALLEL_VOCODER_THREADS = 4
         const val SECOND_CONTEXT_MIN_FREE_MB = 2500L
