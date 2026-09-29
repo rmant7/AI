@@ -30,7 +30,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -96,7 +95,8 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         binding.root.applySystemBarInsets(applyImeInset = true)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         title = getString(R.string.menu_voice_benchmark)
-        vm = ViewModelProvider(this)[VoiceBenchmarkViewModel::class.java]
+        vm = VoiceBenchmarkViewModel.get(application)
+        binding.voiceBenchStatus.apply { minLines = 2; maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
 
         // The transcript is what the avatar's cloned voice is made from too, so keep it.
         val settings = AppContainer.get(this).settings
@@ -134,6 +134,18 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopPlayback()
+        if (isFinishing) vm.onScreenClosed()
+    }
+
+    override fun onSupportNavigateUp(): Boolean {
+        finish()
+        return true
+    }
+
+    // Setting identical text on a TextView still resets its selection and can scroll the page;
+    // the state is re-drawn every second while a run is going, so only touch what changed.
+    private fun android.widget.TextView.setTextIfChanged(value: CharSequence) {
+        if (text.toString() != value.toString()) text = value
     }
 
     // ── reference voice ───────────────────────────────────────────────────
@@ -163,11 +175,11 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         binding.voiceBenchStopButton.isEnabled = rec.recording
         binding.voiceBenchPlayRefButton.isEnabled = rec.hasRecording && !rec.recording
         binding.voiceBenchLevel.progress = if (rec.recording) (rec.level * 100).toInt() else 0
-        binding.voiceBenchRefInfo.text = when {
+        binding.voiceBenchRefInfo.setTextIfChanged(when {
             rec.recording -> getString(R.string.voice_bench_ref_recording, rec.elapsedMs / 1000.0)
             rec.hasRecording -> getString(R.string.voice_bench_ref_saved, rec.durationMs / 1000.0)
             else -> getString(R.string.voice_bench_ref_none)
-        }
+        })
     }
 
     // ── test input ────────────────────────────────────────────────────────
@@ -388,15 +400,15 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         binding.voiceBenchGenerateButton.isEnabled = !ui.running
         binding.voiceBenchCancelButton.isEnabled = ui.running
         binding.voiceBenchClearButton.isEnabled = !ui.running
-        binding.voiceBenchProfileOutput.text = ui.profileReport
-        binding.voiceBenchStatus.text = when (val s = ui.status) {
+        binding.voiceBenchProfileOutput.setTextIfChanged(ui.profileReport)
+        binding.voiceBenchStatus.setTextIfChanged(when (val s = ui.status) {
             Status.Idle -> ""
             is Status.Running -> getString(R.string.voice_bench_running, s.engineName)
             Status.Done -> getString(R.string.voice_bench_done)
             Status.Cancelled -> getString(R.string.voice_bench_cancelled)
             is Status.Live -> getString(R.string.voice_bench_live, s.audioMs / 1000.0, s.elapsedMs / 1000.0, s.elapsedMs.toDouble() / s.audioMs)
             is Status.Native -> s.line
-        }
+        })
 
         val ids = (ui.results.keys + ui.runningIds).toSet()
         resultViews.keys.filter { it !in ids }.forEach { id ->
@@ -407,14 +419,14 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
             val result = ui.results[id]
             when {
                 id in ui.runningIds -> {
-                    item.voiceBenchResultTitle.text = vm.engineName(id)
-                    item.voiceBenchResultDetails.text = getString(R.string.voice_bench_running, vm.engineName(id))
+                    item.voiceBenchResultTitle.setTextIfChanged(vm.engineName(id))
+                    item.voiceBenchResultDetails.setTextIfChanged(getString(R.string.voice_bench_running, vm.engineName(id)))
                     item.voiceBenchResultLog.visibility = View.GONE
                     setActionsEnabled(item, playable = false)
                 }
                 result != null -> showResult(item, result, !ui.running)
                 else -> {
-                    item.voiceBenchResultDetails.text = getString(R.string.voice_bench_cancelled)
+                    item.voiceBenchResultDetails.setTextIfChanged(getString(R.string.voice_bench_cancelled))
                     setActionsEnabled(item, playable = false)
                 }
             }
@@ -447,20 +459,20 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
 
     private fun showResult(item: ItemVoiceBenchmarkResultBinding, result: VoiceBenchmarkResult, idle: Boolean) {
         val language = languages.firstOrNull { it.first == (result.language ?: selectedLanguage()) }?.second
-        item.voiceBenchResultTitle.text = if (language != null) {
+        item.voiceBenchResultTitle.setTextIfChanged(if (language != null) {
             getString(R.string.voice_bench_result_meta, vm.engineName(result.engineId), getString(language))
         } else {
             vm.engineName(result.engineId)
-        }
-        item.voiceBenchResultDetails.text = when {
+        })
+        item.voiceBenchResultDetails.setTextIfChanged(when {
             result.success -> resultLines(result).joinToString("\n")
             result.status == VoiceBenchmarkStatus.NOT_INSTALLED -> getString(R.string.voice_bench_status_not_installed)
             result.status == VoiceBenchmarkStatus.MODEL_NOT_DOWNLOADED -> getString(R.string.voice_bench_status_model_missing)
             result.status == VoiceBenchmarkStatus.UNSUPPORTED_DEVICE -> getString(R.string.voice_bench_status_unsupported_device)
             result.status == VoiceBenchmarkStatus.UNSUPPORTED_LANGUAGE -> getString(R.string.voice_bench_status_unsupported)
             else -> getString(R.string.voice_bench_status_error, result.error ?: "")
-        }
-        item.voiceBenchResultLog.text = result.details.orEmpty()
+        })
+        item.voiceBenchResultLog.setTextIfChanged(result.details.orEmpty())
         item.voiceBenchResultLog.visibility = if (result.details.isNullOrBlank()) View.GONE else View.VISIBLE
         setActionsEnabled(item, playable = result.success && result.audioFile?.exists() == true, repeatable = idle)
     }

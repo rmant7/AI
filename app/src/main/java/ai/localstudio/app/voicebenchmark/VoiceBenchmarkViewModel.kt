@@ -8,7 +8,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +24,7 @@ import java.io.File
  * carries on and the new screen just draws the same state again. Results also
  * go to disk ([VoiceBenchmarkStore]), so they outlive the process too.
  */
-class VoiceBenchmarkViewModel(application: Application) : AndroidViewModel(application) {
+class VoiceBenchmarkViewModel private constructor(application: Application) : AndroidViewModel(application) {
 
     /** What the status line says — formatted (and translated) by the screen, so a language change re-translates it. */
     sealed interface Status {
@@ -60,7 +59,7 @@ class VoiceBenchmarkViewModel(application: Application) : AndroidViewModel(appli
     var presetIndex = 0
     var text = ""
     val engineChecked = HashMap<String, Boolean>()
-    var trimReference = false
+    var trimReference = true
     var threadsIndex = 0
 
     private val app = application
@@ -72,9 +71,8 @@ class VoiceBenchmarkViewModel(application: Application) : AndroidViewModel(appli
     val runner = VoiceBenchmarkRunner(
         listOf(
             AndroidTtsBenchmarkEngine(app, resultsDir),
+            // The 1.7B and Chatterbox engines are still placeholders: not offered until they exist.
             Qwen3TtsBenchmarkEngine(app, Qwen3TtsBenchmarkEngine.Size.SMALL, resultsDir),
-            Qwen3TtsBenchmarkEngine(app, Qwen3TtsBenchmarkEngine.Size.LARGE, resultsDir),
-            ChatterboxBenchmarkEngine(),
         ),
     )
     private val store = VoiceBenchmarkStore(File(app.filesDir, "voice_benchmark/results.json"))
@@ -206,15 +204,26 @@ class VoiceBenchmarkViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    override fun onCleared() {
-        // The screen is really gone (not just recreated): stop whatever is running, and
-        // ~1 GB of model weights must not stay resident once nobody is using them.
+    /** True while a benchmark run is in progress. */
+    val isRunning: Boolean get() = _state.value.running
+
+    /** The screen was left for good: stop recording, and free the ~1 GB model unless a run still needs it. */
+    fun onScreenClosed() {
         if (recorder.isRecording) recorder.stop()
-        scope.cancel()
-        QwenTtsRuntimeManager.releaseAsync()
+        if (!isRunning) QwenTtsRuntimeManager.releaseAsync()
     }
 
     companion object {
+        @Volatile
+        private var instance: VoiceBenchmarkViewModel? = null
+
+        /**
+         * One per process, not per screen: leaving the screen (or Android recreating it) must not
+         * cancel a run that takes minutes, and a screen opened again must show it still going.
+         */
+        fun get(app: Application): VoiceBenchmarkViewModel =
+            instance ?: synchronized(this) { instance ?: VoiceBenchmarkViewModel(app).also { instance = it } }
+
         const val QWEN_06B_ID = "qwen3_tts_0.6b"
     }
 }

@@ -68,9 +68,9 @@ object QwenTtsRuntimeManager {
     @Volatile
     var threadsOverride: Int? = null
 
-    /** Diagnostics: use only the first N seconds of the reference recording for the voice prompt (null = all of it). */
+    /** Diagnostics: use only the first N seconds of the reference recording for the voice prompt (null = all of it; default 6 s like the upstream benchmarks — a long reference makes every step slower). */
     @Volatile
-    var referenceMaxSeconds: Double? = null
+    var referenceMaxSeconds: Double? = 6.0
 
     /**
      * Default thread count for Qwen: every core within ~70% of the fastest core's clock (prime + big
