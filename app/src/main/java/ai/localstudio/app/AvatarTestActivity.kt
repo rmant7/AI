@@ -101,6 +101,30 @@ class AvatarTestActivity : AppCompatActivity() {
         if (config.backend == AvatarVoiceBackend.ANDROID) populateVoicesWhenReady()
     }
 
+    // What the avatar is doing right now: with a slow cloned voice the first sound can take 15-20 s,
+    // and without this the screen looks dead in the meantime.
+    private val statusTick = object : Runnable {
+        override fun run() {
+            val pending = controller.pendingSentences
+            binding.avatarTestStatus.text = when {
+                controller.isSpeaking -> getString(R.string.avatar_test_status_speaking, pending)
+                pending > 0 -> getString(R.string.avatar_test_status_preparing, pending)
+                else -> ""
+            }
+            binding.root.postDelayed(this, STATUS_INTERVAL_MS)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        binding.root.post(statusTick)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        binding.root.removeCallbacks(statusTick)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         controller.shutdown()
@@ -164,5 +188,6 @@ class AvatarTestActivity : AppCompatActivity() {
 
     private companion object {
         const val VOICE_POLL_INTERVAL_MS = 200L
+        const val STATUS_INTERVAL_MS = 500L
     }
 }

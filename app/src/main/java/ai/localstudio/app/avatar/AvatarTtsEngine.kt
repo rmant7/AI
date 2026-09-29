@@ -81,6 +81,15 @@ class AvatarTtsEngine(
 
     // Sentences may finish synthesizing out of order (two contexts at once); they are played in the
     // order they were spoken. [ready] holds finished ones (null = failed) until every earlier one is in.
+    /** Sentences spoken but not yet finished playing (still being synthesized, waiting or playing). */
+    private val pendingCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    @Volatile
+    private var playingNow = false
+
+    val pending: Int get() = pendingCount.get().coerceAtLeast(0)
+    val isPlaying: Boolean get() = playingNow
+
     private val orderLock = Any()
     private var nextSeq = 0L
     private var nextPlay = 0L
@@ -123,6 +132,7 @@ class AvatarTtsEngine(
         utteranceText[utteranceId] = text
         utteranceFile[utteranceId] = file
         queuedAt[utteranceId] = SystemClock.elapsedRealtime()
+        pendingCount.incrementAndGet()
         synchronized(orderLock) { seqOf[utteranceId] = nextSeq++ }
         synthesizer.synthesize(text, file) { ok -> onSynthesized(utteranceId, ok) }
         return utteranceId
@@ -134,6 +144,7 @@ class AvatarTtsEngine(
         val seq = seqOf.remove(utteranceId)
         if (!ok || text == null || file == null || !file.exists()) {
             discard(utteranceId)
+            pendingCount.decrementAndGet()
             if (!ok) onEvent(Event.Failed(utteranceId))
             if (seq != null) deliver(seq, null)
             return
@@ -174,6 +185,7 @@ class AvatarTtsEngine(
         utteranceFile.clear()
         queuedAt.clear()
         lastEndAt = 0L
+        pendingCount.set(0)
         synchronized(orderLock) {
             ready.values.forEach { it?.file?.delete() }
             ready.clear()
@@ -216,13 +228,17 @@ class AvatarTtsEngine(
             }
             if (job.generation != generation) {
                 job.file.delete()
+                pendingCount.decrementAndGet()
                 continue
             }
             try {
+                playingNow = true
                 play(job)
             } catch (e: Exception) {
                 onEvent(Event.Failed(job.id))
             } finally {
+                playingNow = false
+                pendingCount.decrementAndGet()
                 job.file.delete()
                 utteranceFile.remove(job.id)
             }

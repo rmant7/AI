@@ -76,6 +76,12 @@ class AvatarSpeechController(context: Context, private val view: AvatarView, voi
     }
 
     /** Must be called before [onPartialText] sees a new turn's text (which starts shorter than the previous turn's final text). */
+    /** Sentences still to be synthesized or played. */
+    val pendingSentences: Int get() = engine.pending
+
+    /** A sentence is being played right now. */
+    val isSpeaking: Boolean get() = engine.isPlaying
+
     fun onNewTurn() {
         chunker.reset()
         firstPieceOfTurn = true
