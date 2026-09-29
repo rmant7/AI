@@ -182,7 +182,7 @@ object QwenTtsRuntimeManager {
         val started = SystemClock.elapsedRealtime()
         val status = runNative(h) {
             Qwen3TtsNative.setStreaming(streamingChunkMs, streamingLeftMs)
-            Qwen3TtsNative.synthesize(h, prompt.absolutePath, text, languageId, MAX_AUDIO_TOKENS, output.absolutePath)
+            Qwen3TtsNative.synthesize(h, prompt.absolutePath, text, languageId, maxFramesFor(text), output.absolutePath)
         }
         val elapsed = SystemClock.elapsedRealtime() - started
         val log = Qwen3TtsNative.takeLog(h)
@@ -232,6 +232,11 @@ object QwenTtsRuntimeManager {
     }
 
     private const val MAX_AUDIO_TOKENS = 1024
+
+    // Speech is ~12.5 codec frames a second; even slow speech is under ~2.5 frames per character. A model that
+    // never emits its end token (seen on a Pixel: 25 characters, an hour and still generating) is cut off
+    // at a length the text can plausibly need instead of at 1024 frames (82 s of audio).
+    private fun maxFramesFor(text: String): Int = (text.length * 3 + 24).coerceIn(48, MAX_AUDIO_TOKENS)
 
     private suspend fun <T> runNative(cancelHandle: Long?, block: () -> T): T = coroutineScope {
         val call = async(Dispatchers.IO + NonCancellable) { block() }
