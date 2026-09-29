@@ -34,6 +34,8 @@ data class VoiceBenchmarkResult(
     val availRamMb: Long? = null,
     /** A full diagnostic report (timings, native log) for engines that produce one. */
     val details: String? = null,
+    /** The language this was generated in ("ru", "en", "he"), set by whoever ran it. */
+    val language: String? = null,
 ) {
     companion object {
         fun ok(engineId: String, file: File, generationMs: Long, audioDurationMs: Long, loadMs: Long? = null) =

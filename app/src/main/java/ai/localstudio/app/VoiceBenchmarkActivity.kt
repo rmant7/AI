@@ -3,22 +3,23 @@ package ai.localstudio.app
 import ai.localstudio.app.databinding.ActivityVoiceBenchmarkBinding
 import ai.localstudio.app.databinding.ItemVoiceBenchmarkResultBinding
 import ai.localstudio.app.llama.LlamaBridge
-import ai.localstudio.app.voicebenchmark.AndroidTtsBenchmarkEngine
-import ai.localstudio.app.voicebenchmark.ChatterboxBenchmarkEngine
-import ai.localstudio.app.voicebenchmark.Qwen3TtsBenchmarkEngine
 import ai.localstudio.app.voicebenchmark.QwenModelState
 import ai.localstudio.app.voicebenchmark.QwenTtsModelDescriptor
 import ai.localstudio.app.voicebenchmark.QwenTtsModelProvider
 import ai.localstudio.app.voicebenchmark.QwenTtsRuntimeManager
-import ai.localstudio.app.voicebenchmark.ReferenceVoiceRecorder
-import ai.localstudio.app.voicebenchmark.VoiceBenchmarkEngine
 import ai.localstudio.app.voicebenchmark.VoiceBenchmarkResult
 import ai.localstudio.app.voicebenchmark.VoiceBenchmarkRunner
 import ai.localstudio.app.voicebenchmark.VoiceBenchmarkStatus
+import ai.localstudio.app.voicebenchmark.VoiceBenchmarkViewModel
+import ai.localstudio.app.voicebenchmark.VoiceBenchmarkViewModel.Status
 import android.Manifest
+import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -29,39 +30,33 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
  * "Voice benchmark": record a reference voice, pick a language and a phrase,
- * and run every selected [VoiceBenchmarkEngine] on exactly the same input,
- * keeping each engine's WAV next to its timing so the voices can be
- * compared by ear. Knows nothing about how any engine makes its audio — that
- * is [VoiceBenchmarkRunner] and the engines' job.
+ * and run every selected engine on exactly the same input, keeping each
+ * engine's WAV next to its timing so the voices can be compared by ear.
+ *
+ * This screen only draws. The work, the results, the recording and the inputs
+ * live in [VoiceBenchmarkViewModel], so changing the app language (which
+ * recreates the activity) or rotating the phone loses nothing.
  */
 class VoiceBenchmarkActivity : AppCompatActivity() {
-
-    private companion object {
-        const val QWEN_06B_ID = "qwen3_tts_0.6b"
-    }
 
     private class Preset(val labelRes: Int, val textRes: Int?)
 
     private lateinit var binding: ActivityVoiceBenchmarkBinding
-    private lateinit var recorder: ReferenceVoiceRecorder
-    private lateinit var runner: VoiceBenchmarkRunner
-    private lateinit var resultsDir: File
+    private lateinit var vm: VoiceBenchmarkViewModel
 
     private val engineChecks = LinkedHashMap<String, CheckBox>()
     private val resultViews = LinkedHashMap<String, ItemVoiceBenchmarkResultBinding>()
-    private val results = LinkedHashMap<String, VoiceBenchmarkResult>()
 
-    private var runJob: Job? = null
     private var player: MediaPlayer? = null
     private var playingButton: com.google.android.material.button.MaterialButton? = null
 
@@ -102,17 +97,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         binding.root.applySystemBarInsets(applyImeInset = true)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         title = getString(R.string.menu_voice_benchmark)
-
-        recorder = ReferenceVoiceRecorder(this)
-        resultsDir = File(filesDir, "voice_benchmark/results").also { it.mkdirs() }
-        runner = VoiceBenchmarkRunner(
-            listOf(
-                AndroidTtsBenchmarkEngine(this, resultsDir),
-                Qwen3TtsBenchmarkEngine(this, Qwen3TtsBenchmarkEngine.Size.SMALL, resultsDir),
-                Qwen3TtsBenchmarkEngine(this, Qwen3TtsBenchmarkEngine.Size.LARGE, resultsDir),
-                ChatterboxBenchmarkEngine(),
-            ),
-        )
+        vm = ViewModelProvider(this)[VoiceBenchmarkViewModel::class.java]
 
         // The transcript is what the avatar's cloned voice is made from too, so keep it.
         val settings = AppContainer.get(this).settings
@@ -132,9 +117,14 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         setupQwenTuning()
 
         binding.voiceBenchGenerateButton.setOnClickListener { runSelected() }
-        binding.voiceBenchCancelButton.setOnClickListener { runJob?.cancel() }
-        binding.voiceBenchClearButton.setOnClickListener { clearResults() }
-        renderRunning(false)
+        binding.voiceBenchCancelButton.setOnClickListener { vm.cancel() }
+        binding.voiceBenchClearButton.setOnClickListener {
+            stopPlayback()
+            vm.clearResults()
+        }
+        vm.inputsInitialized = true
+
+        lifecycleScope.launch { vm.state.collect { render(it) } }
     }
 
     override fun onStop() {
@@ -144,10 +134,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (recorder.isRecording) recorder.stop()
         stopPlayback()
-        // ~1 GB of model weights must not stay resident once the benchmark screen is gone.
-        if (isFinishing) QwenTtsRuntimeManager.releaseAsync()
     }
 
     // ── reference voice ───────────────────────────────────────────────────
@@ -160,45 +147,27 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
                 requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
-        binding.voiceBenchStopButton.setOnClickListener { recorder.stop() }
+        binding.voiceBenchStopButton.setOnClickListener { vm.stopRecording() }
         binding.voiceBenchPlayRefButton.setOnClickListener {
-            togglePlayback(recorder.file, binding.voiceBenchPlayRefButton)
+            togglePlayback(vm.recorder.file, binding.voiceBenchPlayRefButton)
         }
-        renderReference()
     }
 
     private fun startRecording() {
         stopPlayback()
-        val started = recorder.start(
-            onLevel = { level -> runOnUiThread { binding.voiceBenchLevel.progress = (level * 100).toInt() } },
-            onElapsed = { ms ->
-                runOnUiThread {
-                    binding.voiceBenchRefInfo.text = getString(R.string.voice_bench_ref_recording, ms / 1000.0)
-                }
-            },
-            onFinished = { runOnUiThread { renderReference() } },
-        )
-        if (!started) {
-            Toast.makeText(this, R.string.voice_bench_mic_failed, Toast.LENGTH_LONG).show()
-            return
-        }
-        renderReference()
+        if (!vm.startRecording()) Toast.makeText(this, R.string.voice_bench_mic_failed, Toast.LENGTH_LONG).show()
     }
 
-    private fun renderReference() {
-        val recording = recorder.isRecording
-        val has = recorder.hasRecording
-        binding.voiceBenchRecordButton.isEnabled = !recording
-        binding.voiceBenchRecordButton.setText(if (has) R.string.voice_bench_rerecord else R.string.voice_bench_record)
-        binding.voiceBenchStopButton.isEnabled = recording
-        binding.voiceBenchPlayRefButton.isEnabled = has && !recording
-        if (!recording) {
-            binding.voiceBenchLevel.progress = 0
-            binding.voiceBenchRefInfo.text = if (has) {
-                getString(R.string.voice_bench_ref_saved, recorder.durationMs() / 1000.0)
-            } else {
-                getString(R.string.voice_bench_ref_none)
-            }
+    private fun renderReference(rec: VoiceBenchmarkViewModel.Recording) {
+        binding.voiceBenchRecordButton.isEnabled = !rec.recording
+        binding.voiceBenchRecordButton.setText(if (rec.hasRecording) R.string.voice_bench_rerecord else R.string.voice_bench_record)
+        binding.voiceBenchStopButton.isEnabled = rec.recording
+        binding.voiceBenchPlayRefButton.isEnabled = rec.hasRecording && !rec.recording
+        binding.voiceBenchLevel.progress = if (rec.recording) (rec.level * 100).toInt() else 0
+        binding.voiceBenchRefInfo.text = when {
+            rec.recording -> getString(R.string.voice_bench_ref_recording, rec.elapsedMs / 1000.0)
+            rec.hasRecording -> getString(R.string.voice_bench_ref_saved, rec.durationMs / 1000.0)
+            else -> getString(R.string.voice_bench_ref_none)
         }
     }
 
@@ -208,45 +177,66 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         binding.voiceBenchLanguageSpinner.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item, languages.map { getString(it.second) },
         )
+        binding.voiceBenchLanguageSpinner.setSelection(vm.languageIndex, false)
+        showPresets()
+        binding.voiceBenchText.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                vm.text = s?.toString().orEmpty()
+            }
+        })
+        if (vm.inputsInitialized) binding.voiceBenchText.setText(vm.text) else applyPreset(1)
+
+        // A spinner reports its initial selection as if the user had picked it; a
+        // restored screen must not answer that by overwriting the text just typed.
         binding.voiceBenchLanguageSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                onLanguageChanged()
+                if (position == vm.languageIndex) return
+                vm.languageIndex = position
+                showPresets()
+                applyPreset(1)
+                renderEngineSupport()
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
         binding.voiceBenchPresetSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                // Position 0 is always "Custom text": leaves whatever is typed alone.
-                currentPresets.getOrNull(position - 1)?.textRes?.let { binding.voiceBenchText.setText(getString(it)) }
+                if (position == vm.presetIndex) return
+                applyPreset(position)
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
-        onLanguageChanged()
     }
 
-    private fun selectedLanguage(): String = languages[binding.voiceBenchLanguageSpinner.selectedItemPosition.coerceAtLeast(0)].first
+    private fun selectedLanguage(): String = languages[vm.languageIndex.coerceIn(languages.indices)].first
 
-    private fun onLanguageChanged() {
-        val language = selectedLanguage()
-        currentPresets = presets[language].orEmpty()
+    // Fills the preset spinner for the chosen language, keeping the remembered choice if it still exists.
+    private fun showPresets() {
+        currentPresets = presets[selectedLanguage()].orEmpty()
         val labels = listOf(getString(R.string.voice_bench_preset_custom)) + currentPresets.map { getString(it.labelRes) }
         binding.voiceBenchPresetSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
-        currentPresets.firstOrNull()?.textRes?.let {
-            binding.voiceBenchPresetSpinner.setSelection(1, false)
-            binding.voiceBenchText.setText(getString(it))
-        }
-        renderEngineSupport()
+        binding.voiceBenchPresetSpinner.setSelection(vm.presetIndex.coerceIn(labels.indices), false)
+    }
+
+    // Position 0 is always "Custom text": leaves whatever is typed alone.
+    private fun applyPreset(position: Int) {
+        val res = currentPresets.getOrNull(position - 1)?.textRes
+        vm.presetIndex = if (res != null) position else 0
+        binding.voiceBenchPresetSpinner.setSelection(vm.presetIndex, false)
+        if (res != null) binding.voiceBenchText.setText(getString(res))
     }
 
     // ── engines ───────────────────────────────────────────────────────────
 
     private fun setupEngines() {
-        for (engine in runner.engines) {
+        for (engine in vm.runner.engines) {
             val check = CheckBox(this).apply {
                 text = engine.displayName
-                isChecked = true
+                isChecked = vm.engineChecked[engine.id] ?: true
+                setOnCheckedChangeListener { _, checked -> vm.engineChecked[engine.id] = checked }
             }
             engineChecks[engine.id] = check
             binding.voiceBenchEngineList.addView(check)
@@ -259,7 +249,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
     // (and still runs, so the result card records it as a compatibility test).
     private fun renderEngineSupport() {
         val language = selectedLanguage()
-        for (engine in runner.engines) {
+        for (engine in vm.runner.engines) {
             engineChecks[engine.id]?.text = if (language in engine.supportedLanguages) {
                 engine.displayName
             } else {
@@ -304,7 +294,10 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
     // ── Qwen diagnostics ──────────────────────────────────────────────────
 
     private fun setupQwenTuning() {
+        binding.voiceBenchQwenTrim.isChecked = vm.trimReference
+        QwenTtsRuntimeManager.referenceMaxSeconds = if (vm.trimReference) 6.0 else null
         binding.voiceBenchQwenTrim.setOnCheckedChangeListener { _, checked ->
+            vm.trimReference = checked
             QwenTtsRuntimeManager.referenceMaxSeconds = if (checked) 6.0 else null
         }
         val choices = listOf<Int?>(null, 1, 2, 4, 6, 8)
@@ -313,8 +306,11 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
             else getString(R.string.voice_bench_qwen_threads_n, n)
         }
         binding.voiceBenchQwenThreads.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+        binding.voiceBenchQwenThreads.setSelection(vm.threadsIndex.coerceIn(choices.indices), false)
+        QwenTtsRuntimeManager.threadsOverride = choices[vm.threadsIndex.coerceIn(choices.indices)]
         binding.voiceBenchQwenThreads.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                vm.threadsIndex = position
                 QwenTtsRuntimeManager.threadsOverride = choices[position]
             }
 
@@ -327,7 +323,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
     // voice cache cleared), the second with the model loaded and the voice
     // prepared but a new text — the difference between them is the one-off cost.
     private fun runQwenProfile() {
-        val reference = if (recorder.hasRecording) recorder.file else null
+        val reference = if (vm.recorder.hasRecording) vm.recorder.file else null
         val transcript = binding.voiceBenchTranscript.text?.toString()?.trim().orEmpty()
         if (reference == null) {
             Toast.makeText(this, R.string.voice_bench_qwen_profile_need_recording, Toast.LENGTH_SHORT).show()
@@ -346,25 +342,11 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
                 return
             }
         }.map { getString(it) }
-        stopPlayback()
-        launchRun {
-            AppContainer.get(this).releaseLocalModels()
-            QwenTtsRuntimeManager.release()
-            QwenTtsRuntimeManager.clearVoiceCache(this)
-            val report = StringBuilder()
-            texts.forEachIndexed { index, text ->
-                val label = getString(
-                    if (index == 0) R.string.voice_bench_profile_run_cold else R.string.voice_bench_profile_run_warm, index + 1,
-                )
-                markRunning(QWEN_06B_ID)
-                binding.voiceBenchProfileOutput.text = report.toString() + label + " …"
-                val result = runner.runOne(QWEN_06B_ID, VoiceBenchmarkRunner.Request(text, language, reference, transcript))
-                showResult(result)
-                report.append("===== ").append(label).append(" =====\n\"").append(text).append("\"\n")
-                report.append(result.details ?: result.error ?: result.status.name).append("\n\n")
-                binding.voiceBenchProfileOutput.text = report.toString()
-            }
+        val labels = texts.indices.map { index ->
+            getString(if (index == 0) R.string.voice_bench_profile_run_cold else R.string.voice_bench_profile_run_warm, index + 1)
         }
+        stopPlayback()
+        vm.runQwenProfile({ text -> VoiceBenchmarkRunner.Request(text, language, reference, transcript) }, texts, labels)
     }
 
     // ── running ───────────────────────────────────────────────────────────
@@ -378,120 +360,99 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         return VoiceBenchmarkRunner.Request(
             text = text,
             language = selectedLanguage(),
-            referenceAudio = if (recorder.hasRecording) recorder.file else null,
+            referenceAudio = if (vm.recorder.hasRecording) vm.recorder.file else null,
             referenceText = binding.voiceBenchTranscript.text?.toString()?.trim()?.takeIf { it.isNotEmpty() },
         )
     }
 
     private fun runSelected() {
-        val ids = runner.engines.map { it.id }.filter { engineChecks[it]?.isChecked == true }
+        val ids = vm.runner.engines.map { it.id }.filter { engineChecks[it]?.isChecked == true }
         if (ids.isEmpty()) {
             Toast.makeText(this, R.string.voice_bench_no_engines, Toast.LENGTH_SHORT).show()
             return
         }
         val request = buildRequest() ?: return
         stopPlayback()
-        launchRun {
-            if (ids.any { it.startsWith("qwen3_tts") }) AppContainer.get(this).releaseLocalModels()
-            runner.runAll(ids, request, onStarted = { markRunning(it) }, onFinished = { showResult(it) })
-        }
+        vm.runSelected(ids, request)
     }
 
     private fun repeat(engineId: String) {
         val request = buildRequest() ?: return
         stopPlayback()
-        launchRun {
-            if (engineId.startsWith("qwen3_tts")) AppContainer.get(this).releaseLocalModels()
-            markRunning(engineId)
-            showResult(runner.runOne(engineId, request))
-        }
+        vm.repeat(engineId, request)
     }
 
-    private fun launchRun(block: suspend () -> Unit) {
-        if (runJob?.isActive == true) return
-        renderRunning(true)
-        runJob = lifecycleScope.launch {
-            // While a Qwen generation runs, show how fast it is going: at ~15 minutes
-            // per paragraph waiting for the final report is not an option.
-            val ticker = launch {
-                var liveOffset = 0
-                while (isActive) {
-                    delay(1000)
-                    // The native runtime's own progress lines, as they are printed — into
-                    // the app log and the status — so a long phase is never silent.
-                    QwenTtsRuntimeManager.liveLog()?.let { live ->
-                        if (live.length < liveOffset) liveOffset = 0
-                        val end = live.lastIndexOf('\n') + 1
-                        if (end > liveOffset) {
-                            val fresh = live.substring(liveOffset, end).lines().filter { it.isNotBlank() }
-                            liveOffset = end
-                            fresh.forEach { AppContainer.get(this@VoiceBenchmarkActivity).appLog.record("QWEN_NATIVE", it.trim()) }
-                            fresh.lastOrNull()?.let { binding.voiceBenchStatus.text = it.trim() }
-                        }
-                    }
-                    QwenTtsRuntimeManager.generationProgress()?.let { (audioMs, elapsedMs) ->
-                        if (audioMs > 0) {
-                            binding.voiceBenchStatus.text = getString(
-                                R.string.voice_bench_live, audioMs / 1000.0, elapsedMs / 1000.0, elapsedMs.toDouble() / audioMs,
-                            )
-                        }
-                    }
+    // ── drawing the ViewModel's state ─────────────────────────────────────
+
+    private fun render(ui: VoiceBenchmarkViewModel.Ui) {
+        renderReference(ui.recording)
+        binding.voiceBenchGenerateButton.isEnabled = !ui.running
+        binding.voiceBenchCancelButton.isEnabled = ui.running
+        binding.voiceBenchClearButton.isEnabled = !ui.running
+        binding.voiceBenchProfileOutput.text = ui.profileReport
+        binding.voiceBenchStatus.text = when (val s = ui.status) {
+            Status.Idle -> ""
+            is Status.Running -> getString(R.string.voice_bench_running, s.engineName)
+            Status.Done -> getString(R.string.voice_bench_done)
+            Status.Cancelled -> getString(R.string.voice_bench_cancelled)
+            is Status.Live -> getString(R.string.voice_bench_live, s.audioMs / 1000.0, s.elapsedMs / 1000.0, s.elapsedMs.toDouble() / s.audioMs)
+            is Status.Native -> s.line
+        }
+
+        val ids = (ui.results.keys + ui.runningIds).toSet()
+        resultViews.keys.filter { it !in ids }.forEach { id ->
+            resultViews.remove(id)?.let { binding.voiceBenchResults.removeView(it.root) }
+        }
+        for (id in ids) {
+            val item = card(id)
+            val result = ui.results[id]
+            when {
+                id in ui.runningIds -> {
+                    item.voiceBenchResultTitle.text = vm.engineName(id)
+                    item.voiceBenchResultDetails.text = getString(R.string.voice_bench_running, vm.engineName(id))
+                    item.voiceBenchResultLog.visibility = View.GONE
+                    setActionsEnabled(item, playable = false)
                 }
-            }
-            try {
-                block()
-                binding.voiceBenchStatus.text = getString(R.string.voice_bench_done)
-            } catch (e: CancellationException) {
-                binding.voiceBenchStatus.text = getString(R.string.voice_bench_cancelled)
-                resultViews.forEach { (id, item) ->
-                    if (results[id] == null) item.voiceBenchResultDetails.text = getString(R.string.voice_bench_cancelled)
+                result != null -> showResult(item, result, !ui.running)
+                else -> {
+                    item.voiceBenchResultDetails.text = getString(R.string.voice_bench_cancelled)
+                    setActionsEnabled(item, playable = false)
                 }
-                throw e
-            } finally {
-                ticker.cancel()
-                renderRunning(false)
             }
         }
     }
 
-    private fun renderRunning(running: Boolean) {
-        binding.voiceBenchGenerateButton.isEnabled = !running
-        binding.voiceBenchCancelButton.isEnabled = running
-        binding.voiceBenchClearButton.isEnabled = !running
-        resultViews.values.forEach { it.voiceBenchResultRepeat.isEnabled = !running }
+    private fun setActionsEnabled(item: ItemVoiceBenchmarkResultBinding, playable: Boolean, repeatable: Boolean = false) {
+        item.voiceBenchResultPlay.isEnabled = playable
+        item.voiceBenchResultSave.isEnabled = playable
+        item.voiceBenchResultShare.isEnabled = playable
+        item.voiceBenchResultRepeat.isEnabled = repeatable
     }
-
-    // ── results ───────────────────────────────────────────────────────────
-
-    private fun engineName(id: String) = runner.engines.firstOrNull { it.id == id }?.displayName ?: id
 
     private fun card(engineId: String): ItemVoiceBenchmarkResultBinding =
         resultViews.getOrPut(engineId) {
             ItemVoiceBenchmarkResultBinding.inflate(layoutInflater, binding.voiceBenchResults, false).also { item ->
-                item.voiceBenchResultTitle.text = engineName(engineId)
+                item.voiceBenchResultTitle.text = vm.engineName(engineId)
                 item.voiceBenchResultPlay.setOnClickListener {
-                    results[engineId]?.audioFile?.let { togglePlayback(it, item.voiceBenchResultPlay) }
+                    audioOf(engineId)?.let { togglePlayback(it, item.voiceBenchResultPlay) }
                 }
+                item.voiceBenchResultSave.setOnClickListener { audioOf(engineId)?.let { save(engineId, it) } }
+                item.voiceBenchResultShare.setOnClickListener { audioOf(engineId)?.let { share(it) } }
                 item.voiceBenchResultRepeat.setOnClickListener { repeat(engineId) }
                 binding.voiceBenchResults.addView(item.root)
             }
         }
 
-    private fun markRunning(engineId: String) {
-        val item = card(engineId)
-        results.remove(engineId)?.audioFile?.delete()
-        item.voiceBenchResultDetails.text = getString(R.string.voice_bench_running, engineName(engineId))
-        item.voiceBenchResultPlay.isEnabled = false
-        item.voiceBenchResultRepeat.isEnabled = false
-        binding.voiceBenchStatus.text = getString(R.string.voice_bench_running, engineName(engineId))
-    }
+    private fun audioOf(engineId: String): File? =
+        vm.state.value.results[engineId]?.audioFile?.takeIf { it.exists() }
 
-    private fun showResult(result: VoiceBenchmarkResult) {
-        results[result.engineId] = result
-        val item = card(result.engineId)
-        val language = languages.first { it.first == selectedLanguage() }.second
-        item.voiceBenchResultTitle.text =
-            getString(R.string.voice_bench_result_meta, engineName(result.engineId), getString(language))
+    private fun showResult(item: ItemVoiceBenchmarkResultBinding, result: VoiceBenchmarkResult, idle: Boolean) {
+        val language = languages.firstOrNull { it.first == (result.language ?: selectedLanguage()) }?.second
+        item.voiceBenchResultTitle.text = if (language != null) {
+            getString(R.string.voice_bench_result_meta, vm.engineName(result.engineId), getString(language))
+        } else {
+            vm.engineName(result.engineId)
+        }
         item.voiceBenchResultDetails.text = when {
             result.success -> resultLines(result).joinToString("\n")
             result.status == VoiceBenchmarkStatus.NOT_INSTALLED -> getString(R.string.voice_bench_status_not_installed)
@@ -502,8 +463,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         }
         item.voiceBenchResultLog.text = result.details.orEmpty()
         item.voiceBenchResultLog.visibility = if (result.details.isNullOrBlank()) View.GONE else View.VISIBLE
-        item.voiceBenchResultPlay.isEnabled = result.success && result.audioFile != null
-        item.voiceBenchResultRepeat.isEnabled = runJob?.isActive != true
+        setActionsEnabled(item, playable = result.success && result.audioFile?.exists() == true, repeatable = idle)
     }
 
     // Load and voice preparation come first and are reported apart from
@@ -528,13 +488,59 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         if (before != null && after != null && free != null) add(getString(R.string.voice_bench_result_memory, before, after, free))
     }
 
-    private fun clearResults() {
-        stopPlayback()
-        results.values.forEach { it.audioFile?.delete() }
-        results.clear()
-        resultViews.clear()
-        binding.voiceBenchResults.removeAllViews()
-        binding.voiceBenchStatus.text = ""
+    // ── saving and sharing the audio ──────────────────────────────────────
+
+    private fun exportName(engineId: String): String {
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+        return "voice_${engineId.replace(Regex("[^A-Za-z0-9._-]"), "_")}_$stamp.wav"
+    }
+
+    // API 29+: copied into the public Downloads folder through MediaStore, which
+    // needs no storage permission. Older phones get the share sheet instead.
+    private fun save(engineId: String, file: File) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            share(file)
+            return
+        }
+        val name = exportName(engineId)
+        lifecycleScope.launch {
+            val failure = withContext(Dispatchers.IO) {
+                runCatching {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, name)
+                        put(MediaStore.Downloads.MIME_TYPE, "audio/wav")
+                        put(MediaStore.Downloads.RELATIVE_PATH, "Download/LocalAIStudio")
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    val resolver = applicationContext.contentResolver
+                    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        ?: error("MediaStore refused the file")
+                    try {
+                        resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
+                        resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                    } catch (e: Exception) {
+                        resolver.delete(uri, null, null)
+                        throw e
+                    }
+                }.exceptionOrNull()
+            }
+            Toast.makeText(
+                this@VoiceBenchmarkActivity,
+                if (failure == null) getString(R.string.voice_bench_saved, name)
+                else getString(R.string.voice_bench_save_failed, failure.message ?: failure.javaClass.simpleName),
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    private fun share(file: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "audio/wav"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(send, getString(R.string.voice_bench_share)))
     }
 
     // ── playback ──────────────────────────────────────────────────────────

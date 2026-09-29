@@ -8,4 +8,5 @@
 <paths>
     <files-path name="transcripts" path="transcripts/" />
     <files-path name="benchmarks" path="benchmarks/" />
+    <files-path name="voice_benchmark_results" path="voice_benchmark/results/" />
 </paths>

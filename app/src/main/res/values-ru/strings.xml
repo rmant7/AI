@@ -502,6 +502,10 @@
     <string name="voice_bench_stop">Стоп</string>
     <string name="voice_bench_play">Играть</string>
     <string name="voice_bench_stop_playing">Стоп</string>
+    <string name="voice_bench_save">Сохранить WAV</string>
+    <string name="voice_bench_share">Поделиться</string>
+    <string name="voice_bench_saved">Сохранено в Downloads/LocalAIStudio: %1$s</string>
+    <string name="voice_bench_save_failed">Не удалось сохранить: %1$s</string>
     <string name="voice_bench_ref_none">Образец ещё не записан. Говори 10–20 секунд на языке, который будешь проверять.</string>
     <string name="voice_bench_ref_recording">Запись… %1$.1f с (максимум 30 с)</string>
     <string name="voice_bench_ref_saved">Образец сохранён: %1$.1f с, mono 24 кГц 16 бит WAV, хранится только на этом устройстве.</string>

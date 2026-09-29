@@ -506,6 +506,10 @@
     <string name="voice_bench_stop">Stop</string>
     <string name="voice_bench_play">Play</string>
     <string name="voice_bench_stop_playing">Stop</string>
+    <string name="voice_bench_save">Save WAV</string>
+    <string name="voice_bench_share">Share</string>
+    <string name="voice_bench_saved">Saved to Downloads/LocalAIStudio: %1$s</string>
+    <string name="voice_bench_save_failed">Could not save: %1$s</string>
     <string name="voice_bench_ref_none">No reference recorded yet. Speak for 10–20 seconds in the language you will test.</string>
     <string name="voice_bench_ref_recording">Recording… %1$.1f s (max 30 s)</string>
     <string name="voice_bench_ref_saved">Reference saved: %1$.1f s, mono 24 kHz 16-bit WAV, kept only on this device.</string>
