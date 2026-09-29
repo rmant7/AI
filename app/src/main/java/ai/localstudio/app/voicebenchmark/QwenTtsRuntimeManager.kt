@@ -68,11 +68,11 @@ object QwenTtsRuntimeManager {
     @Volatile
     var threadsOverride: Int? = null
 
-    /** Diagnostics: streaming chunk length / vocoder left context in ms (defaults = upstream's). */
+    /** Diagnostics: streaming chunk length / vocoder left context in ms (default 3 s / 0.5 s: measured about 2x faster than upstream's 1 s / 2 s). */
     @Volatile
-    var streamingChunkMs: Int = 1000
+    var streamingChunkMs: Int = 3000
     @Volatile
-    var streamingLeftMs: Int = 2000
+    var streamingLeftMs: Int = 500
 
     /** Diagnostics: use only the first N seconds of the reference recording for the voice prompt (null = all of it; default 6 s like the upstream benchmarks — a long reference makes every step slower). */
     @Volatile

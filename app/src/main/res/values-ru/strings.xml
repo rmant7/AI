@@ -578,8 +578,8 @@ RTF: %3$.2f</string>
 
     <string name="voice_bench_qwen_profile_need_recording">Образец ещё не записан — сначала запиши его.</string>
     <string name="voice_bench_qwen_profile_need_transcript">Запись есть; впиши её транскрипт (что ты говорил) в поле транскрипта. Перезаписывать не нужно.</string>
-    <string name="voice_bench_qwen_stream_0">Стриминг: чанки 1 с, контекст 2 с (по умолчанию)</string>
-    <string name="voice_bench_qwen_stream_1">Стриминг: чанки 3 с, контекст 0,5 с</string>
+    <string name="voice_bench_qwen_stream_0">Стриминг: чанки 1 с, контекст 2 с (как в оригинале)</string>
+    <string name="voice_bench_qwen_stream_1">Стриминг: чанки 3 с, контекст 0,5 с (по умолчанию)</string>
     <string name="voice_bench_qwen_stream_2">Стриминг: чанки 8 с, контекст 0,5 с</string>
     <string name="voice_bench_qwen_stream_3">Без стриминга: декодировать всё сразу</string>
 </resources>
