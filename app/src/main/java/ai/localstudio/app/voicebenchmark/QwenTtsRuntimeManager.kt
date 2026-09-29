@@ -19,7 +19,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class QwenTtsException(message: String) : Exception(message)
+/** [log] is whatever the native runtime reported before it failed. */
+class QwenTtsException(message: String, val log: String = "") : Exception(message)
 
 /**
  * The one owner of the native Qwen3-TTS model: at most one context exists at
@@ -40,11 +41,20 @@ object QwenTtsRuntimeManager {
         val availRamMbBefore: Long,
         val pssMbBefore: Long,
         val pssMbAfter: Long,
+        val threads: Int,
+        val log: String,
     )
 
-    class PrepInfo(val prepMs: Long, val cached: Boolean)
+    /** [cached]: the speaker/reference analysis was reused (from memory or from disk) rather than redone. */
+    class PrepInfo(
+        val prepMs: Long,
+        val cached: Boolean,
+        val referenceSeconds: Double,
+        val usedSeconds: Double,
+        val log: String,
+    )
 
-    class SynthInfo(val generationMs: Long, val firstAudioMs: Long?)
+    class SynthInfo(val generationMs: Long, val firstAudioMs: Long?, val log: String)
 
     private val lock = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -52,13 +62,30 @@ object QwenTtsRuntimeManager {
     private var handle = 0L
     private var preparedKey: String? = null
     private var promptFile: File? = null
+    private var loadedThreads = 0
+
+    /** Diagnostics: CPU threads for the model (null = the app's default), applied on the next load. */
+    @Volatile
+    var threadsOverride: Int? = null
+
+    /** Diagnostics: use only the first N seconds of the reference recording for the voice prompt (null = all of it). */
+    @Volatile
+    var referenceMaxSeconds: Double? = null
 
     /** Free RAM needed before loading: ~0.9 GB of weights plus graph buffers and the vocoder. */
     private const val MIN_AVAILABLE_MB = 1400L
 
     suspend fun ensureLoaded(context: Context, provider: QwenTtsModelProvider): LoadInfo = lock.withLock {
         val app = context.applicationContext
-        if (handle != 0L) return@withLock LoadInfo(0, true, availMb(app), pssMb(), pssMb())
+        val wantedThreads = threadsOverride ?: LlamaBridge.defaultThreads()
+        // A different thread count needs a fresh context.
+        if (handle != 0L && loadedThreads != wantedThreads) {
+            val old = handle
+            handle = 0L
+            preparedKey = null
+            runNative(null) { Qwen3TtsNative.destroy(old) }
+        }
+        if (handle != 0L) return@withLock LoadInfo(0, true, availMb(app), pssMb(), pssMb(), loadedThreads, "")
         if (!Qwen3TtsNative.isLoaded) throw QwenTtsException("Native Qwen3-TTS library could not be loaded")
 
         val avail = availMb(app)
@@ -67,33 +94,62 @@ object QwenTtsRuntimeManager {
         }
         val pssBefore = pssMb()
         val started = SystemClock.elapsedRealtime()
-        val newHandle = runNative(null) { Qwen3TtsNative.create(LlamaBridge.defaultThreads()) }
+        val newHandle = runNative(null) { Qwen3TtsNative.create(wantedThreads) }
         if (newHandle == 0L) throw QwenTtsException("Could not create the Qwen3-TTS context")
         val ok = runNative(null) {
             Qwen3TtsNative.loadModels(newHandle, provider.modelDir.absolutePath, QwenTtsModelDescriptor.TALKER_FILE)
         }
+        val log = Qwen3TtsNative.takeLog(newHandle)
         if (!ok) {
             val error = Qwen3TtsNative.lastError(newHandle)
             Qwen3TtsNative.destroy(newHandle)
-            throw QwenTtsException("Model load failed: $error")
+            throw QwenTtsException("Model load failed: $error", log)
         }
         handle = newHandle
-        LoadInfo(SystemClock.elapsedRealtime() - started, false, avail, pssBefore, pssMb())
+        loadedThreads = wantedThreads
+        LoadInfo(SystemClock.elapsedRealtime() - started, false, avail, pssBefore, pssMb(), wantedThreads, log)
     }
 
-    /** Prepares (or reuses) the voice prompt for this exact reference recording + transcript. */
+    /**
+     * Prepares the voice prompt for this exact reference recording + transcript
+     * (+ trim setting) — or reuses it. The prompt is a file next to a small key
+     * file, so it survives the model being unloaded and the app being
+     * restarted: the reference is analysed once per voice, not once per run.
+     */
     suspend fun prepareVoice(context: Context, referenceWav: File, referenceText: String): PrepInfo = lock.withLock {
         check(handle != 0L) { "model not loaded" }
-        val key = "${referenceWav.absolutePath}:${referenceWav.length()}:${referenceWav.lastModified()}:${referenceText.hashCode()}"
-        val prompt = File(File(context.applicationContext.filesDir, "qwen3tts").also { it.mkdirs() }, "voice_prompt.json")
-        if (key == preparedKey && prompt.exists()) return@withLock PrepInfo(0, true)
+        val dir = File(context.applicationContext.filesDir, "qwen3tts").also { it.mkdirs() }
+        val prompt = File(dir, "voice_prompt.json")
+        val keyFile = File(dir, "voice_prompt.key")
+        val maxSeconds = referenceMaxSeconds
+        val fullSeconds = (WavFiles.durationMs(referenceWav) ?: 0L) / 1000.0
+        val usedSeconds = if (maxSeconds != null) minOf(maxSeconds, fullSeconds) else fullSeconds
 
+        val key = "${referenceWav.absolutePath}:${referenceWav.length()}:${referenceWav.lastModified()}:" +
+            "${referenceText.hashCode()}:${maxSeconds ?: 0.0}"
+        val onDisk = keyFile.takeIf { it.exists() }?.readText()
+        if (prompt.exists() && (key == preparedKey || key == onDisk)) {
+            preparedKey = key
+            promptFile = prompt
+            return@withLock PrepInfo(0, true, fullSeconds, usedSeconds, "")
+        }
+
+        val source = if (maxSeconds != null) WavFiles.trimmedCopy(referenceWav, File(dir, "reference_trimmed.wav"), maxSeconds) else referenceWav
         val started = SystemClock.elapsedRealtime()
-        val ok = runNative(null) { Qwen3TtsNative.prepareVoice(handle, referenceWav.absolutePath, referenceText, prompt.absolutePath) }
-        if (!ok) throw QwenTtsException("Voice preparation failed: ${Qwen3TtsNative.lastError(handle)}")
+        val ok = runNative(null) { Qwen3TtsNative.prepareVoice(handle, source.absolutePath, referenceText, prompt.absolutePath) }
+        val log = Qwen3TtsNative.takeLog(handle)
+        if (!ok) throw QwenTtsException("Voice preparation failed: ${Qwen3TtsNative.lastError(handle)}", log)
+        keyFile.writeText(key)
         preparedKey = key
         promptFile = prompt
-        PrepInfo(SystemClock.elapsedRealtime() - started, false)
+        PrepInfo(SystemClock.elapsedRealtime() - started, false, fullSeconds, usedSeconds, log)
+    }
+
+    /** Forgets the prepared voice (memory and disk), so the next run analyses the reference again. */
+    suspend fun clearVoiceCache(context: Context) = lock.withLock {
+        preparedKey = null
+        promptFile = null
+        File(context.applicationContext.filesDir, "qwen3tts").listFiles { f -> f.name.startsWith("voice_prompt") }?.forEach { it.delete() }
     }
 
     suspend fun synthesize(text: String, languageId: Int, output: File): SynthInfo = lock.withLock {
@@ -105,10 +161,11 @@ object QwenTtsRuntimeManager {
             Qwen3TtsNative.synthesize(h, prompt.absolutePath, text, languageId, MAX_AUDIO_TOKENS, output.absolutePath)
         }
         val elapsed = SystemClock.elapsedRealtime() - started
+        val log = Qwen3TtsNative.takeLog(h)
         when (status) {
-            Qwen3TtsNative.STATUS_OK -> SynthInfo(elapsed, Qwen3TtsNative.firstChunkMs(h).takeIf { it >= 0 })
+            Qwen3TtsNative.STATUS_OK -> SynthInfo(elapsed, Qwen3TtsNative.firstChunkMs(h).takeIf { it >= 0 }, log)
             Qwen3TtsNative.STATUS_CANCELLED -> throw CancellationException("Qwen3-TTS generation cancelled")
-            else -> throw QwenTtsException("Generation failed: ${Qwen3TtsNative.lastError(h)}")
+            else -> throw QwenTtsException("Generation failed: ${Qwen3TtsNative.lastError(h)}", log)
         }
     }
 
@@ -120,6 +177,14 @@ object QwenTtsRuntimeManager {
             preparedKey = null
             runNative(null) { Qwen3TtsNative.destroy(h) }
         }
+    }
+
+    /** Audio milliseconds delivered so far and elapsed milliseconds of the generation in progress (null if idle). */
+    fun generationProgress(): Pair<Long, Long>? {
+        val h = handle
+        if (h == 0L) return null
+        val p = Qwen3TtsNative.progress(h)
+        return if (p.size == 3 && p[2] > 0) p[1] to p[2] else null
     }
 
     /**

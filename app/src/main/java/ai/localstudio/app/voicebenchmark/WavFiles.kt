@@ -17,6 +17,21 @@ object WavFiles {
         file.outputStream().use { it.write(header.array()); it.write(pcm16) }
     }
 
+    /**
+     * Copies the first [maxSeconds] of a mono 16-bit WAV this app wrote itself
+     * (canonical 44-byte header, see [write]) to [dst]. Returns [src] unchanged
+     * when it is already short enough.
+     */
+    fun trimmedCopy(src: File, dst: File, maxSeconds: Double): File {
+        val bytes = src.readBytes()
+        if (bytes.size < 44) return src
+        val rate = ByteBuffer.wrap(bytes, 24, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        val keep = (rate * 2L * maxSeconds).toLong().coerceAtLeast(2L) and 1L.inv()
+        if (bytes.size - 44 <= keep) return src
+        write(dst, bytes.copyOfRange(44, 44 + keep.toInt()), rate)
+        return dst
+    }
+
     /** Length of a PCM16 WAV in milliseconds, or null if it isn't one. Tolerates engines that leave the data size at 0. */
     fun durationMs(file: File): Long? {
         if (!file.exists() || file.length() < 44) return null

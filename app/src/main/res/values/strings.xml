@@ -573,4 +573,19 @@ RTF: %3$.2f</string>
     <string name="avatar_qwen_problem_model">Download the Qwen3-TTS model first (More → Voice benchmark).</string>
     <string name="avatar_qwen_problem_reference">Record a reference voice first (More → Voice benchmark).</string>
     <string name="avatar_qwen_problem_transcript">Type the reference transcript first (More → Voice benchmark).</string>
+
+    <string name="voice_bench_qwen_tuning_title">Qwen diagnostics</string>
+    <string name="voice_bench_qwen_trim">Use only the first 6 s of the reference recording</string>
+    <string name="voice_bench_qwen_threads_auto">Threads: auto (%1$d)</string>
+    <string name="voice_bench_qwen_threads_n">Threads: %1$d</string>
+    <string name="voice_bench_qwen_profile">Speed profile: 2 runs (cold, then same voice + new text)</string>
+    <string name="voice_bench_profile_run_cold">Run %1$d — cold: model load + voice preparation</string>
+    <string name="voice_bench_profile_run_warm">Run %1$d — same voice, new text</string>
+    <string name="voice_bench_qwen_profile_need_reference">Record a reference and type its transcript first.</string>
+    <string name="voice_bench_qwen_profile_language">The profile has texts for Russian and English only.</string>
+    <string name="voice_bench_live">Qwen: %1$.1f s of audio in %2$.0f s (RTF %3$.1f)</string>
+    <string name="voice_bench_profile_text_ru_a" translatable="false">Привет, меня зовут Роман.</string>
+    <string name="voice_bench_profile_text_ru_b" translatable="false">Сегодня мы проверяем скорость голоса.</string>
+    <string name="voice_bench_profile_text_en_a" translatable="false">Hello, my name is Roman.</string>
+    <string name="voice_bench_profile_text_en_b" translatable="false">Today we are testing the speed of the voice.</string>
 </resources>

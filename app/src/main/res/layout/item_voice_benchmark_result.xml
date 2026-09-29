@@ -23,6 +23,17 @@
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="13sp" />
 
+    <TextView
+        android:id="@+id/voiceBenchResultLog"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="8dp"
+        android:fontFamily="monospace"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textIsSelectable="true"
+        android:textSize="10sp"
+        android:visibility="gone" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

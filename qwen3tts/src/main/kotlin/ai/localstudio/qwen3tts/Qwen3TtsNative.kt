@@ -46,4 +46,13 @@ object Qwen3TtsNative {
     external fun firstChunkMs(handle: Long): Long
 
     external fun lastError(handle: Long): String
+
+    /** `[chunks, audioMs, elapsedMs]` of the current or last [synthesize]; safe to call while it runs. */
+    external fun progress(handle: Long): LongArray
+
+    /**
+     * What the native runtime reported (its own per-phase timings, memory) plus
+     * the bridge's chunk timeline since the last call; clears it.
+     */
+    external fun takeLog(handle: Long): String
 }

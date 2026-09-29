@@ -4,6 +4,7 @@
 // that native calls on it never overlap, except cancel().
 #include <jni.h>
 #include <android/log.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "qwen3_tts_c.h"
@@ -24,7 +26,14 @@ struct Handle {
     int32_t threads = 4;
     std::atomic<bool> cancel{false};
     std::atomic<int64_t> first_chunk_ms{-1};
+    // Live view of the generation in progress, for a progress display (see progress()).
+    std::atomic<int64_t> chunk_count{0};
+    std::atomic<int64_t> audio_ms{0};
+    std::atomic<int64_t> gen_start_ms{0};
+    std::atomic<int64_t> gen_end_ms{0};
     std::string error;
+    // What the native runtime (and this bridge) reported since the last takeLog().
+    std::string log;
 };
 
 constexpr jint kOk = 0;
@@ -50,16 +59,91 @@ std::string to_std(JNIEnv* env, jstring s) {
 struct Stream {
     Handle* h;
     int64_t started_ms;
+    int64_t audio_samples = 0;
+    int32_t sample_rate = 24000;
+    // (elapsed ms when the chunk arrived, total audio ms delivered so far)
+    std::vector<std::pair<int64_t, int64_t>> chunks;
 };
 
 // Non-zero keeps generating, zero asks the runtime to stop (see
 // pipeline_synthesize.cpp: "Streaming audio callback requested cancellation").
 int32_t on_chunk(const qwen3_tts_audio_chunk_t* chunk, void* user) {
     auto* s = static_cast<Stream*>(user);
-    if (chunk != nullptr && chunk->n_samples > 0 && s->h->first_chunk_ms.load() < 0) {
-        s->h->first_chunk_ms.store(now_ms() - s->started_ms);
+    if (chunk != nullptr && chunk->n_samples > 0) {
+        const int64_t elapsed = now_ms() - s->started_ms;
+        if (s->h->first_chunk_ms.load() < 0) s->h->first_chunk_ms.store(elapsed);
+        s->audio_samples += chunk->n_samples;
+        if (chunk->sample_rate > 0) s->sample_rate = chunk->sample_rate;
+        s->chunks.emplace_back(elapsed, s->audio_samples * 1000 / s->sample_rate);
+        s->h->chunk_count.store(static_cast<int64_t>(s->chunks.size()));
+        s->h->audio_ms.store(s->audio_samples * 1000 / s->sample_rate);
     }
     return s->h->cancel.load() ? 0 : 1;
+}
+
+// qwen3-tts.cpp reports its own per-phase timings (tokenization, speaker
+// encode, code generation, vocoder, memory ...) with fprintf(stderr), which on
+// Android goes nowhere. While one of its calls runs, fd 2 is redirected into a
+// pipe, so the text can be handed to Kotlin (and the app log) instead.
+class StderrCapture {
+public:
+    StderrCapture() {
+        if (pipe(fds_) != 0) return;
+        saved_ = dup(2);
+        if (saved_ < 0) {
+            close(fds_[0]);
+            close(fds_[1]);
+            return;
+        }
+        fflush(stderr);
+        dup2(fds_[1], 2);
+        reader_ = std::thread([this] {
+            char buf[4096];
+            ssize_t n;
+            while ((n = read(fds_[0], buf, sizeof(buf))) > 0) text_.append(buf, static_cast<size_t>(n));
+        });
+        active_ = true;
+    }
+    StderrCapture(const StderrCapture&) = delete;
+    StderrCapture& operator=(const StderrCapture&) = delete;
+    ~StderrCapture() { finish(); }
+
+    std::string finish() {
+        if (!active_) return std::move(text_);
+        fflush(stderr);
+        dup2(saved_, 2);
+        close(saved_);
+        close(fds_[1]);  // last write end: the reader now sees EOF
+        reader_.join();
+        close(fds_[0]);
+        active_ = false;
+        return std::move(text_);
+    }
+
+private:
+    int fds_[2] = {-1, -1};
+    int saved_ = -1;
+    bool active_ = false;
+    std::thread reader_;
+    std::string text_;
+};
+
+// Also into logcat, one line at a time, so `adb logcat -s Qwen3TtsNative` shows it.
+void mirror_to_logcat(const std::string& text) {
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find('\n', start);
+        if (end == std::string::npos) end = text.size();
+        if (end > start) {
+            __android_log_print(ANDROID_LOG_INFO, "Qwen3TtsNative", "%.*s", static_cast<int>(end - start), text.c_str() + start);
+        }
+        start = end + 1;
+    }
+}
+
+void keep_log(Handle* h, std::string text) {
+    mirror_to_logcat(text);
+    h->log += text;
 }
 
 void put_u16(std::vector<uint8_t>& v, uint16_t x) { v.push_back(x & 0xFF); v.push_back(x >> 8); }
@@ -133,7 +217,9 @@ JNIEXPORT jboolean JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_loadModel
     if (h == nullptr) return JNI_FALSE;
     const std::string dir = to_std(env, model_dir);
     const std::string talker = to_std(env, talker_file);
+    StderrCapture capture;
     const int32_t ok = qwen3_tts_load_models_with_name(h->ctx, dir.c_str(), talker.c_str());
+    keep_log(h, capture.finish());
     if (!ok) {
         h->error = context_error(h);
         __android_log_print(ANDROID_LOG_ERROR, TAG, "load failed: %s", h->error.c_str());
@@ -150,7 +236,9 @@ JNIEXPORT jboolean JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_prepareVo
     const std::string wav = to_std(env, reference_wav);
     const std::string text = to_std(env, reference_text);
     const std::string out = to_std(env, prompt_path);
+    StderrCapture capture;
     const int32_t ok = qwen3_tts_extract_icl_prompt(h->ctx, wav.c_str(), text.c_str(), out.c_str());
+    keep_log(h, capture.finish());
     if (!ok) {
         h->error = context_error(h);
         __android_log_print(ANDROID_LOG_ERROR, TAG, "prepareVoice failed: %s", h->error.c_str());
@@ -172,6 +260,10 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
 
     h->cancel.store(false);
     h->first_chunk_ms.store(-1);
+    h->chunk_count.store(0);
+    h->audio_ms.store(0);
+    h->gen_end_ms.store(0);
+    h->gen_start_ms.store(now_ms());
     h->error.clear();
 
     qwen3_tts_streaming_params_t params{};
@@ -181,21 +273,51 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
     params.collect_audio = 1;
 
     Stream stream{h, now_ms()};
+    StderrCapture capture;
     qwen3_tts_result_t r = qwen3_tts_synthesize_with_icl_prompt_streaming(
         h->ctx, utterance.c_str(), prompt.c_str(), params, on_chunk, &stream);
+    const int64_t native_ms = now_ms() - stream.started_ms;
+    h->gen_end_ms.store(now_ms());
+    std::string runtime_log = capture.finish();
 
     jint status = kOk;
+    int64_t wav_ms = 0;
     if (!r.success) {
         status = h->cancel.load() ? kCancelled : kError;
         if (status == kError) h->error = r.error_msg ? r.error_msg : context_error(h);
     } else if (r.audio == nullptr || r.audio_len <= 0) {
         status = kError;
         h->error = "synthesis produced no audio";
-    } else if (!write_wav16(out_path, r.audio, r.audio_len, r.sample_rate)) {
-        status = kError;
-        h->error = "could not write " + out_path;
+    } else {
+        const int64_t wav_start = now_ms();
+        if (!write_wav16(out_path, r.audio, r.audio_len, r.sample_rate)) {
+            status = kError;
+            h->error = "could not write " + out_path;
+        }
+        wav_ms = now_ms() - wav_start;
     }
     qwen3_tts_free_result(r);
+
+    // Bridge-side facts the runtime's own report cannot know: the wall time of
+    // the whole native call, WAV writing, and when each audio chunk arrived —
+    // chunks arriving at a steady pace mean generation is linear, chunks
+    // getting further apart mean it slows down as the sequence grows.
+    char line[160];
+    std::string extra = "\nBridge:\n";
+    snprintf(line, sizeof(line), "  Threads:         %d\n  Native call:     %lld ms\n  WAV writing:     %lld ms\n",
+             static_cast<int>(h->threads), static_cast<long long>(native_ms), static_cast<long long>(wav_ms));
+    extra += line;
+    snprintf(line, sizeof(line), "  Audio chunks:    %d (chunk 1.0 s, vocoder left context 2.0 s)\n",
+             static_cast<int>(stream.chunks.size()));
+    extra += line;
+    const size_t shown = stream.chunks.size() < 40 ? stream.chunks.size() : 40;
+    for (size_t i = 0; i < shown; ++i) {
+        snprintf(line, sizeof(line), "    chunk %zu: arrived at %lld ms, audio so far %lld ms\n", i + 1,
+                 static_cast<long long>(stream.chunks[i].first), static_cast<long long>(stream.chunks[i].second));
+        extra += line;
+    }
+    if (stream.chunks.size() > shown) extra += "    ...\n";
+    keep_log(h, runtime_log + extra);
     if (status == kError) __android_log_print(ANDROID_LOG_ERROR, TAG, "synthesize failed: %s", h->error.c_str());
     return status;
 }
@@ -209,6 +331,31 @@ JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_cancel(JNIEnv
 JNIEXPORT jlong JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_firstChunkMs(JNIEnv*, jobject, jlong handle) {
     Handle* h = handle_of(handle);
     return h == nullptr ? -1 : static_cast<jlong>(h->first_chunk_ms.load());
+}
+
+// [chunks delivered, audio ms delivered, ms since generation started (frozen when it ended)]
+// of the current or last generation — safe to call while synthesize() runs.
+JNIEXPORT jlongArray JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_progress(JNIEnv* env, jobject, jlong handle) {
+    jlong values[3] = {0, 0, 0};
+    Handle* h = handle_of(handle);
+    if (h != nullptr && h->gen_start_ms.load() > 0) {
+        const int64_t end = h->gen_end_ms.load();
+        values[0] = h->chunk_count.load();
+        values[1] = h->audio_ms.load();
+        values[2] = (end > 0 ? end : now_ms()) - h->gen_start_ms.load();
+    }
+    jlongArray out = env->NewLongArray(3);
+    env->SetLongArrayRegion(out, 0, 3, values);
+    return out;
+}
+
+// Everything logged since the previous call; clears it.
+JNIEXPORT jstring JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_takeLog(JNIEnv* env, jobject, jlong handle) {
+    Handle* h = handle_of(handle);
+    if (h == nullptr) return env->NewStringUTF("");
+    std::string out;
+    out.swap(h->log);
+    return env->NewStringUTF(out.c_str());
 }
 
 JNIEXPORT jstring JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_lastError(JNIEnv* env, jobject, jlong handle) {

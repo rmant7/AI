@@ -1,5 +1,6 @@
 package ai.localstudio.app.voicebenchmark
 
+import ai.localstudio.app.AppContainer
 import ai.localstudio.whisper.CpuVariant
 import ai.localstudio.qwen3tts.Qwen3TtsNative
 import android.content.Context
@@ -60,12 +61,23 @@ class Qwen3TtsBenchmarkEngine(
         }
         outputDir.mkdirs()
         val output = File(outputDir, "qwen3_tts_${size.label}_${System.currentTimeMillis()}.wav")
+        val sections = StringBuilder()
+        fun section(title: String, body: String) {
+            if (body.isBlank()) return
+            sections.append("\n--- ").append(title).append(" ---\n").append(body.trimEnd()).append('\n')
+        }
+        record("run started: ${text.length} chars, language=$language, reference=${referenceAudio.length() / 1024} KB")
         return try {
             val load = QwenTtsRuntimeManager.ensureLoaded(appContext, QwenTtsModelProvider.get(appContext))
+            section("native: model load", load.log)
+            record("model load: ${if (load.alreadyLoaded) "already loaded" else "%.1f s".format(load.loadMs / 1000.0)}, threads=${load.threads}")
             val prep = QwenTtsRuntimeManager.prepareVoice(appContext, referenceAudio, referenceText)
+            section("native: voice preparation", prep.log)
+            record("voice preparation: ${if (prep.cached) "cached prompt reused" else "%.1f s".format(prep.prepMs / 1000.0)}; generation started")
             val generation = QwenTtsRuntimeManager.synthesize(text, languageId, output)
+            section("native: generation", generation.log)
             val audioMs = WavFiles.durationMs(output)
-            if (audioMs == null || audioMs <= 0) {
+            val result = if (audioMs == null || audioMs <= 0) {
                 output.delete()
                 VoiceBenchmarkResult.failed(id, VoiceBenchmarkStatus.ERROR, "Qwen3-TTS produced no audio")
             } else {
@@ -78,6 +90,10 @@ class Qwen3TtsBenchmarkEngine(
                         availRamMb = load.availRamMbBefore,
                     )
             }
+            val summary = summary(text, load, prep, generation, audioMs)
+            val details = summary + sections
+            record(details)
+            result.copy(details = details)
         } catch (e: CancellationException) {
             // Cancel must not leave the native model resident.
             output.delete()
@@ -85,8 +101,43 @@ class Qwen3TtsBenchmarkEngine(
             throw e
         } catch (e: QwenTtsException) {
             output.delete()
-            VoiceBenchmarkResult.failed(id, VoiceBenchmarkStatus.ERROR, e.message)
+            section("native (before the failure)", e.log)
+            val details = "FAILED: ${e.message}\n$sections"
+            record(details)
+            VoiceBenchmarkResult.failed(id, VoiceBenchmarkStatus.ERROR, e.message).copy(details = details)
         }
+    }
+
+    // The three costs and the RTF, in one place. Generation time (and RTF)
+    // cover neither model loading nor voice preparation.
+    private fun summary(
+        text: String,
+        load: QwenTtsRuntimeManager.LoadInfo,
+        prep: QwenTtsRuntimeManager.PrepInfo,
+        generation: QwenTtsRuntimeManager.SynthInfo,
+        audioMs: Long?,
+    ): String {
+        fun s(ms: Long) = "%.2f s".format(ms / 1000.0)
+        val audio = (audioMs ?: 0L)
+        val rtf = if (audio > 0) generation.generationMs.toDouble() / audio else 0.0
+        return buildString {
+            append("Qwen3-TTS ${size.label} Base · ${text.length} chars\n")
+            append("Threads:            ${load.threads}\n")
+            append("Reference:          ${"%.1f".format(prep.referenceSeconds)} s recorded, ${"%.1f".format(prep.usedSeconds)} s used\n")
+            append("1 Model load:       ").append(if (load.alreadyLoaded) "0 (already loaded)" else s(load.loadMs)).append('\n')
+            append("2 Voice prep:       ").append(if (prep.cached) "0 (cached prompt reused, reference NOT re-analysed)" else s(prep.prepMs)).append('\n')
+            append("3-6 Generation:     ${s(generation.generationMs)}  (tokenize + talker + vocoder + WAV, see native report below)\n")
+            generation.firstAudioMs?.let { append("    first audio chunk: ${s(it)}\n") }
+            append("7 Total (all):      ${s((if (load.alreadyLoaded) 0 else load.loadMs) + prep.prepMs + generation.generationMs)}\n")
+            append("8 Audio duration:   ${s(audio)}\n")
+            append("9 RTF:              ${"%.2f".format(rtf)}  (generation / audio)\n")
+        }
+    }
+
+    // The app log is where a phone-only investigation looks: without this the
+    // native side's timings went to stderr, which Android discards.
+    private fun record(details: String) {
+        runCatching { AppContainer.get(appContext).appLog.record("QWEN_TTS", details) }
     }
 
     private companion object {

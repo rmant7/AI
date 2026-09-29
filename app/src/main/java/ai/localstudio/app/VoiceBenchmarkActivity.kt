@@ -2,6 +2,7 @@ package ai.localstudio.app
 
 import ai.localstudio.app.databinding.ActivityVoiceBenchmarkBinding
 import ai.localstudio.app.databinding.ItemVoiceBenchmarkResultBinding
+import ai.localstudio.app.llama.LlamaBridge
 import ai.localstudio.app.voicebenchmark.AndroidTtsBenchmarkEngine
 import ai.localstudio.app.voicebenchmark.ChatterboxBenchmarkEngine
 import ai.localstudio.app.voicebenchmark.Qwen3TtsBenchmarkEngine
@@ -31,6 +32,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -42,6 +45,10 @@ import java.io.File
  * is [VoiceBenchmarkRunner] and the engines' job.
  */
 class VoiceBenchmarkActivity : AppCompatActivity() {
+
+    private companion object {
+        const val QWEN_06B_ID = "qwen3_tts_0.6b"
+    }
 
     private class Preset(val labelRes: Int, val textRes: Int?)
 
@@ -122,6 +129,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         setupTest()
         setupEngines()
         setupQwenModel()
+        setupQwenTuning()
 
         binding.voiceBenchGenerateButton.setOnClickListener { runSelected() }
         binding.voiceBenchCancelButton.setOnClickListener { runJob?.cancel() }
@@ -293,6 +301,68 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         }
     }
 
+    // ── Qwen diagnostics ──────────────────────────────────────────────────
+
+    private fun setupQwenTuning() {
+        binding.voiceBenchQwenTrim.setOnCheckedChangeListener { _, checked ->
+            QwenTtsRuntimeManager.referenceMaxSeconds = if (checked) 6.0 else null
+        }
+        val choices = listOf<Int?>(null, 1, 2, 4, 6, 8)
+        val labels = choices.map { n ->
+            if (n == null) getString(R.string.voice_bench_qwen_threads_auto, LlamaBridge.defaultThreads())
+            else getString(R.string.voice_bench_qwen_threads_n, n)
+        }
+        binding.voiceBenchQwenThreads.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+        binding.voiceBenchQwenThreads.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                QwenTtsRuntimeManager.threadsOverride = choices[position]
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        binding.voiceBenchQwenProfile.setOnClickListener { runQwenProfile() }
+    }
+
+    // Two runs of the same voice: the first from a cold start (model unloaded,
+    // voice cache cleared), the second with the model loaded and the voice
+    // prepared but a new text — the difference between them is the one-off cost.
+    private fun runQwenProfile() {
+        val reference = if (recorder.hasRecording) recorder.file else null
+        val transcript = binding.voiceBenchTranscript.text?.toString()?.trim().orEmpty()
+        if (reference == null || transcript.isEmpty()) {
+            Toast.makeText(this, R.string.voice_bench_qwen_profile_need_reference, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val language = selectedLanguage()
+        val texts = when (language) {
+            "ru" -> listOf(R.string.voice_bench_profile_text_ru_a, R.string.voice_bench_profile_text_ru_b)
+            "en" -> listOf(R.string.voice_bench_profile_text_en_a, R.string.voice_bench_profile_text_en_b)
+            else -> {
+                Toast.makeText(this, R.string.voice_bench_qwen_profile_language, Toast.LENGTH_SHORT).show()
+                return
+            }
+        }.map { getString(it) }
+        stopPlayback()
+        launchRun {
+            AppContainer.get(this).releaseLocalModels()
+            QwenTtsRuntimeManager.release()
+            QwenTtsRuntimeManager.clearVoiceCache(this)
+            val report = StringBuilder()
+            texts.forEachIndexed { index, text ->
+                val label = getString(
+                    if (index == 0) R.string.voice_bench_profile_run_cold else R.string.voice_bench_profile_run_warm, index + 1,
+                )
+                markRunning(QWEN_06B_ID)
+                binding.voiceBenchProfileOutput.text = report.toString() + label + " …"
+                val result = runner.runOne(QWEN_06B_ID, VoiceBenchmarkRunner.Request(text, language, reference, transcript))
+                showResult(result)
+                report.append("===== ").append(label).append(" =====\n\"").append(text).append("\"\n")
+                report.append(result.details ?: result.error ?: result.status.name).append("\n\n")
+                binding.voiceBenchProfileOutput.text = report.toString()
+            }
+        }
+    }
+
     // ── running ───────────────────────────────────────────────────────────
 
     private fun buildRequest(): VoiceBenchmarkRunner.Request? {
@@ -337,6 +407,20 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         if (runJob?.isActive == true) return
         renderRunning(true)
         runJob = lifecycleScope.launch {
+            // While a Qwen generation runs, show how fast it is going: at ~15 minutes
+            // per paragraph waiting for the final report is not an option.
+            val ticker = launch {
+                while (isActive) {
+                    delay(1000)
+                    QwenTtsRuntimeManager.generationProgress()?.let { (audioMs, elapsedMs) ->
+                        if (audioMs > 0) {
+                            binding.voiceBenchStatus.text = getString(
+                                R.string.voice_bench_live, audioMs / 1000.0, elapsedMs / 1000.0, elapsedMs.toDouble() / audioMs,
+                            )
+                        }
+                    }
+                }
+            }
             try {
                 block()
                 binding.voiceBenchStatus.text = getString(R.string.voice_bench_done)
@@ -347,6 +431,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
                 }
                 throw e
             } finally {
+                ticker.cancel()
                 renderRunning(false)
             }
         }
@@ -398,6 +483,8 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
             result.status == VoiceBenchmarkStatus.UNSUPPORTED_LANGUAGE -> getString(R.string.voice_bench_status_unsupported)
             else -> getString(R.string.voice_bench_status_error, result.error ?: "")
         }
+        item.voiceBenchResultLog.text = result.details.orEmpty()
+        item.voiceBenchResultLog.visibility = if (result.details.isNullOrBlank()) View.GONE else View.VISIBLE
         item.voiceBenchResultPlay.isEnabled = result.success && result.audioFile != null
         item.voiceBenchResultRepeat.isEnabled = runJob?.isActive != true
     }
