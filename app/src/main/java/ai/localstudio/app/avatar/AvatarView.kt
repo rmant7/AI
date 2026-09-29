@@ -77,8 +77,11 @@ class AvatarView @JvmOverloads constructor(
     private var blinkPhaseStartMs = 0L
     private var blinking = false
 
-    private var gesture: AvatarGesture? = null
-    private var gestureStartMs = 0L
+    // At most one held expression per group (eyes / mouth), so a wink and a
+    // smile can be held together but two eye states cannot.
+    private var heldEyes: AvatarGesture? = null
+    private var heldMouth: AvatarGesture? = null
+    private var popWeight = 0f
 
     // Head motion, applied identically to every layer — see onDraw.
     private var headRotationDeg = 0f
@@ -99,16 +102,22 @@ class AvatarView @JvmOverloads constructor(
     }
 
     /**
-     * One-shot, timed expression, independent of whatever [updateState] is
-     * currently driving — see [ai.localstudio.app.AvatarTestActivity] for
-     * where this is triggered from. Replaces any gesture already playing
-     * rather than queuing, so mashing a button restarts it instead of piling
-     * up.
+     * Holds [gesture] at its full expression until it is toggled again (or
+     * another gesture of the same [AvatarGesture.group] replaces it) — so a
+     * screenshot can be taken at the extreme of an expression instead of
+     * racing a timer. Independent of whatever [updateState] is driving.
+     * Returns whether [gesture] is held after the call.
      */
-    fun playGesture(gesture: AvatarGesture) {
-        this.gesture = gesture
-        gestureStartMs = System.currentTimeMillis()
+    fun toggleGesture(gesture: AvatarGesture): Boolean {
+        val held = isHeld(gesture)
+        when (gesture.group) {
+            AvatarGesture.Group.EYES -> heldEyes = if (held) null else gesture
+            AvatarGesture.Group.MOUTH -> heldMouth = if (held) null else gesture
+        }
+        return !held
     }
+
+    fun isHeld(gesture: AvatarGesture): Boolean = heldEyes == gesture || heldMouth == gesture
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -196,42 +205,29 @@ class AvatarView @JvmOverloads constructor(
         }
         var left = blinkPulse
         var right = blinkPulse
+        when (heldEyes) {
+            AvatarGesture.BLINK -> { left = 1f; right = 1f }
+            AvatarGesture.WINK_LEFT -> left = 1f
+            AvatarGesture.WINK_RIGHT -> right = 1f
+            else -> Unit
+        }
 
         var viseme = visemeFor(targetState.mouthShape, currentMouthOpen)
         var visemeTarget = smoothstep(MOUTH_OPEN_MIN, MOUTH_OPEN_FULL, currentMouthOpen)
-        var popPulse = 0f
-
-        val active = gesture
-        if (active != null) {
-            val elapsed = now - gestureStartMs
-            if (elapsed >= active.durationMs) {
-                gesture = null
-            } else {
-                val pulse = trianglePulse(elapsed, active.durationMs)
-                when (active) {
-                    AvatarGesture.BLINK -> {
-                        left = pulse
-                        right = pulse
-                    }
-                    AvatarGesture.WINK_LEFT -> left = pulse
-                    AvatarGesture.WINK_RIGHT -> right = pulse
-                    AvatarGesture.SURPRISE -> {
-                        viseme = Viseme.WOW
-                        visemeTarget = min(1f, pulse * 1.6f)
-                        popPulse = pulse
-                    }
-                    AvatarGesture.SMILE -> {
-                        viseme = Viseme.SMILE
-                        visemeTarget = min(1f, pulse * 2f)
-                    }
-                }
-            }
+        when (heldMouth) {
+            AvatarGesture.SURPRISE -> { viseme = Viseme.WOW; visemeTarget = 1f }
+            AvatarGesture.SMILE -> { viseme = Viseme.SMILE; visemeTarget = 1f }
+            else -> Unit
         }
+        val popTarget = if (heldMouth == AvatarGesture.SURPRISE) 1f else 0f
+        popWeight += (popTarget - popWeight) * VISEME_SMOOTHING
+        val popPulse = popWeight
 
-        // A triangular pulse is closed only at its very peak; this widens the
-        // closed plateau so a blink reads as shut, not as a half-faded ghost.
-        leftClosed = min(1f, left * CLOSED_PLATEAU)
-        rightClosed = min(1f, right * CLOSED_PLATEAU)
+        // A triangular blink pulse is closed only at its very peak; this
+        // widens the closed plateau so a blink reads as shut, not as a
+        // half-faded ghost. Held eyes are already at 1 and simply stay there.
+        leftClosed += (min(1f, left * CLOSED_PLATEAU) - leftClosed) * EYE_SMOOTHING
+        rightClosed += (min(1f, right * CLOSED_PLATEAU) - rightClosed) * EYE_SMOOTHING
 
         for (v in Viseme.entries) {
             val target = if (v == viseme) visemeTarget else 0f
@@ -310,6 +306,7 @@ class AvatarView @JvmOverloads constructor(
 
         const val SMOOTHING = 0.25f
         const val VISEME_SMOOTHING = 0.4f
+        const val EYE_SMOOTHING = 0.55f
         const val MIN_LAYER_ALPHA = 0.02f
 
         const val BLINK_DURATION_MS = 180L
@@ -324,14 +321,18 @@ class AvatarView @JvmOverloads constructor(
 }
 
 /**
- * A short, timed expression [AvatarView.playGesture] plays on top of
- * whatever [AvatarState] speech is currently driving — see
- * [ai.localstudio.app.AvatarTestActivity], the only caller today.
+ * An expression [AvatarView.toggleGesture] holds at its maximum until it is
+ * toggled off — see [ai.localstudio.app.AvatarTestActivity], the only caller
+ * today. Gestures in the same [Group] replace each other; different groups
+ * combine.
  */
-enum class AvatarGesture(val durationMs: Long) {
-    BLINK(220L),
-    WINK_LEFT(650L),
-    WINK_RIGHT(650L),
-    SURPRISE(900L),
-    SMILE(1400L),
+enum class AvatarGesture(val group: Group) {
+    BLINK(Group.EYES),
+    WINK_LEFT(Group.EYES),
+    WINK_RIGHT(Group.EYES),
+    SURPRISE(Group.MOUTH),
+    SMILE(Group.MOUTH),
+    ;
+
+    enum class Group { EYES, MOUTH }
 }

@@ -43,11 +43,23 @@ class AvatarTestActivity : AppCompatActivity() {
 
         binding.avatarTestPlayButton.setOnClickListener { play() }
         binding.avatarTestStopButton.setOnClickListener { controller.onInterrupted() }
-        binding.avatarTestWinkLeftButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.WINK_LEFT) }
-        binding.avatarTestWinkRightButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.WINK_RIGHT) }
-        binding.avatarTestSurpriseButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.SURPRISE) }
-        binding.avatarTestBlinkButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.BLINK) }
-        binding.avatarTestSmileButton.setOnClickListener { binding.avatarView.playGesture(AvatarGesture.SMILE) }
+
+        // Each gesture button toggles a held expression; checked = currently held.
+        val gestureButtons = mapOf(
+            AvatarGesture.WINK_LEFT to binding.avatarTestWinkLeftButton,
+            AvatarGesture.WINK_RIGHT to binding.avatarTestWinkRightButton,
+            AvatarGesture.SURPRISE to binding.avatarTestSurpriseButton,
+            AvatarGesture.BLINK to binding.avatarTestBlinkButton,
+            AvatarGesture.SMILE to binding.avatarTestSmileButton,
+        )
+        gestureButtons.forEach { (gesture, button) ->
+            button.isCheckable = true
+            button.setOnClickListener {
+                binding.avatarView.toggleGesture(gesture)
+                // Replacing a held gesture in the same group un-holds its sibling too.
+                gestureButtons.forEach { (g, b) -> b.isChecked = binding.avatarView.isHeld(g) }
+            }
+        }
 
         populateVoicesWhenReady()
     }
