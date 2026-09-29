@@ -588,7 +588,7 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_variant_q4">Talker: Q4_K_M (по умолчанию)</string>
     <string name="voice_bench_qwen_variant_q8">Talker: Q8_0 (эксперимент: быстрее Code Predictor?)</string>
     <string name="voice_bench_qwen_q8_download">Скачать Q8_0</string>
-    <string name="voice_bench_qwen_q8_not_downloaded">Talker Q8_0: не скачан (около 1 ГБ, точный размер неизвестен)</string>
+    <string name="voice_bench_qwen_q8_not_downloaded">Talker Q8_0: не скачан (993 МБ)</string>
     <string name="voice_bench_qwen_q8_downloading">Talker Q8_0: загрузка %1$d%%</string>
     <string name="voice_bench_qwen_q8_ready">Talker Q8_0: скачан</string>
     <string name="voice_bench_qwen_q8_failed">Talker Q8_0: ошибка загрузки: %1$s</string>

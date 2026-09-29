@@ -34,6 +34,8 @@ object QwenTtsModelDescriptor {
         val expectedBytes: Long,
         val minBytes: Long? = null,
         val maxBytes: Long? = null,
+        /** Checked once after download when set (lower-case hex). */
+        val sha256: String? = null,
     )
 
     /**
@@ -50,8 +52,12 @@ object QwenTtsModelDescriptor {
         ),
         Q8_0(
             "q8_0", "Q8_0",
-            // Size not pinned (not verifiable from the build environment): any GGUF between 0.6 and 1.8 GB.
-            ModelFile(TALKER_Q8_FILE, "$BASE_URL/$TALKER_Q8_FILE?download=true", 1_000_000_000L, 600_000_000L, 1_800_000_000L),
+            // Serveurperso's Q8_0 talker: ~993 MB (MB or MiB not stated, so the range covers both), and the SHA-256
+            // reported for that file. Not verifiable from the build environment, hence the hash check on the phone.
+            ModelFile(
+                TALKER_Q8_FILE, "$BASE_URL/$TALKER_Q8_FILE?download=true", 993_000_000L, 940_000_000L, 1_100_000_000L,
+                "d54dbaf10591421fa764ed630d764efa717ae40cd959bd48c66d4eb1af226426",
+            ),
         );
 
         companion object {
@@ -133,7 +139,14 @@ class QwenTtsModelProvider private constructor(context: Context) {
                 if (!isValid(target, file)) {
                     val got = target.length()
                     target.delete()
-                    throw IOException("${file.name} is not a valid GGUF (got $got bytes)")
+                    throw IOException("${file.name} is not a valid GGUF of the expected size (got $got bytes)")
+                }
+                file.sha256?.let { expected ->
+                    val actual = sha256Of(target)
+                    if (actual != expected) {
+                        target.delete()
+                        throw IOException("${file.name}: SHA-256 mismatch (got $actual)")
+                    }
                 }
                 _q8State.value = QwenModelState.Ready
             } catch (e: Exception) {
@@ -215,6 +228,19 @@ class QwenTtsModelProvider private constructor(context: Context) {
         if (file.length() !in low..high) return false
         return runCatching { file.inputStream().use { s -> ByteArray(4).also { s.read(it) }.decodeToString() == "GGUF" } }
             .getOrDefault(false)
+    }
+
+    private fun sha256Of(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(1 shl 20)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     companion object {
