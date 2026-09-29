@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.SystemClock
 import android.speech.tts.Voice
 import java.io.File
 import java.util.Locale
@@ -50,7 +51,15 @@ class AvatarTtsEngine(
 
     private class Wav(val sampleRate: Int, val channels: Int, val pcm: ByteArray)
 
-    private val cacheDir = context.applicationContext.cacheDir
+    private val appContext = context.applicationContext
+    private val cacheDir = appContext.cacheDir
+
+    // Timing of the sentence pipeline: how long a sentence waited for its audio, and the silence
+    // between the end of one sentence and the start of the next (the number that matters for a
+    // voice slower than real time). Short lines to the app log, tag AVATAR_TTS.
+    private val queuedAt = ConcurrentHashMap<String, Long>()
+    @Volatile
+    private var lastEndAt = 0L
 
     // Which voice makes the WAV; everything below is the same for all of them.
     private val synthesizer: SpeechSynthesizer = when (config.backend) {
@@ -104,6 +113,7 @@ class AvatarTtsEngine(
         val file = File(cacheDir, "avatar_tts_$utteranceId.wav")
         utteranceText[utteranceId] = text
         utteranceFile[utteranceId] = file
+        queuedAt[utteranceId] = SystemClock.elapsedRealtime()
         synthesizer.synthesize(text, file) { ok -> onSynthesized(utteranceId, ok) }
         return utteranceId
     }
@@ -128,6 +138,8 @@ class AvatarTtsEngine(
         utteranceText.clear()
         utteranceFile.values.forEach { it.delete() }
         utteranceFile.clear()
+        queuedAt.clear()
+        lastEndAt = 0L
     }
 
     fun shutdown() {
@@ -214,6 +226,7 @@ class AvatarTtsEngine(
         track = audioTrack
         try {
             audioTrack.write(wav.pcm, 0, wav.pcm.size)
+            logTiming(job, totalFrames.toDouble() / wav.sampleRate)
             onEvent(Event.Started(job.id))
             audioTrack.play()
 
@@ -235,6 +248,7 @@ class AvatarTtsEngine(
                 Thread.sleep(TICK_MS)
             }
             if (job.generation == generation) {
+                lastEndAt = SystemClock.elapsedRealtime()
                 utteranceText.remove(job.id)
                 onEvent(Event.Done(job.id))
             }
@@ -243,6 +257,18 @@ class AvatarTtsEngine(
             audioTrack.release()
             track = null
         }
+    }
+
+    private fun logTiming(job: Job, audioSeconds: Double) {
+        val now = SystemClock.elapsedRealtime()
+        val waited = queuedAt.remove(job.id)?.let { (now - it) / 1000.0 }
+        val gap = lastEndAt.takeIf { it > 0 && now - it < 60_000 }?.let { (now - it) / 1000.0 }
+        val line = buildString {
+            append("sentence ${job.text.length} chars, audio ${"%.1f".format(audioSeconds)} s")
+            waited?.let { append(", ready after ${"%.1f".format(it)} s") }
+            append(if (gap != null) ", silence before it ${"%.1f".format(gap)} s" else ", first of the answer")
+        }
+        runCatching { ai.localstudio.app.AppContainer.get(appContext).appLog.record("AVATAR_TTS", line) }
     }
 
     private fun readWav(file: File): Wav? {
