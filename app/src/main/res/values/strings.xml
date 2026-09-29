@@ -599,4 +599,5 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_stream_1">Streaming: 3 s chunks, 0.5 s context (default)</string>
     <string name="voice_bench_qwen_stream_2">Streaming: 8 s chunks, 0.5 s context</string>
     <string name="voice_bench_qwen_stream_3">No streaming: decode the whole utterance once</string>
+    <string name="avatar_qwen_failed">Cloned voice failed: %1$s</string>
 </resources>

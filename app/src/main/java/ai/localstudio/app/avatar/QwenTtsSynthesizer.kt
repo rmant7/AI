@@ -5,7 +5,11 @@ import ai.localstudio.app.voicebenchmark.QwenTtsModelProvider
 import ai.localstudio.app.voicebenchmark.QwenTtsRuntimeManager
 import ai.localstudio.app.voicebenchmark.ReferenceVoiceRecorder
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
+import ai.localstudio.app.AppContainer
+import ai.localstudio.app.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +51,7 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
     override val isReady: Boolean get() = true
 
     override fun synthesize(text: String, file: File, onResult: (Boolean) -> Unit) {
+        note("sentence queued (${text.length} chars)")
         requests.trySend(Request(text, file, generation, onResult))
     }
 
@@ -66,22 +71,39 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
 
     private suspend fun process(request: Request) {
         if (request.generation != generation) return
+        val started = SystemClock.elapsedRealtime()
+        fun since() = "%.1f s".format((SystemClock.elapsedRealtime() - started) / 1000.0)
+        note("sentence started (${request.text.length} chars)")
         val ok = try {
             val reference = ReferenceVoiceRecorder.referenceFile(app)
-            QwenTtsRuntimeManager.ensureLoaded(app, QwenTtsModelProvider.get(app))
+            val load = QwenTtsRuntimeManager.ensureLoaded(app, QwenTtsModelProvider.get(app))
+            note("model ${if (load.alreadyLoaded) "already loaded" else "loaded"}, threads=${load.threads}, after ${since()}")
             QwenTtsRuntimeManager.prepareVoice(app, reference, referenceText)
+            note("voice ready after ${since()}")
             QwenTtsRuntimeManager.synthesize(request.text, languageIdFor(request.text), request.file)
+            note("sentence synthesized in ${since()}")
             true
         } catch (e: CancellationException) {
             // Either this worker is being shut down (rethrown here) or just
             // the current sentence was stopped (carry on with the queue).
             currentCoroutineContext().ensureActive()
+            note("sentence cancelled after ${since()}")
             false
-        } catch (e: QwenTtsException) {
-            Log.w(TAG, "Qwen3-TTS failed: ${e.message}")
+        } catch (e: Exception) {
+            // Not only QwenTtsException: any failure must be visible, or "Play" just does nothing.
+            Log.w(TAG, "Qwen3-TTS failed", e)
+            val message = e.message ?: e.javaClass.simpleName
+            note("FAILED after ${since()}: $message")
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                Toast.makeText(app, app.getString(R.string.avatar_qwen_failed, message), Toast.LENGTH_LONG).show()
+            }
             false
         }
         if (request.generation == generation) request.onResult(ok)
+    }
+
+    private fun note(message: String) {
+        runCatching { AppContainer.get(app).appLog.record("AVATAR_QWEN", message) }
     }
 
     // Codec language ids from qwen3-tts.cpp: Cyrillic text is Russian, anything else English.
