@@ -62,6 +62,7 @@ class VoiceBenchmarkViewModel private constructor(application: Application) : An
     var trimReference = true
     var threadsIndex = 0
     var streamingIndex = 1
+    var vocoderThreadsIndex = 0
 
     private val app = application
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

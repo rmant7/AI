@@ -327,6 +327,21 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        val vocoderChoices = listOf<Int?>(null, 2, 3, 4, 6, 8)
+        val vocoderLabels = vocoderChoices.map { n ->
+            if (n == null) getString(R.string.voice_bench_qwen_vocoder_same) else getString(R.string.voice_bench_qwen_vocoder_n, n)
+        }
+        binding.voiceBenchQwenVocoderThreads.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, vocoderLabels)
+        binding.voiceBenchQwenVocoderThreads.setSelection(vm.vocoderThreadsIndex.coerceIn(vocoderChoices.indices), false)
+        QwenTtsRuntimeManager.vocoderThreadsOverride = vocoderChoices[vm.vocoderThreadsIndex.coerceIn(vocoderChoices.indices)]
+        binding.voiceBenchQwenVocoderThreads.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                vm.vocoderThreadsIndex = position
+                QwenTtsRuntimeManager.vocoderThreadsOverride = vocoderChoices[position]
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         // chunk ms to vocoder left-context ms; "whole utterance" is one chunk longer than any answer.
         val streaming = listOf(1000 to 2000, 3000 to 500, 8000 to 500, 600_000 to 0)
         val streamLabels = listOf(

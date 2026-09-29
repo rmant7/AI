@@ -25,6 +25,9 @@ namespace {
 // Streaming parameters, set from Kotlin (diagnostics): audio chunk length and vocoder left context.
 std::atomic<int32_t> g_chunk_ms{1000};
 std::atomic<int32_t> g_left_ms{2000};
+// Threads for the streaming vocoder, whose backend is created on the first synthesis after a load
+// (0 = same as the talker). The runtime reads the global thread count only when it creates a backend.
+std::atomic<int32_t> g_vocoder_threads{0};
 
 struct Handle {
     qwen3_tts_context_t* ctx = nullptr;
@@ -295,8 +298,11 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
     Stream stream{h, now_ms()};
     StderrCapture capture(h);
     capture.start();
+    const int32_t vocoder_threads = g_vocoder_threads.load();
+    if (vocoder_threads > 0) qwen3_tts_set_cpu_threads(vocoder_threads);
     qwen3_tts_result_t r = qwen3_tts_synthesize_with_icl_prompt_streaming(
         h->ctx, utterance.c_str(), prompt.c_str(), params, on_chunk, &stream);
+    if (vocoder_threads > 0) qwen3_tts_set_cpu_threads(h->threads);
     const int64_t native_ms = now_ms() - stream.started_ms;
     h->gen_end_ms.store(now_ms());
     std::string runtime_log = capture.finish();
@@ -347,6 +353,10 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
 JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_setStreaming(JNIEnv*, jobject, jint chunkMs, jint leftMs) {
     g_chunk_ms.store(chunkMs > 0 ? chunkMs : 1000);
     g_left_ms.store(leftMs >= 0 ? leftMs : 2000);
+}
+
+JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_setVocoderThreads(JNIEnv*, jobject, jint threads) {
+    g_vocoder_threads.store(threads > 0 ? threads : 0);
 }
 
 JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_cancel(JNIEnv*, jobject, jlong handle) {

@@ -583,4 +583,6 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_stream_2">Стриминг: чанки 8 с, контекст 0,5 с</string>
     <string name="voice_bench_qwen_stream_3">Без стриминга: декодировать всё сразу</string>
     <string name="avatar_qwen_failed">Клонированный голос не сработал: %1$s</string>
+    <string name="voice_bench_qwen_vocoder_same">Потоки вокодера: как у модели</string>
+    <string name="voice_bench_qwen_vocoder_n">Потоки вокодера: %1$d</string>
 </resources>

@@ -122,7 +122,7 @@ class Qwen3TtsBenchmarkEngine(
         val rtf = if (audio > 0) generation.generationMs.toDouble() / audio else 0.0
         return buildString {
             append("Qwen3-TTS ${size.label} Base · ${text.length} chars\n")
-            append("Threads:            ${load.threads}\n")
+            append("Threads:            ${load.threads}").append(QwenTtsRuntimeManager.vocoderThreadsOverride?.let { " (vocoder $it)" } ?: "").append('\n')
             append("Streaming:          chunk ${QwenTtsRuntimeManager.streamingChunkMs} ms, vocoder context ${QwenTtsRuntimeManager.streamingLeftMs} ms\n")
             append("Device state:       ${deviceState()}\n")
             append("Reference:          ${"%.1f".format(prep.referenceSeconds)} s recorded, ${"%.1f".format(prep.usedSeconds)} s used\n")

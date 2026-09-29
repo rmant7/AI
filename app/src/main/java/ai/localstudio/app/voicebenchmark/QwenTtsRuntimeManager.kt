@@ -68,6 +68,12 @@ object QwenTtsRuntimeManager {
     @Volatile
     var threadsOverride: Int? = null
 
+    /** Diagnostics: threads for the vocoder (null = same as the model), applied on the next load. */
+    @Volatile
+    var vocoderThreadsOverride: Int? = null
+
+    private var loadedVocoderThreads = 0
+
     /** Diagnostics: streaming chunk length / vocoder left context in ms (default 3 s / 0.5 s: measured about 2x faster than upstream's 1 s / 2 s). */
     @Volatile
     var streamingChunkMs: Int = 3000
@@ -102,7 +108,8 @@ object QwenTtsRuntimeManager {
         val app = context.applicationContext
         val wantedThreads = threadsOverride ?: defaultThreads()
         // A different thread count needs a fresh context.
-        if (handle != 0L && loadedThreads != wantedThreads) {
+        val wantedVocoder = vocoderThreadsOverride ?: 0
+        if (handle != 0L && (loadedThreads != wantedThreads || loadedVocoderThreads != wantedVocoder)) {
             val old = handle
             handle = 0L
             preparedKey = null
@@ -130,6 +137,7 @@ object QwenTtsRuntimeManager {
         }
         handle = newHandle
         loadedThreads = wantedThreads
+        loadedVocoderThreads = wantedVocoder
         LoadInfo(SystemClock.elapsedRealtime() - started, false, avail, pssBefore, pssMb(), wantedThreads, log)
     }
 
@@ -202,6 +210,7 @@ object QwenTtsRuntimeManager {
         val started = SystemClock.elapsedRealtime()
         val status = runNative(h) {
             Qwen3TtsNative.setStreaming(streamingChunkMs, streamingLeftMs)
+            Qwen3TtsNative.setVocoderThreads(loadedVocoderThreads)
             Qwen3TtsNative.synthesize(h, prompt.absolutePath, text, languageId, maxFramesFor(text), output.absolutePath)
         }
         val elapsed = SystemClock.elapsedRealtime() - started
