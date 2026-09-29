@@ -107,11 +107,13 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
                 val prompt = QwenTtsRuntimeManager.currentPromptFile() ?: throw QwenTtsException("Voice not prepared")
                 this.second.synthesize(
                     app, QwenTtsModelProvider.get(app), prompt, threadsEach ?: QwenTtsRuntimeManager.defaultThreads(),
-                    request.text, languageIdFor(request.text), request.file,
+                    PARALLEL_VOCODER_THREADS, request.text, languageIdFor(request.text), request.file,
                 )
             } else {
                 val reference = ReferenceVoiceRecorder.referenceFile(app)
-                val load = QwenTtsRuntimeManager.ensureLoaded(app, QwenTtsModelProvider.get(app), threadsEach)
+                val load = QwenTtsRuntimeManager.ensureLoaded(
+                    app, QwenTtsModelProvider.get(app), threadsEach, if (parallel) PARALLEL_VOCODER_THREADS else null,
+                )
                 note("model ${if (load.alreadyLoaded) "already loaded" else "loaded"}, threads=${load.threads}, after ${since()}")
                 QwenTtsRuntimeManager.prepareVoice(app, reference, referenceText)
                 note("voice ready after ${since()}")
@@ -157,7 +159,8 @@ internal class QwenTtsSynthesizer(context: Context, private val referenceText: S
     }
 
     private companion object {
-        const val PARALLEL_THREADS = 3
+        const val PARALLEL_THREADS = 2
+        const val PARALLEL_VOCODER_THREADS = 4
         const val SECOND_CONTEXT_MIN_FREE_MB = 2500L
         const val TAG = "QwenTtsSynthesizer"
         const val RUSSIAN = 2069

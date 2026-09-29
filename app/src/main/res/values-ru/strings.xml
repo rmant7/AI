@@ -566,7 +566,7 @@ RTF: %3$.2f</string>
     <string name="avatar_qwen_problem_transcript">Сначала введи транскрипт образца (Ещё → Голосовой бенчмарк).</string>
 
     <string name="voice_bench_qwen_tuning_title">Диагностика Qwen</string>
-    <string name="voice_bench_qwen_trim">Использовать только первые 12 с записи образца</string>
+    <string name="voice_bench_qwen_trim">Использовать только первые 8 с записи образца</string>
     <string name="voice_bench_qwen_threads_auto">Потоки: авто (%1$d)</string>
     <string name="voice_bench_qwen_threads_n">Потоки: %1$d</string>
     <string name="voice_bench_qwen_profile">Профиль скорости: 2 запуска (холодный, затем тот же голос и новый текст)</string>
@@ -583,6 +583,6 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_stream_2">Стриминг: чанки 8 с, контекст 0,5 с</string>
     <string name="voice_bench_qwen_stream_3">Без стриминга: декодировать всё сразу</string>
     <string name="avatar_qwen_failed">Клонированный голос не сработал: %1$s</string>
-    <string name="voice_bench_qwen_vocoder_same">Потоки вокодера: как у модели</string>
+    <string name="voice_bench_qwen_vocoder_same">Потоки вокодера: авто</string>
     <string name="voice_bench_qwen_vocoder_n">Потоки вокодера: %1$d</string>
 </resources>

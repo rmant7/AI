@@ -25,6 +25,7 @@ internal class QwenTtsSecondWorker {
         provider: QwenTtsModelProvider,
         prompt: File,
         threads: Int,
+        vocoderThreads: Int,
         text: String,
         languageId: Int,
         output: File,
@@ -46,6 +47,7 @@ internal class QwenTtsSecondWorker {
         val h = handle
         val status = QwenTtsRuntimeManager.runNative(h) {
             Qwen3TtsNative.setStreaming(QwenTtsRuntimeManager.streamingChunkMs, QwenTtsRuntimeManager.streamingLeftMs)
+            Qwen3TtsNative.setVocoderThreads(vocoderThreads)
             Qwen3TtsNative.synthesize(h, prompt.absolutePath, text, languageId, QwenTtsRuntimeManager.maxFramesFor(text), output.absolutePath)
         }
         Qwen3TtsNative.takeLog(h)

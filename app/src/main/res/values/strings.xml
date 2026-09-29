@@ -579,7 +579,7 @@ RTF: %3$.2f</string>
     <string name="avatar_qwen_problem_transcript">Type the reference transcript first (More → Voice benchmark).</string>
 
     <string name="voice_bench_qwen_tuning_title">Qwen diagnostics</string>
-    <string name="voice_bench_qwen_trim">Use only the first 12 s of the reference recording</string>
+    <string name="voice_bench_qwen_trim">Use only the first 8 s of the reference recording</string>
     <string name="voice_bench_qwen_threads_auto">Threads: auto (%1$d)</string>
     <string name="voice_bench_qwen_threads_n">Threads: %1$d</string>
     <string name="voice_bench_qwen_profile">Speed profile: 2 runs (cold, then same voice + new text)</string>
@@ -600,6 +600,6 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_stream_2">Streaming: 8 s chunks, 0.5 s context</string>
     <string name="voice_bench_qwen_stream_3">No streaming: decode the whole utterance once</string>
     <string name="avatar_qwen_failed">Cloned voice failed: %1$s</string>
-    <string name="voice_bench_qwen_vocoder_same">Vocoder threads: same as model</string>
+    <string name="voice_bench_qwen_vocoder_same">Vocoder threads: automatic</string>
     <string name="voice_bench_qwen_vocoder_n">Vocoder threads: %1$d</string>
 </resources>

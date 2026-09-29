@@ -89,7 +89,13 @@ object QwenTtsRuntimeManager {
      * cores). [LlamaBridge.defaultThreads] counts only the single top-clocked core, which on a
      * 1+3+4 SoC (e.g. Snapdragon 865) means one thread — measured ~20-200x slower than realtime.
      */
-    fun defaultThreads(): Int {
+    fun defaultThreads(): Int = fastCoreCount().coerceIn(1, 4)
+
+    /** The vocoder, unlike the talker, keeps getting faster with more threads (2 -> 6 threads: 4.5 s -> 2.4 s). */
+    fun defaultVocoderThreads(): Int = fastCoreCount().coerceIn(1, 8)
+
+    // Measured: the talker is no faster on 6 threads than on 2-4, so it is capped at 4.
+    private fun fastCoreCount(): Int {
         val total = Runtime.getRuntime().availableProcessors()
         val freqs = (0 until total).mapNotNull { core ->
             runCatching {
@@ -98,20 +104,26 @@ object QwenTtsRuntimeManager {
         }
         if (freqs.size < total) return LlamaBridge.defaultThreads()
         val top = freqs.max()
-        return freqs.count { it * 10 >= top * 7 }.coerceIn(1, 8)
+        return freqs.count { it * 10 >= top * 7 }
     }
 
-    /** Reference length used by default: a 8-12 s recording is used whole, so its transcript matches exactly. */
-    const val DEFAULT_REFERENCE_SECONDS = 12.0
+    /** Threads the loaded vocoder uses (0 if nothing is loaded). */
+    fun currentVocoderThreads(): Int = if (handle != 0L) loadedVocoderThreads else 0
+
+    /**
+     * Reference length used by default. Measured on a Pixel: the talker takes ~0.16 s per frame with a 6 s
+     * reference and ~0.235 s with 12 s, so a long reference costs speed; 8 s is the compromise.
+     */
+    const val DEFAULT_REFERENCE_SECONDS = 8.0
 
     /** Free RAM needed before loading: ~0.9 GB of weights plus graph buffers and the vocoder. */
     private const val MIN_AVAILABLE_MB = 1400L
 
-    suspend fun ensureLoaded(context: Context, provider: QwenTtsModelProvider, threadsHint: Int? = null): LoadInfo = lock.withLock {
+    suspend fun ensureLoaded(context: Context, provider: QwenTtsModelProvider, threadsHint: Int? = null, vocoderHint: Int? = null): LoadInfo = lock.withLock {
         val app = context.applicationContext
         val wantedThreads = threadsOverride ?: threadsHint ?: defaultThreads()
         // A different thread count needs a fresh context.
-        val wantedVocoder = vocoderThreadsOverride ?: 0
+        val wantedVocoder = vocoderThreadsOverride ?: vocoderHint ?: defaultVocoderThreads()
         if (handle != 0L && (loadedThreads != wantedThreads || loadedVocoderThreads != wantedVocoder)) {
             val old = handle
             handle = 0L
