@@ -439,8 +439,8 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
         }
         val language = selectedLanguage()
         val texts = when (language) {
-            "ru" -> listOf(R.string.voice_bench_profile_text_ru_a, R.string.voice_bench_profile_text_ru_b)
-            "en" -> listOf(R.string.voice_bench_profile_text_en_a, R.string.voice_bench_profile_text_en_b)
+            "ru" -> listOf(R.string.voice_bench_profile_text_ru_a, R.string.voice_bench_profile_text_ru_b).let { it + it }
+            "en" -> listOf(R.string.voice_bench_profile_text_en_a, R.string.voice_bench_profile_text_en_b).let { it + it }
             else -> {
                 Toast.makeText(this, R.string.voice_bench_qwen_profile_language, Toast.LENGTH_SHORT).show()
                 return

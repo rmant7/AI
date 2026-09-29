@@ -129,12 +129,36 @@ class VoiceBenchmarkViewModel private constructor(application: Application) : An
         QwenTtsRuntimeManager.release()
         QwenTtsRuntimeManager.clearVoiceCache(app)
         val report = StringBuilder()
+        val warm = mutableListOf<VoiceBenchmarkResult>()
         texts.forEachIndexed { index, text ->
-            _state.update { it.copy(profileReport = report.toString() + labels[index] + " …") }
+            _state.update { it.copy(profileReport = summary(warm) + report.toString() + labels[index] + " …") }
             val result = runEngine(QWEN_06B_ID, request(text))
+            if (index > 0 && result.success) warm += result
             report.append("===== ").append(labels[index]).append(" =====\n\"").append(text).append("\"\n")
             report.append(result.details ?: result.error ?: result.status.name).append("\n\n")
-            _state.update { it.copy(profileReport = report.toString()) }
+            _state.update { it.copy(profileReport = summary(warm) + report.toString()) }
+        }
+    }
+
+    // Repeated runs of the same setup differ by tens of percent, so the warm runs are summarised:
+    // the code-generation cost per frame (total minus vocoder decode, over frames) and the RTF of each.
+    private fun summary(warm: List<VoiceBenchmarkResult>): String {
+        if (warm.isEmpty()) return ""
+        fun num(re: String, text: String) = Regex(re).find(text)?.groupValues?.get(1)?.toDoubleOrNull()
+        val perFrame = warm.mapNotNull { r ->
+            val d = r.details ?: return@mapNotNull null
+            val code = num("Code\\+streaming:\\s+(\\d+) ms", d) ?: return@mapNotNull null
+            val decode = num("Streaming decode:\\s*(\\d+) ms", d) ?: 0.0
+            val frames = num("emitted=(\\d+)", d)?.takeIf { it > 0 } ?: return@mapNotNull null
+            (code - decode) / 1000.0 / frames
+        }
+        val rtfs = warm.mapNotNull { it.rtf }
+        fun median(v: List<Double>) = v.sorted().let { if (it.isEmpty()) Double.NaN else it[it.size / 2] }
+        fun list(v: List<Double>) = v.joinToString(", ") { "%.2f".format(it) }
+        return buildString {
+            append("##### WARM RUNS (${warm.size}) #####\n")
+            append("code s/frame: ${list(perFrame)}  -> median ${"%.3f".format(median(perFrame))}\n")
+            append("RTF: ${list(rtfs)}  -> median ${"%.2f".format(median(rtfs))}\n\n")
         }
     }
 
