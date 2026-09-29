@@ -571,4 +571,7 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_profile_need_reference">Сначала запиши образец и введи его транскрипт.</string>
     <string name="voice_bench_qwen_profile_language">Тексты профиля есть только для русского и английского.</string>
     <string name="voice_bench_live">Qwen: %1$.1f с аудио за %2$.0f с (RTF %3$.1f)</string>
+
+    <string name="voice_bench_qwen_profile_need_recording">Образец ещё не записан — сначала запиши его.</string>
+    <string name="voice_bench_qwen_profile_need_transcript">Запись есть; впиши её транскрипт (что ты говорил) в поле транскрипта. Перезаписывать не нужно.</string>
 </resources>

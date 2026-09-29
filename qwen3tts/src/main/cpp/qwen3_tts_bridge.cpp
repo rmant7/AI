@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <mutex>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -34,6 +35,9 @@ struct Handle {
     std::string error;
     // What the native runtime (and this bridge) reported since the last takeLog().
     std::string log;
+    // The same text as it arrives, while a native call is still running (see peekLive()).
+    std::mutex live_mu;
+    std::string live;
 };
 
 constexpr jint kOk = 0;
@@ -87,7 +91,12 @@ int32_t on_chunk(const qwen3_tts_audio_chunk_t* chunk, void* user) {
 // pipe, so the text can be handed to Kotlin (and the app log) instead.
 class StderrCapture {
 public:
-    StderrCapture() {
+    explicit StderrCapture(Handle* h) : h_(h) {
+        std::lock_guard<std::mutex> g(h_->live_mu);
+        h_->live.clear();
+    }
+
+    void start() {
         if (pipe(fds_) != 0) return;
         saved_ = dup(2);
         if (saved_ < 0) {
@@ -100,7 +109,11 @@ public:
         reader_ = std::thread([this] {
             char buf[4096];
             ssize_t n;
-            while ((n = read(fds_[0], buf, sizeof(buf))) > 0) text_.append(buf, static_cast<size_t>(n));
+            while ((n = read(fds_[0], buf, sizeof(buf))) > 0) {
+                text_.append(buf, static_cast<size_t>(n));
+                std::lock_guard<std::mutex> g(h_->live_mu);
+                h_->live.append(buf, static_cast<size_t>(n));
+            }
         });
         active_ = true;
     }
@@ -121,6 +134,7 @@ public:
     }
 
 private:
+    Handle* h_;
     int fds_[2] = {-1, -1};
     int saved_ = -1;
     bool active_ = false;
@@ -217,7 +231,8 @@ JNIEXPORT jboolean JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_loadModel
     if (h == nullptr) return JNI_FALSE;
     const std::string dir = to_std(env, model_dir);
     const std::string talker = to_std(env, talker_file);
-    StderrCapture capture;
+    StderrCapture capture(h);
+    capture.start();
     const int32_t ok = qwen3_tts_load_models_with_name(h->ctx, dir.c_str(), talker.c_str());
     keep_log(h, capture.finish());
     if (!ok) {
@@ -236,7 +251,8 @@ JNIEXPORT jboolean JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_prepareVo
     const std::string wav = to_std(env, reference_wav);
     const std::string text = to_std(env, reference_text);
     const std::string out = to_std(env, prompt_path);
-    StderrCapture capture;
+    StderrCapture capture(h);
+    capture.start();
     const int32_t ok = qwen3_tts_extract_icl_prompt(h->ctx, wav.c_str(), text.c_str(), out.c_str());
     keep_log(h, capture.finish());
     if (!ok) {
@@ -273,7 +289,8 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
     params.collect_audio = 1;
 
     Stream stream{h, now_ms()};
-    StderrCapture capture;
+    StderrCapture capture(h);
+    capture.start();
     qwen3_tts_result_t r = qwen3_tts_synthesize_with_icl_prompt_streaming(
         h->ctx, utterance.c_str(), prompt.c_str(), params, on_chunk, &stream);
     const int64_t native_ms = now_ms() - stream.started_ms;
@@ -347,6 +364,18 @@ JNIEXPORT jlongArray JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_progres
     jlongArray out = env->NewLongArray(3);
     env->SetLongArrayRegion(out, 0, 3, values);
     return out;
+}
+
+// What the running (or last) native call has printed so far — safe to call while it runs.
+JNIEXPORT jstring JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_peekLive(JNIEnv* env, jobject, jlong handle) {
+    Handle* h = handle_of(handle);
+    if (h == nullptr) return env->NewStringUTF("");
+    std::string copy;
+    {
+        std::lock_guard<std::mutex> g(h->live_mu);
+        copy = h->live;
+    }
+    return env->NewStringUTF(copy.c_str());
 }
 
 // Everything logged since the previous call; clears it.

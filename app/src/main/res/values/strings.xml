@@ -588,4 +588,7 @@ RTF: %3$.2f</string>
     <string name="voice_bench_profile_text_ru_b" translatable="false">Сегодня мы проверяем скорость голоса.</string>
     <string name="voice_bench_profile_text_en_a" translatable="false">Hello, my name is Roman.</string>
     <string name="voice_bench_profile_text_en_b" translatable="false">Today we are testing the speed of the voice.</string>
+
+    <string name="voice_bench_qwen_profile_need_recording">No reference recording yet — record one first.</string>
+    <string name="voice_bench_qwen_profile_need_transcript">The recording is fine; type its transcript (what you said) into the transcript field. No need to re-record.</string>
 </resources>

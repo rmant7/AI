@@ -329,8 +329,12 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
     private fun runQwenProfile() {
         val reference = if (recorder.hasRecording) recorder.file else null
         val transcript = binding.voiceBenchTranscript.text?.toString()?.trim().orEmpty()
-        if (reference == null || transcript.isEmpty()) {
-            Toast.makeText(this, R.string.voice_bench_qwen_profile_need_reference, Toast.LENGTH_SHORT).show()
+        if (reference == null) {
+            Toast.makeText(this, R.string.voice_bench_qwen_profile_need_recording, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (transcript.isEmpty()) {
+            Toast.makeText(this, R.string.voice_bench_qwen_profile_need_transcript, Toast.LENGTH_SHORT).show()
             return
         }
         val language = selectedLanguage()
@@ -410,8 +414,21 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
             // While a Qwen generation runs, show how fast it is going: at ~15 minutes
             // per paragraph waiting for the final report is not an option.
             val ticker = launch {
+                var liveOffset = 0
                 while (isActive) {
                     delay(1000)
+                    // The native runtime's own progress lines, as they are printed — into
+                    // the app log and the status — so a long phase is never silent.
+                    QwenTtsRuntimeManager.liveLog()?.let { live ->
+                        if (live.length < liveOffset) liveOffset = 0
+                        val end = live.lastIndexOf('\n') + 1
+                        if (end > liveOffset) {
+                            val fresh = live.substring(liveOffset, end).lines().filter { it.isNotBlank() }
+                            liveOffset = end
+                            fresh.forEach { AppContainer.get(this@VoiceBenchmarkActivity).appLog.record("QWEN_NATIVE", it.trim()) }
+                            fresh.lastOrNull()?.let { binding.voiceBenchStatus.text = it.trim() }
+                        }
+                    }
                     QwenTtsRuntimeManager.generationProgress()?.let { (audioMs, elapsedMs) ->
                         if (audioMs > 0) {
                             binding.voiceBenchStatus.text = getString(

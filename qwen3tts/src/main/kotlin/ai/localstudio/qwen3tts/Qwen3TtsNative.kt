@@ -55,4 +55,7 @@ object Qwen3TtsNative {
      * the bridge's chunk timeline since the last call; clears it.
      */
     external fun takeLog(handle: Long): String
+
+    /** What the running (or last) native call has printed so far; safe to call while it runs. */
+    external fun peekLive(handle: Long): String
 }

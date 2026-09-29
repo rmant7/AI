@@ -179,6 +179,12 @@ object QwenTtsRuntimeManager {
         }
     }
 
+    /** What the native call in progress has printed so far (null if no model is loaded). */
+    fun liveLog(): String? {
+        val h = handle
+        return if (h == 0L) null else Qwen3TtsNative.peekLive(h)
+    }
+
     /** Audio milliseconds delivered so far and elapsed milliseconds of the generation in progress (null if idle). */
     fun generationProgress(): Pair<Long, Long>? {
         val h = handle
