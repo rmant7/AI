@@ -46,7 +46,15 @@ VISEMES = {
     "smile": (52.0, 10.0, 2.0, 0.62, False, False, 7.0),
     # the "surprised" mouth: a big round opening, much larger than the speech "o"
     "wow": (30.0, 30.0, 5.0, 0.0, True, True, 0.0),
+    # clenched teeth, corners pulled down
+    "anger": (46.0, 9.0, 1.0, 1.0, False, False, -6.0),
 }
+BITE_LINE = {"anger"}
+
+# Eyebrows (box in photo px) and which end is the inner one (nearer the nose).
+LEFT_BROW = dict(box=(190, 302, 294, 333), pivot_x=192, angle=-7.0)   # inner end = right
+RIGHT_BROW = dict(box=(343, 287, 449, 319), pivot_x=447, angle=7.0)   # inner end = left
+BROW_DROP = 5.0
 
 
 def smoothstep(x):
@@ -110,6 +118,65 @@ def close_eye(rgb, eye):
     return out, lash
 
 
+def angry_eye(rgb, eye, inner_sign):
+    """Upper lid pulled down over the top ~45% of the opening, lower at the inner end (a glare)."""
+    out = rgb.copy()
+    lash = np.zeros(rgb.shape[:2], np.float32)
+    ramp_up = 18.0
+    for x in range(int(eye["xc"] - eye["a"] - 8), int(eye["xc"] + eye["a"] + 9)):
+        env = eye_profile(x, eye)
+        top = eye["yc"] - eye["h_top"] * env - 2.5
+        bot = eye["yc"] + eye["h_bot"] * env + 2.5
+        slant = 5.0 * inner_sign * (x - eye["xc"]) / eye["a"]
+        y_lid = min(bot - 1.5, top + (bot - top) * 0.45 + slant * env)
+        d_up = max(0.0, y_lid - top)
+        ys = np.arange(int(top - ramp_up), int(y_lid) + 1, dtype=np.float32)
+        r = smoothstep((ys - (top - ramp_up)) / (ramp_up + d_up))
+        out[ys.astype(int), x] = sample_rows(rgb, x, ys - d_up * r)
+        yy = np.arange(int(y_lid) - 4, int(y_lid) + 6)
+        a = np.clip(1.0 - np.abs(yy - y_lid) / (1.3 + 1.6 * env), 0.0, 1.0)
+        lash[yy, x] = np.maximum(lash[yy, x], a * float(smoothstep(env * 3.5)))
+    return out, lash
+
+
+def brow_hair_mask(rgb, brow):
+    """Soft mask of the brow hairs only (local deviation from the smoothed skin), inside the brow box."""
+    h, w = rgb.shape[:2]
+    lum = rgb.mean(axis=2)
+    blur = np.asarray(Image.fromarray(lum.astype(np.uint8)).filter(ImageFilter.GaussianBlur(6)), np.float32)
+    dev = np.abs(lum - blur)
+    m = np.clip((dev - 3.0) / 10.0, 0.0, 1.0)
+    m = np.asarray(Image.fromarray((m * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.3)), np.float32) / 255.0
+    x0, y0, x1, y1 = brow["box"]
+    return np.clip(m * 1.6, 0.0, 1.0) * rect_mask(h, w, x0, y0, x1, y1, 5.0)
+
+
+def angry_brow(rgb, brow, out, alpha):
+    """Paints the old brow hairs out of `out` (forehead skin) and re-draws them lower and tilted.
+    `alpha` accumulates exactly the pixels this changes, so the layer never covers the eyes."""
+    h, w = rgb.shape[:2]
+    mask = brow_hair_mask(rgb, brow)
+    x0, y0, x1, y1 = brow["box"]
+    # skin to hide the old brow: forehead just above, softened
+    skin = rgb.copy()
+    skin[y0:y1, x0:x1] = rgb[y0 - 26:y1 - 26, x0:x1]
+    skin = np.asarray(Image.fromarray(skin.astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.2)), np.float32)
+    grow = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(2)), np.float32) / 255.0
+    out = out * (1 - grow[..., None]) + skin * grow[..., None]
+    # the same hairs, rotated about the outer end and dropped
+    rgba = np.dstack([rgb * 0.84, mask * 255]).astype(np.uint8)
+    rot = Image.fromarray(rgba, "RGBA").rotate(brow["angle"], resample=Image.BICUBIC, center=(brow["pivot_x"], (y0 + y1) / 2))
+    rot = np.asarray(rot, np.float32)
+    rmask = np.roll(rot[..., 3] / 255.0, int(BROW_DROP), axis=0)
+    rcol = np.roll(rot[..., :3], int(BROW_DROP), axis=0)
+    # soft shadow just under the lowered brow so the frown reads
+    shadow = np.asarray(Image.fromarray((np.roll(rmask, 5, axis=0) * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(3.5)), np.float32) / 255.0
+    out = out * (1 - 0.14 * shadow[..., None])
+    touched = np.maximum(np.maximum(grow, rmask), shadow * 0.9)
+    touched = np.asarray(Image.fromarray((touched * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3)), np.float32) / 255.0
+    return out * (1 - rmask[..., None]) + rcol * rmask[..., None], np.maximum(alpha, touched)
+
+
 def lipless(rgb):
     """The photo with the closed-lip line painted out: the band around it is refilled
     from the lower-lip skin a few rows below (real texture, not an interpolation)."""
@@ -130,10 +197,10 @@ def lift_corners(rgb, half, amount):
     y_mid = MOUTH_YS + 3.0
     for x in range(int(MOUTH_XC - half * 1.5), int(MOUTH_XC + half * 1.5) + 1):
         t = abs(x - MOUTH_XC) / half
-        s = amount * float(smoothstep((t - 0.35) / 0.65)) * float(smoothstep((1.6 - t) / 0.6))
+        s = abs(amount) * float(smoothstep((t - 0.35) / 0.65)) * float(smoothstep((1.6 - t) / 0.6))
         if s < 0.5:
             continue
-        s = round(s)
+        s = round(s) * (1 if amount > 0 else -1)
         for y in range(int(y_mid - band), int(y_mid + band) + 1):
             decay = max(0.0, 1.0 - abs(y - y_mid) / band)
             out[y, x] = rgb[min(len(rgb) - 1, y + round(s * decay)), x]
@@ -143,7 +210,7 @@ def lift_corners(rgb, half, amount):
 def mouth_variant(rgb, base, name):
     half, drop, lift, teeth_frac, tongue, rounded, corner_lift = VISEMES[name]
     src = base if rounded else rgb
-    if corner_lift > 0.0:
+    if corner_lift != 0.0:
         src = lift_corners(src, half, corner_lift)
     h, w = rgb.shape[:2]
     out = src.copy()
@@ -194,6 +261,9 @@ def mouth_variant(rgb, base, name):
             shade = 1.0 - 0.10 * (0.5 + 0.5 * math.cos((x - MOUTH_XC) * 2 * math.pi / 9.0))
             tcol = np.array([214, 204, 188], np.float32) * shade * (0.82 + 0.18 * (1 - v))[:, None]
             col = col * (1 - tooth[:, None]) + tcol * tooth[:, None]
+        if name in BITE_LINE:
+            bite = np.clip(1.0 - np.abs(v - 0.5) / 0.09, 0.0, 1.0)
+            col = col * (1 - 0.5 * bite[:, None])
         # soft shadow under the moustache along the top edge of the opening
         top_shadow = np.clip(1.0 - (ys[top:bot, x] - top) / 2.5, 0.0, 1.0)
         col = col * (1 - 0.45 * top_shadow[:, None])
@@ -265,6 +335,14 @@ def main():
         soft = np.clip(soft * 1.25, 0.0, 1.0) * 0.72
         skin_with_lash = closed * (1 - soft[..., None]) + lash_col * soft[..., None]
         layers[f"eyes/{side}_closed.png"] = (skin_with_lash, fp)
+    lash_soft = lambda l: np.clip(np.asarray(Image.fromarray((l * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)), np.float32) / 255.0 * 1.25, 0, 1) * 0.8
+    for side, eye, fp, inner in (("left", LEFT_EYE, fl, 1.0), ("right", RIGHT_EYE, fr, -1.0)):
+        ang, lash = angry_eye(rgb, eye, inner)
+        soft = lash_soft(lash)
+        layers[f"eyes/{side}_angry.png"] = (ang * (1 - soft[..., None]) + lash_col * soft[..., None], fp)
+    brows_rgb, brow_alpha = angry_brow(rgb, LEFT_BROW, rgb.copy(), np.zeros((h, w), np.float32))
+    brows_rgb, brow_alpha = angry_brow(rgb, RIGHT_BROW, brows_rgb, brow_alpha)
+    layers["eyebrows/angry.png"] = (brows_rgb, brow_alpha)
     layers["mouth/neutral.png"] = (rgb, fm)
     for name in VISEMES:
         layers[f"mouth/{name}.png"] = (mouth_variant(rgb, lipless_rgb, name), fm)
@@ -289,6 +367,28 @@ def main():
         }
         for name in VISEMES:
             combos[f"mouth_{name}"] = ["eyes/left_open.png", "eyes/right_open.png", f"mouth/{name}.png"]
+        def combo(parts, weights=None):
+            im = Image.open(os.path.join(OUT, "avatar_head.png")).convert("RGBA")
+            for i, n in enumerate(parts):
+                layer = Image.open(os.path.join(OUT, n)).convert("RGBA")
+                if weights and weights[i] < 1.0:
+                    a = layer.getchannel("A").point(lambda v, k=weights[i]: int(v * k))
+                    layer.putalpha(a)
+                im = Image.alpha_composite(im, layer)
+            return im.convert("RGB")
+        E = ["eyes/left_open.png", "eyes/right_open.png"]
+        AE = ["eyes/left_angry.png", "eyes/right_angry.png"]
+        combos_w = {
+            "anger": (E + AE + ["eyebrows/angry.png", "mouth/neutral.png", "mouth/anger.png"], None),
+            "anger_a": (E + AE + ["eyebrows/angry.png", "mouth/neutral.png", "mouth/anger.png", "mouth/a.png"], [1, 1, 1, 1, 1, 1, 1, .6]),
+            "anger_blink": (E + AE + ["eyes/left_closed.png", "eyes/right_closed.png", "eyebrows/angry.png", "mouth/neutral.png", "mouth/anger.png"], None),
+            "anger_wink_l": (E + AE + ["eyes/left_closed.png", "eyebrows/angry.png", "mouth/neutral.png", "mouth/anger.png"], None),
+            "smile_a": (E + ["mouth/neutral.png", "mouth/smile.png", "mouth/a.png"], [1, 1, 1, 1, .6]),
+            "wow_o": (E + ["mouth/neutral.png", "mouth/wow.png", "mouth/o.png"], [1, 1, 1, 1, .6]),
+            "smile_wink": (["eyes/left_closed.png", "eyes/right_open.png", "mouth/neutral.png", "mouth/smile.png"], None),
+        }
+        for name, (parts, wts) in combos_w.items():
+            combo(parts, wts).save(os.path.join(args.preview, name + ".png"))
         for name, parts in combos.items():
             composite(*parts).save(os.path.join(args.preview, name + ".png"))
         diff = np.abs(np.asarray(composite(*combos["static"]), np.float32) - rgb).max()

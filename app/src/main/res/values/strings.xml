@@ -49,6 +49,7 @@
     <string name="avatar_test_gesture_surprise">Surprise</string>
     <string name="avatar_test_gesture_blink">Blink</string>
     <string name="avatar_test_gesture_smile">Smile</string>
+    <string name="avatar_test_gesture_anger">Anger</string>
 
     <string name="benchmark_hint">Picks a folder of audio files and runs every registered speech-to-text backend against every file, so their speed and output can be compared on identical input. See docs/16-stt-benchmark.md.</string>
     <string name="benchmark_pick_folder">Pick folder</string>

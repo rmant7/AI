@@ -51,6 +51,7 @@
     <string name="avatar_test_gesture_surprise">Удивление</string>
     <string name="avatar_test_gesture_blink">Моргнуть</string>
     <string name="avatar_test_gesture_smile">Улыбка</string>
+    <string name="avatar_test_gesture_anger">Гнев</string>
 
     <string name="benchmark_hint">Выбираешь папку с аудиофайлами — приложение прогоняет каждый файл через все зарегистрированные STT-движки, чтобы сравнить скорость и результат на одинаковом входе. См. docs/16-stt-benchmark.md.</string>
     <string name="benchmark_pick_folder">Выбрать папку</string>

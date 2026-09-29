@@ -39,18 +39,27 @@ class AvatarView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
 
-    private enum class Viseme(val asset: String) {
-        A("a"), E("e"), I("i"), O("o"), U("u"), SMILE("smile"), WOW("wow"),
-    }
+    // Speech states — the only ones VisemeMapper's MouthShape can select.
+    // round and wide are different lip shapes, not two degrees of "open", so
+    // moving between them is an alpha cross-fade of full layers, nothing more.
+    private enum class Speech(val asset: String) { OPEN("a"), WIDE("e"), ROUND("o") }
+
+    // Expressions — held by toggle, never chosen by speech, and independent of
+    // it: they set the base mouth/eyes/brows, speech is drawn over the mouth.
+    private enum class Expression(val mouthAsset: String) { SMILE("smile"), WOW("wow"), ANGER("anger") }
 
     private class Layers(
         val head: Bitmap,
         val leftOpen: Bitmap,
         val leftClosed: Bitmap,
+        val leftAngry: Bitmap,
         val rightOpen: Bitmap,
         val rightClosed: Bitmap,
+        val rightAngry: Bitmap,
+        val browsAngry: Bitmap,
         val mouthNeutral: Bitmap,
-        val mouths: Map<Viseme, Bitmap>,
+        val speech: Map<Speech, Bitmap>,
+        val expression: Map<Expression, Bitmap>,
     )
 
     // Decoded off the main thread (a dozen 640x640 PNGs); nothing is drawn
@@ -67,7 +76,8 @@ class AvatarView @JvmOverloads constructor(
 
     private var targetState = AvatarState()
     private var currentMouthOpen = 0f
-    private val visemeWeights = FloatArray(Viseme.entries.size)
+    private val speechWeights = FloatArray(Speech.entries.size)
+    private val expressionWeights = FloatArray(Expression.entries.size)
 
     // 0..1 = how far the closed-eye layer is faded in over the open one.
     private var leftClosed = 0f
@@ -77,11 +87,10 @@ class AvatarView @JvmOverloads constructor(
     private var blinkPhaseStartMs = 0L
     private var blinking = false
 
-    // At most one held expression per group (eyes / mouth), so a wink and a
-    // smile can be held together but two eye states cannot.
+    // At most one held gesture per group (eyes / expression), so a wink and
+    // an expression can be held together but two of the same kind cannot.
     private var heldEyes: AvatarGesture? = null
-    private var heldMouth: AvatarGesture? = null
-    private var popWeight = 0f
+    private var heldExpression: AvatarGesture? = null
 
     // Head motion, applied identically to every layer — see onDraw.
     private var headRotationDeg = 0f
@@ -112,12 +121,12 @@ class AvatarView @JvmOverloads constructor(
         val held = isHeld(gesture)
         when (gesture.group) {
             AvatarGesture.Group.EYES -> heldEyes = if (held) null else gesture
-            AvatarGesture.Group.MOUTH -> heldMouth = if (held) null else gesture
+            AvatarGesture.Group.EXPRESSION -> heldExpression = if (held) null else gesture
         }
         return !held
     }
 
-    fun isHeld(gesture: AvatarGesture): Boolean = heldEyes == gesture || heldMouth == gesture
+    fun isHeld(gesture: AvatarGesture): Boolean = heldEyes == gesture || heldExpression == gesture
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -148,10 +157,14 @@ class AvatarView @JvmOverloads constructor(
                 head = load("avatar_head.png"),
                 leftOpen = load("eyes/left_open.png"),
                 leftClosed = load("eyes/left_closed.png"),
+                leftAngry = load("eyes/left_angry.png"),
                 rightOpen = load("eyes/right_open.png"),
                 rightClosed = load("eyes/right_closed.png"),
+                rightAngry = load("eyes/right_angry.png"),
+                browsAngry = load("eyebrows/angry.png"),
                 mouthNeutral = load("mouth/neutral.png"),
-                mouths = Viseme.entries.associateWith { load("mouth/${it.asset}.png") },
+                speech = Speech.entries.associateWith { load("mouth/${it.asset}.png") },
+                expression = Expression.entries.associateWith { load("mouth/${it.mouthAsset}.png") },
             )
             post {
                 layers = loaded
@@ -212,16 +225,25 @@ class AvatarView @JvmOverloads constructor(
             else -> Unit
         }
 
-        var viseme = visemeFor(targetState.mouthShape, currentMouthOpen)
-        var visemeTarget = smoothstep(MOUTH_OPEN_MIN, MOUTH_OPEN_FULL, currentMouthOpen)
-        when (heldMouth) {
-            AvatarGesture.SURPRISE -> { viseme = Viseme.WOW; visemeTarget = 1f }
-            AvatarGesture.SMILE -> { viseme = Viseme.SMILE; visemeTarget = 1f }
-            else -> Unit
+        val speechShape = speechFor(targetState.mouthShape)
+        val speechTarget = smoothstep(MOUTH_OPEN_MIN, MOUTH_OPEN_FULL, currentMouthOpen)
+        val held = when (heldExpression) {
+            AvatarGesture.SMILE -> Expression.SMILE
+            AvatarGesture.SURPRISE -> Expression.WOW
+            AvatarGesture.ANGER -> Expression.ANGER
+            else -> null
         }
-        val popTarget = if (heldMouth == AvatarGesture.SURPRISE) 1f else 0f
-        popWeight += (popTarget - popWeight) * VISEME_SMOOTHING
-        val popPulse = popWeight
+        for (e in Expression.entries) {
+            val i = e.ordinal
+            expressionWeights[i] += ((if (e == held) 1f else 0f) - expressionWeights[i]) * VISEME_SMOOTHING
+        }
+        // Speech stays visible over a held expression, just a little less
+        // dominant, so the expression is still readable while talking.
+        val speechScale = 1f - EXPRESSION_SPEECH_DAMPING * expressionWeights.max()
+        for (v in Speech.entries) {
+            val target = if (v == speechShape) speechTarget * speechScale else 0f
+            speechWeights[v.ordinal] += (target - speechWeights[v.ordinal]) * VISEME_SMOOTHING
+        }
 
         // A triangular blink pulse is closed only at its very peak; this
         // widens the closed plateau so a blink reads as shut, not as a
@@ -229,10 +251,9 @@ class AvatarView @JvmOverloads constructor(
         leftClosed += (min(1f, left * CLOSED_PLATEAU) - leftClosed) * EYE_SMOOTHING
         rightClosed += (min(1f, right * CLOSED_PLATEAU) - rightClosed) * EYE_SMOOTHING
 
-        for (v in Viseme.entries) {
-            val target = if (v == viseme) visemeTarget else 0f
-            visemeWeights[v.ordinal] += (target - visemeWeights[v.ordinal]) * VISEME_SMOOTHING
-        }
+        val wow = expressionWeights[Expression.WOW.ordinal]
+        val anger = expressionWeights[Expression.ANGER.ordinal]
+        val popPulse = wow
 
         // Idle micro-motion, incommensurate periods so it never visibly loops.
         // Bounded well inside the ±1–3% translation, ±2° rotation, 0.98–1.02
@@ -241,8 +262,8 @@ class AvatarView @JvmOverloads constructor(
         val speech = currentMouthOpen.coerceIn(0f, 1f)
         headRotationDeg = (0.9 * sin(2 * PI * t / 6.3) + 0.5 * sin(2 * PI * t / 3.1 + 1.0)).toFloat()
         headShiftX = (0.012 * sin(2 * PI * t / 7.1 + 0.7)).toFloat()
-        headShiftY = (0.014 * sin(2 * PI * t / 5.3) + 0.006 * speech - 0.012 * popPulse).toFloat()
-        headScale = (1.0 + 0.008 * sin(2 * PI * t / 8.9) + 0.006 * speech + 0.02 * popPulse).toFloat()
+        headShiftY = (0.014 * sin(2 * PI * t / 5.3) + 0.006 * speech - 0.012 * popPulse + 0.008 * anger).toFloat()
+        headScale = (1.0 + 0.008 * sin(2 * PI * t / 8.9) + 0.006 * speech + 0.02 * popPulse + 0.01 * anger).toFloat()
         invalidate()
     }
 
@@ -257,15 +278,27 @@ class AvatarView @JvmOverloads constructor(
         drawMatrix.postScale(headScale, headScale, pivot[0], pivot[1])
         drawMatrix.postTranslate(headShiftX * drawnSizePx, headShiftY * drawnSizePx)
 
+        val anger = expressionWeights[Expression.ANGER.ordinal]
         drawLayer(canvas, l.head, 1f)
         drawLayer(canvas, l.leftOpen, 1f)
         drawLayer(canvas, l.rightOpen, 1f)
+        if (anger > MIN_LAYER_ALPHA) {
+            drawLayer(canvas, l.leftAngry, anger)
+            drawLayer(canvas, l.rightAngry, anger)
+        }
+        // Closed eyes over open/angry ones, then brows over everything on the
+        // eyes: a blink or wink under anger keeps the lowered brows.
         if (leftClosed > 0f) drawLayer(canvas, l.leftClosed, leftClosed)
         if (rightClosed > 0f) drawLayer(canvas, l.rightClosed, rightClosed)
+        if (anger > MIN_LAYER_ALPHA) drawLayer(canvas, l.browsAngry, anger)
         drawLayer(canvas, l.mouthNeutral, 1f)
-        for (v in Viseme.entries) {
-            val w = visemeWeights[v.ordinal]
-            if (w > MIN_LAYER_ALPHA) drawLayer(canvas, l.mouths.getValue(v), w)
+        for (e in Expression.entries) {
+            val w = expressionWeights[e.ordinal]
+            if (w > MIN_LAYER_ALPHA) drawLayer(canvas, l.expression.getValue(e), w)
+        }
+        for (v in Speech.entries) {
+            val w = speechWeights[v.ordinal]
+            if (w > MIN_LAYER_ALPHA) drawLayer(canvas, l.speech.getValue(v), w)
         }
     }
 
@@ -274,15 +307,15 @@ class AvatarView @JvmOverloads constructor(
         canvas.drawBitmap(bitmap, drawMatrix, paint)
     }
 
-    // Existing MouthShape buckets -> the six mouth PNGs. CLOSED (bilabials,
-    // punctuation) is just the neutral mouth. The two-way splits (ROUND ->
-    // o/u, WIDE -> e/i) use loudness: a louder syllable opens wider.
-    private fun visemeFor(shape: MouthShape, open: Float): Viseme? = when (shape) {
+    // Existing MouthShape buckets -> the three non-neutral speech layers.
+    // CLOSED (bilabials, punctuation) is just the neutral mouth underneath.
+    // The lips of this face sit behind a moustache, so the fine distinctions
+    // (teeth, sibilant, narrow, and e vs i) are not visible and share "wide".
+    private fun speechFor(shape: MouthShape): Speech? = when (shape) {
         MouthShape.CLOSED -> null
-        MouthShape.OPEN -> Viseme.A
-        MouthShape.ROUND -> if (open >= WIDE_OPEN_THRESHOLD) Viseme.O else Viseme.U
-        MouthShape.WIDE -> if (open >= WIDE_OPEN_THRESHOLD) Viseme.E else Viseme.I
-        MouthShape.TEETH, MouthShape.SIBILANT, MouthShape.NARROW -> Viseme.I
+        MouthShape.OPEN -> Speech.OPEN
+        MouthShape.ROUND -> Speech.ROUND
+        MouthShape.WIDE, MouthShape.TEETH, MouthShape.SIBILANT, MouthShape.NARROW -> Speech.WIDE
     }
 
     // A triangular pulse (0 -> 1 -> 0), not a step — an instant open/closed
@@ -316,7 +349,7 @@ class AvatarView @JvmOverloads constructor(
 
         const val MOUTH_OPEN_MIN = 0.04f
         const val MOUTH_OPEN_FULL = 0.35f
-        const val WIDE_OPEN_THRESHOLD = 0.4f
+        const val EXPRESSION_SPEECH_DAMPING = 0.4f
     }
 }
 
@@ -330,9 +363,10 @@ enum class AvatarGesture(val group: Group) {
     BLINK(Group.EYES),
     WINK_LEFT(Group.EYES),
     WINK_RIGHT(Group.EYES),
-    SURPRISE(Group.MOUTH),
-    SMILE(Group.MOUTH),
+    SURPRISE(Group.EXPRESSION),
+    SMILE(Group.EXPRESSION),
+    ANGER(Group.EXPRESSION),
     ;
 
-    enum class Group { EYES, MOUTH }
+    enum class Group { EYES, EXPRESSION }
 }

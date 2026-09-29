@@ -51,6 +51,7 @@ class AvatarTestActivity : AppCompatActivity() {
             AvatarGesture.SURPRISE to binding.avatarTestSurpriseButton,
             AvatarGesture.BLINK to binding.avatarTestBlinkButton,
             AvatarGesture.SMILE to binding.avatarTestSmileButton,
+            AvatarGesture.ANGER to binding.avatarTestAngerButton,
         )
         gestureButtons.forEach { (gesture, button) ->
             button.isCheckable = true
