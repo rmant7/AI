@@ -40,7 +40,7 @@ class AvatarView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     private enum class Viseme(val asset: String) {
-        A("a"), E("e"), I("i"), O("o"), U("u"), SMILE("smile"),
+        A("a"), E("e"), I("i"), O("o"), U("u"), SMILE("smile"), WOW("wow"),
     }
 
     private class Layers(
@@ -216,7 +216,7 @@ class AvatarView @JvmOverloads constructor(
                     AvatarGesture.WINK_LEFT -> left = pulse
                     AvatarGesture.WINK_RIGHT -> right = pulse
                     AvatarGesture.SURPRISE -> {
-                        viseme = Viseme.O
+                        viseme = Viseme.WOW
                         visemeTarget = min(1f, pulse * 1.6f)
                         popPulse = pulse
                     }

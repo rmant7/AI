@@ -35,14 +35,17 @@ MOUTH_YS = 513.0
 MOUTH_H_UP = 14.0
 MOUTH_H_LOW = 28.0
 
-# name -> (half_width, jaw_drop, upper_lift, teeth_fraction, tongue, rounded)
+# name -> (half_width, jaw_drop, upper_lift, teeth_fraction, tongue, rounded, corner_lift)
+# corner_lift raises the mouth corners (px), which is what makes "smile" read as a smile.
 VISEMES = {
-    "a": (32.0, 15.0, 2.0, 0.42, True, False),
-    "e": (42.0, 8.0, 1.0, 0.70, False, False),
-    "i": (38.0, 6.0, 1.0, 0.80, False, False),
-    "o": (23.0, 13.0, 2.0, 0.0, False, True),
-    "u": (17.0, 9.0, 1.0, 0.0, False, True),
-    "smile": (46.0, 5.0, 1.0, 0.85, False, False),
+    "a": (32.0, 15.0, 2.0, 0.42, True, False, 0.0),
+    "e": (42.0, 8.0, 1.0, 0.70, False, False, 0.0),
+    "i": (38.0, 6.0, 1.0, 0.80, False, False, 0.0),
+    "o": (27.0, 16.0, 2.0, 0.0, False, True, 0.0),
+    "u": (17.0, 9.0, 1.0, 0.0, False, True, 0.0),
+    "smile": (52.0, 10.0, 2.0, 0.62, False, False, 7.0),
+    # the "surprised" mouth: a big round opening, much larger than the speech "o"
+    "wow": (30.0, 30.0, 5.0, 0.0, True, True, 0.0),
 }
 
 
@@ -120,9 +123,28 @@ def lipless(rgb):
     return out
 
 
+def lift_corners(rgb, half, amount):
+    """Raises the outer parts of the mouth band (columns beyond ~35% of `half`), so the corners turn up."""
+    out = rgb.copy()
+    band = 26.0
+    y_mid = MOUTH_YS + 3.0
+    for x in range(int(MOUTH_XC - half * 1.5), int(MOUTH_XC + half * 1.5) + 1):
+        t = abs(x - MOUTH_XC) / half
+        s = amount * float(smoothstep((t - 0.35) / 0.65)) * float(smoothstep((1.6 - t) / 0.6))
+        if s < 0.5:
+            continue
+        s = round(s)
+        for y in range(int(y_mid - band), int(y_mid + band) + 1):
+            decay = max(0.0, 1.0 - abs(y - y_mid) / band)
+            out[y, x] = rgb[min(len(rgb) - 1, y + round(s * decay)), x]
+    return out
+
+
 def mouth_variant(rgb, base, name):
-    half, drop, lift, teeth_frac, tongue, rounded = VISEMES[name]
+    half, drop, lift, teeth_frac, tongue, rounded, corner_lift = VISEMES[name]
     src = base if rounded else rgb
+    if corner_lift > 0.0:
+        src = lift_corners(src, half, corner_lift)
     h, w = rgb.shape[:2]
     out = src.copy()
     cav = np.zeros((h, w), np.float32)
