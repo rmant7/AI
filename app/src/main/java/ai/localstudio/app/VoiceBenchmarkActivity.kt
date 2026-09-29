@@ -311,7 +311,7 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
             vm.trimReference = checked
             QwenTtsRuntimeManager.referenceMaxSeconds = if (checked) 6.0 else null
         }
-        val choices = listOf<Int?>(null, 1, 2, 4, 6, 8)
+        val choices = listOf<Int?>(null, 1, 2, 3, 4, 5, 6, 8)
         val labels = choices.map { n ->
             if (n == null) getString(R.string.voice_bench_qwen_threads_auto, QwenTtsRuntimeManager.defaultThreads())
             else getString(R.string.voice_bench_qwen_threads_n, n)
