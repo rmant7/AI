@@ -4,9 +4,6 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.os.Bundle
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import java.io.File
 import java.util.Locale
@@ -19,8 +16,9 @@ import java.util.concurrent.TimeUnit
  * Speaks text for [AvatarSpeechController] and reports what is being said,
  * as a plain [Event] stream via [onEvent].
  *
- * `android.speech.tts.TextToSpeech` is used only to *synthesize* (to a WAV
- * file per utterance); this class then plays that audio itself and follows
+ * A [SpeechSynthesizer] — the device's TextToSpeech or the local Qwen3-TTS
+ * cloned voice, chosen by [AvatarVoiceConfig] — is used only to *synthesize*
+ * (to a WAV file per utterance); this class then plays that audio itself and follows
  * the playback position, emitting [Event.Audio] (the samples about to be
  * heard) and [Event.Range] (the letter estimated to be spoken right now —
  * see [SpeechAlignment]). Relying on the engine's own `onRangeStart` /
@@ -33,7 +31,11 @@ import java.util.concurrent.TimeUnit
  * `TextToSpeech` instance for its one-shot "play this translation" button —
  * sharing one would mean either interrupting the other's queue.
  */
-class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
+class AvatarTtsEngine(
+    context: Context,
+    config: AvatarVoiceConfig = AvatarVoiceConfig(),
+    private val onEvent: (Event) -> Unit,
+) {
 
     sealed interface Event {
         data class Started(val utteranceId: String) : Event
@@ -50,8 +52,11 @@ class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
 
     private val cacheDir = context.applicationContext.cacheDir
 
-    @Volatile
-    private var ready = false
+    // Which voice makes the WAV; everything below is the same for all of them.
+    private val synthesizer: SpeechSynthesizer = when (config.backend) {
+        AvatarVoiceBackend.ANDROID -> AndroidTtsSynthesizer(context).also { it.setPreferredVoiceName(config.preferredVoiceName) }
+        AvatarVoiceBackend.QWEN -> QwenTtsSynthesizer(context, config.qwenReferenceText)
+    }
 
     // Callbacks report only the utteranceId, not the text — this is what lets
     // Range events resolve back to "which text was that a range of" without
@@ -69,88 +74,56 @@ class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
     @Volatile
     private var track: AudioTrack? = null
 
-    private val tts: TextToSpeech = TextToSpeech(context) { status -> ready = status == TextToSpeech.SUCCESS }.also { engine ->
-        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String) = Unit
-
-            override fun onDone(utteranceId: String) {
-                val text = utteranceText[utteranceId]
-                val file = utteranceFile[utteranceId]
-                if (text == null || file == null || !file.exists()) {
-                    discard(utteranceId)
-                    return
-                }
-                queue.put(Job(utteranceId, text, file, generation))
-                startWorker()
-            }
-
-            // The single-arg overload is the abstract one every
-            // UtteranceProgressListener must implement; the platform always
-            // calls the two-arg overload below when it has an error code
-            // (every real TTS engine), so this one is effectively unused —
-            // still required to compile.
-            override fun onError(utteranceId: String) = Unit
-
-            override fun onError(utteranceId: String, errorCode: Int) {
-                discard(utteranceId)
-                onEvent(Event.Failed(utteranceId))
-            }
-        })
-    }
-
-    val isReady: Boolean get() = ready
-
-    // Set only from AvatarTestActivity's voice picker — every other caller
-    // (the real chat pipeline, via AvatarSpeechController) leaves this null
-    // and gets the remembered voice or preferMaleVoice()'s own automatic pick.
-    @Volatile
-    private var manualVoice: Voice? = null
-
-    // A remembered voice, by name: resolved when speaking, since the engine's
-    // voice list is empty until it has finished its own async init.
-    @Volatile
-    private var preferredVoiceName: String? = null
+    val isReady: Boolean get() = synthesizer.isReady
 
     /** The text actually behind an in-flight utterance's [Event.Range]/[Event.Audio] — null once it's [Event.Done]/[Event.Failed]. */
     fun textFor(utteranceId: String): String? = utteranceText[utteranceId]
 
-    /** Every voice this device's TTS engine(s) currently expose — empty until [isReady]. */
-    fun availableVoices(): List<Voice> = tts.voices?.toList().orEmpty()
+    /** Every Android TTS voice this device exposes — empty until [isReady], and always empty for the cloned voice. */
+    fun availableVoices(): List<Voice> = (synthesizer as? AndroidTtsSynthesizer)?.availableVoices().orEmpty()
 
-    /** Overrides the automatic pick for every call after this one — null reverts to automatic. */
+    /** Android TTS only: overrides the automatic pick for every call after this one — null reverts to automatic. */
     fun setManualVoice(voice: Voice?) {
-        manualVoice = voice
+        (synthesizer as? AndroidTtsSynthesizer)?.setManualVoice(voice)
     }
 
     fun setPreferredVoiceName(name: String?) {
-        preferredVoiceName = name
+        (synthesizer as? AndroidTtsSynthesizer)?.setPreferredVoiceName(name)
     }
 
     /**
      * Queues [text] to be synthesized and then spoken after whatever is
      * already queued. Returns the utterance id [Event]s for this call will
-     * carry, or null if the engine isn't ready yet or no usable [locale] was
-     * found.
+     * carry, or null if the engine isn't ready yet. [locale] is unused: the
+     * voice decides the language.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun speak(text: String, locale: Locale?): String? {
-        if (!ready || text.isBlank()) return null
-        if (!applyVoice(locale)) return null
+        if (!isReady || text.isBlank()) return null
         val utteranceId = UUID.randomUUID().toString()
         val file = File(cacheDir, "avatar_tts_$utteranceId.wav")
         utteranceText[utteranceId] = text
         utteranceFile[utteranceId] = file
-        val result = tts.synthesizeToFile(text, Bundle(), file, utteranceId)
-        if (result != TextToSpeech.SUCCESS) {
-            discard(utteranceId)
-            return null
-        }
+        synthesizer.synthesize(text, file) { ok -> onSynthesized(utteranceId, ok) }
         return utteranceId
+    }
+
+    private fun onSynthesized(utteranceId: String, ok: Boolean) {
+        val text = utteranceText[utteranceId]
+        val file = utteranceFile[utteranceId]
+        if (!ok || text == null || file == null || !file.exists()) {
+            discard(utteranceId)
+            if (!ok) onEvent(Event.Failed(utteranceId))
+            return
+        }
+        queue.put(Job(utteranceId, text, file, generation))
+        startWorker()
     }
 
     /** Drops everything queued or playing — a new turn starting, or the user hitting Stop. */
     fun stop() {
         generation++
-        tts.stop()
+        synthesizer.stop()
         track?.let { runCatching { it.stop() } }
         utteranceText.clear()
         utteranceFile.values.forEach { it.delete() }
@@ -159,7 +132,7 @@ class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
 
     fun shutdown() {
         stop()
-        tts.shutdown()
+        synthesizer.shutdown()
     }
 
     private fun discard(utteranceId: String) {
@@ -301,52 +274,7 @@ class AvatarTtsEngine(context: Context, private val onEvent: (Event) -> Unit) {
         return null
     }
 
-    // Picks the voice for the next utterance: an explicit choice from the
-    // test screen, else the remembered one, else an automatic male-leaning
-    // pick. Returns false only if a requested [locale] has no voice at all.
-    private fun applyVoice(locale: Locale?): Boolean {
-        val manual = manualVoice
-        if (manual != null) {
-            tts.voice = manual
-            tts.setPitch(1.0f)
-            return true
-        }
-        val remembered = preferredVoiceName?.let { name -> tts.voices?.firstOrNull { it.name == name } }
-        if (remembered != null) {
-            tts.voice = remembered
-            tts.setPitch(1.0f)
-            return true
-        }
-        if (locale != null && tts.isLanguageAvailable(locale) < TextToSpeech.LANG_AVAILABLE) return false
-        if (locale != null) tts.language = locale
-        preferMaleVoice()
-        return true
-    }
-
-    // The avatar depicts a specific (male) person, so this engine's voice
-    // should match — TextToSpeech has no gender field on Voice, so this is
-    // two best-effort layers rather than one reliable API: (1) some engines
-    // do put "male"/"female" in a voice's own name (careful: "female"
-    // contains "male" as a substring, so the exclusion below isn't
-    // optional), picked per call since setting `language` above resets the
-    // engine back to that language's default voice; (2) a lower pitch,
-    // which works on every engine/voice regardless of (1) ever matching, as
-    // the actual fallback that makes this reliable rather than a guess.
-    private fun preferMaleVoice() {
-        val activeLocale = tts.voice?.locale ?: tts.language
-        val maleVoice = activeLocale?.let { locale ->
-            tts.voices?.firstOrNull { voice ->
-                voice.locale.language == locale.language &&
-                    voice.name.contains("male", ignoreCase = true) &&
-                    !voice.name.contains("female", ignoreCase = true)
-            }
-        }
-        if (maleVoice != null) tts.voice = maleVoice
-        tts.setPitch(MALE_PITCH)
-    }
-
     private companion object {
-        const val MALE_PITCH = 0.85f
         const val ENVELOPE_HZ = 50
         const val TICK_MS = 16L
         const val IDLE_EXIT_SECONDS = 20L

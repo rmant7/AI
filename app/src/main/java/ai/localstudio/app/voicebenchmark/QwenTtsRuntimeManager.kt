@@ -48,6 +48,7 @@ object QwenTtsRuntimeManager {
 
     private val lock = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile
     private var handle = 0L
     private var preparedKey: String? = null
     private var promptFile: File? = null
@@ -119,6 +120,15 @@ object QwenTtsRuntimeManager {
             preparedKey = null
             runNative(null) { Qwen3TtsNative.destroy(h) }
         }
+    }
+
+    /**
+     * Asks a generation in progress to stop between audio chunks. Safe from any
+     * thread; does nothing if no model is loaded. The model stays loaded.
+     */
+    fun requestCancel() {
+        val h = handle
+        if (h != 0L) Qwen3TtsNative.cancel(h)
     }
 
     /** For callers with no coroutine of their own (an Activity being destroyed). */

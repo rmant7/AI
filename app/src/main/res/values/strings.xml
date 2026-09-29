@@ -566,4 +566,11 @@ RTF: %3$.2f</string>
     <string name="voice_bench_result_prep_reused">Voice preparation: reused from an earlier run</string>
     <string name="voice_bench_result_first">First audio: %1$.1f s</string>
     <string name="voice_bench_result_memory">Memory: %1$d → %2$d MB (%3$d MB free before)</string>
+
+    <string name="avatar_test_qwen">Cloned voice (Qwen3-TTS, on this device)</string>
+    <string name="avatar_qwen_problem_native">The Qwen3-TTS native library could not be loaded on this device.</string>
+    <string name="avatar_qwen_problem_cpu">This CPU lacks the dotprod/fp16 instructions the Qwen3-TTS build needs.</string>
+    <string name="avatar_qwen_problem_model">Download the Qwen3-TTS model first (More → Voice benchmark).</string>
+    <string name="avatar_qwen_problem_reference">Record a reference voice first (More → Voice benchmark).</string>
+    <string name="avatar_qwen_problem_transcript">Type the reference transcript first (More → Voice benchmark).</string>
 </resources>

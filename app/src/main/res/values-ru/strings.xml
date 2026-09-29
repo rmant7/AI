@@ -553,4 +553,11 @@ RTF: %3$.2f</string>
     <string name="voice_bench_result_prep_reused">Подготовка голоса: взята из предыдущего запуска</string>
     <string name="voice_bench_result_first">Первое аудио: %1$.1f с</string>
     <string name="voice_bench_result_memory">Память: %1$d → %2$d МБ (свободно до загрузки: %3$d МБ)</string>
+
+    <string name="avatar_test_qwen">Клонированный голос (Qwen3-TTS, на этом устройстве)</string>
+    <string name="avatar_qwen_problem_native">Нативную библиотеку Qwen3-TTS не удалось загрузить на этом устройстве.</string>
+    <string name="avatar_qwen_problem_cpu">У этого процессора нет инструкций dotprod/fp16, нужных сборке Qwen3-TTS.</string>
+    <string name="avatar_qwen_problem_model">Сначала скачай модель Qwen3-TTS (Ещё → Голосовой бенчмарк).</string>
+    <string name="avatar_qwen_problem_reference">Сначала запиши образец голоса (Ещё → Голосовой бенчмарк).</string>
+    <string name="avatar_qwen_problem_transcript">Сначала введи транскрипт образца (Ещё → Голосовой бенчмарк).</string>
 </resources>

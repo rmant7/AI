@@ -2,12 +2,15 @@ package ai.localstudio.app
 
 import ai.localstudio.app.avatar.AvatarGesture
 import ai.localstudio.app.avatar.AvatarSpeechController
+import ai.localstudio.app.avatar.AvatarVoiceAvailability
+import ai.localstudio.app.avatar.AvatarVoiceBackend
 import ai.localstudio.app.databinding.ActivityAvatarTestBinding
 import android.os.Bundle
 import android.speech.tts.Voice
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.Toast
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +29,7 @@ class AvatarTestActivity : AppCompatActivity() {
     private lateinit var binding: ActivityAvatarTestBinding
     private lateinit var controller: AvatarSpeechController
     private lateinit var settings: Settings
+    private var suppressBackendChange = false
 
     // Index-aligned with the spinner's own items; index 0 is always the
     // null "Auto" entry, everything after is a real device voice — see
@@ -41,7 +45,20 @@ class AvatarTestActivity : AppCompatActivity() {
         title = getString(R.string.menu_avatar_test)
 
         settings = AppContainer.get(this).settings
-        controller = AvatarSpeechController(this, binding.avatarView, settings.avatarVoiceName)
+        binding.avatarTestQwenCheck.setOnCheckedChangeListener { button, checked ->
+            if (suppressBackendChange) return@setOnCheckedChangeListener
+            val problem = if (checked) AvatarVoiceAvailability.qwenProblem(this, settings.voiceReferenceText) else null
+            if (problem != null) {
+                Toast.makeText(this, problem, Toast.LENGTH_LONG).show()
+                suppressBackendChange = true
+                button.isChecked = false
+                suppressBackendChange = false
+                return@setOnCheckedChangeListener
+            }
+            settings.avatarVoiceBackend = if (checked) AvatarVoiceBackend.QWEN.key else AvatarVoiceBackend.ANDROID.key
+            buildController()
+        }
+        buildController()
 
         binding.avatarTestPlayButton.setOnClickListener { play() }
         binding.avatarTestStopButton.setOnClickListener { controller.onInterrupted() }
@@ -63,8 +80,20 @@ class AvatarTestActivity : AppCompatActivity() {
                 gestureButtons.forEach { (g, b) -> b.isChecked = binding.avatarView.isHeld(g) }
             }
         }
+    }
 
-        populateVoicesWhenReady()
+    // The controller (and so the voice) is rebuilt whenever the voice source changes.
+    private fun buildController() {
+        if (::controller.isInitialized) controller.shutdown()
+        val config = AvatarVoiceAvailability.config(this, settings)
+        controller = AvatarSpeechController(this, binding.avatarView, config)
+        // Show what is really in use: a selected-but-unusable cloned voice falls back to Android TTS.
+        suppressBackendChange = true
+        binding.avatarTestQwenCheck.isChecked = config.backend == AvatarVoiceBackend.QWEN
+        suppressBackendChange = false
+        // The voice list is Android TTS's; the cloned voice has just the one.
+        binding.avatarTestVoiceSpinner.isEnabled = config.backend == AvatarVoiceBackend.ANDROID
+        if (config.backend == AvatarVoiceBackend.ANDROID) populateVoicesWhenReady()
     }
 
     override fun onDestroy() {

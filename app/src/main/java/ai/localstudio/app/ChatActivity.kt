@@ -81,6 +81,7 @@ class ChatActivity : AppCompatActivity() {
     // multiple simultaneous sources (see AvatarSpeechController's own doc
     // comment).
     private var avatarController: AvatarSpeechController? = null
+    private var avatarVoiceKey: String? = null
 
     // Staged for exactly one turn, then cleared — an attached image is a
     // question about *this* photo, not something to keep resending on every
@@ -203,12 +204,22 @@ class ChatActivity : AppCompatActivity() {
     // missing until the whole activity was killed and relaunched.
     private fun syncAvatarEnabled() {
         val enabled = container.settings.avatarEnabled
-        if (enabled && avatarController == null) {
+        // Rebuilt when the chosen voice (Android TTS / cloned Qwen voice)
+        // changed on another screen, not just when the avatar is toggled.
+        val voice = if (enabled) ai.localstudio.app.avatar.AvatarVoiceAvailability.config(this, container.settings) else null
+        val voiceKey = voice?.let { "${it.backend.key}:${it.preferredVoiceName}:${it.qwenReferenceText.hashCode()}" }
+        if (avatarController != null && voiceKey != avatarVoiceKey) {
+            avatarController?.shutdown()
+            avatarController = null
+        }
+        if (enabled && avatarController == null && voice != null) {
             binding.avatarView.visibility = android.view.View.VISIBLE
-            avatarController = AvatarSpeechController(this, binding.avatarView, container.settings.avatarVoiceName)
+            avatarController = AvatarSpeechController(this, binding.avatarView, voice)
+            avatarVoiceKey = voiceKey
         } else if (!enabled && avatarController != null) {
             avatarController?.shutdown()
             avatarController = null
+            avatarVoiceKey = null
             binding.avatarView.visibility = android.view.View.GONE
         }
     }

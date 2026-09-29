@@ -107,6 +107,17 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
             ),
         )
 
+        // The transcript is what the avatar's cloned voice is made from too, so keep it.
+        val settings = AppContainer.get(this).settings
+        binding.voiceBenchTranscript.setText(settings.voiceReferenceText)
+        binding.voiceBenchTranscript.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                settings.voiceReferenceText = s?.toString().orEmpty().trim()
+            }
+        })
+
         setupReference()
         setupTest()
         setupEngines()

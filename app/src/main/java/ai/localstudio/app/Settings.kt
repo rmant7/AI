@@ -315,6 +315,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_AVATAR_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_AVATAR_ENABLED, value).apply()
 
+    /** Which voice the avatar speaks with: "android" (default) or "qwen" (cloned voice). See AvatarVoiceBackend. */
+    var avatarVoiceBackend: String
+        get() = prefs.getString(KEY_AVATAR_BACKEND, "android") ?: "android"
+        set(value) = prefs.edit().putString(KEY_AVATAR_BACKEND, value).apply()
+
+    /** Transcript of the reference recording (Voice Benchmark) the cloned voice is made from. */
+    var voiceReferenceText: String
+        get() = prefs.getString(KEY_VOICE_REFERENCE_TEXT, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_VOICE_REFERENCE_TEXT, value).apply()
+
     /** Name of the TTS voice picked for the avatar; null = automatic. */
     var avatarVoiceName: String?
         get() = prefs.getString(KEY_AVATAR_VOICE, null)
@@ -416,6 +426,8 @@ class Settings(context: Context) {
         const val KEY_COMPARE_MODE = "compareMode"
         const val KEY_AVATAR_ENABLED = "avatarEnabled"
         const val KEY_AVATAR_VOICE = "avatarVoiceName"
+        const val KEY_AVATAR_BACKEND = "avatarVoiceBackend"
+        const val KEY_VOICE_REFERENCE_TEXT = "voiceReferenceText"
         const val KEY_RAM_PERCENT = "ramBudgetPercent"
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_DOWNLOAD_POLICY = "downloadPolicy"

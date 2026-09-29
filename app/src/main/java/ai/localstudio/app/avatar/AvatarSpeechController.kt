@@ -24,10 +24,10 @@ import android.speech.tts.Voice
  * is exactly the kind of thing [ai.localstudio.app.models.TtsVoiceFallback]
  * exists for, once this needs it.
  */
-class AvatarSpeechController(context: Context, private val view: AvatarView, preferredVoiceName: String? = null) {
+class AvatarSpeechController(context: Context, private val view: AvatarView, voice: AvatarVoiceConfig = AvatarVoiceConfig()) {
 
     private val chunker = SentenceChunker()
-    private val engine = AvatarTtsEngine(context, onEvent = ::handleEvent).also { it.setPreferredVoiceName(preferredVoiceName) }
+    private val engine = AvatarTtsEngine(context, voice, onEvent = ::handleEvent)
 
     // The shape the most recent Range event named, kept across Audio events
     // for the same utterance — onAudioAvailable's own chunks carry no text

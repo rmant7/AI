@@ -21,7 +21,7 @@ import kotlin.math.sqrt
  */
 class ReferenceVoiceRecorder(context: Context) {
 
-    val file: File = File(File(context.applicationContext.filesDir, "voice_benchmark").also { it.mkdirs() }, "reference.wav")
+    val file: File = referenceFile(context)
 
     @Volatile
     private var recording = false
@@ -101,6 +101,10 @@ class ReferenceVoiceRecorder(context: Context) {
         ShortArray(count / 2) { ((input[it * 2] + input[it * 2 + 1]) / 2).toShort() }
 
     companion object {
+        /** The reference recording, also used by the avatar's cloned voice. */
+        fun referenceFile(context: Context): File =
+            File(File(context.applicationContext.filesDir, "voice_benchmark").also { it.mkdirs() }, "reference.wav")
+
         const val OUTPUT_RATE = 24_000
         const val MAX_MS = 30_000L
     }
