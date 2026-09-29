@@ -418,6 +418,9 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
 
     private fun render(ui: VoiceBenchmarkViewModel.Ui) {
         renderReference(ui.recording)
+        // A run takes minutes: a screen that turns off lets Android throttle or freeze the app.
+        if (ui.running) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.voiceBenchGenerateButton.isEnabled = !ui.running
         binding.voiceBenchCancelButton.isEnabled = ui.running
         binding.voiceBenchClearButton.isEnabled = !ui.running
