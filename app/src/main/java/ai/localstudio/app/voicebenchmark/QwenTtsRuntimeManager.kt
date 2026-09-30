@@ -126,6 +126,30 @@ object QwenTtsRuntimeManager {
      */
     const val DEFAULT_REFERENCE_SECONDS = 8.0
 
+    /**
+     * The model's thread count for THIS device, measured once (about a second) and remembered per build
+     * fingerprint. The Code Predictor is hundreds of tiny products per frame: a Snapdragon 865 runs them
+     * 2.5x faster on 4 threads, a Pixel 10 Pro 5x SLOWER on 2+ threads. Returns (threads or null, note).
+     */
+    private suspend fun tunedThreads(context: Context): Pair<Int?, String> {
+        val prefs = context.getSharedPreferences("qwen_tuning", Context.MODE_PRIVATE)
+        val fingerprint = android.os.Build.FINGERPRINT
+        if (prefs.getString("fingerprint", null) == fingerprint) {
+            val saved = prefs.getInt("threads", 0)
+            if (saved > 0) return saved to "Thread auto-tune: $saved (measured earlier on this device)\n"
+        }
+        if (!Qwen3TtsNative.isLoaded) return null to ""
+        val result = runCatching { runNative(null) { Qwen3TtsNative.tuneThreads() } }.getOrNull() ?: return null to ""
+        val threads = result.substringBefore('\n').trim().toIntOrNull()?.takeIf { it > 0 } ?: return null to ""
+        prefs.edit().putString("fingerprint", fingerprint).putInt("threads", threads).apply()
+        return threads to result.substringAfter('\n')
+    }
+
+    /** Forgets the measured thread count, so the next load measures again. */
+    fun forgetTunedThreads(context: Context) {
+        context.getSharedPreferences("qwen_tuning", Context.MODE_PRIVATE).edit().clear().apply()
+    }
+
     /** Free RAM needed before loading: ~0.9 GB of weights plus graph buffers and the vocoder. */
     private const val MIN_AVAILABLE_MB = 1400L
 
