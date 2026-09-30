@@ -77,7 +77,7 @@ target_compile_definitions(qwen3_tts_core PRIVATE QWEN3_TTS_EXPORT)
 target_compile_definitions(qwen3_tts_core PUBLIC QWEN3_TTS_TIMING)
 target_link_libraries(qwen3_tts_core PUBLIC ggml ggml-base ggml-cpu Threads::Threads)
 
-add_library(qwen3_tts_bridge SHARED qwen3_tts_bridge.cpp)
+add_library(qwen3_tts_bridge SHARED qwen3_tts_bridge.cpp ggml_matvec_bench.cpp)
 find_library(log-lib log)
 target_link_libraries(qwen3_tts_bridge PRIVATE qwen3_tts_core ${log-lib})
 target_link_options(qwen3_tts_bridge PRIVATE "-Wl,--exclude-libs,ALL")

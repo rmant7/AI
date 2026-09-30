@@ -420,6 +420,10 @@ class VoiceBenchmarkActivity : AppCompatActivity() {
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        binding.voiceBenchQwenMatvec.setOnClickListener {
+            stopPlayback()
+            vm.runMatvecBenchmark()
+        }
         binding.voiceBenchQwenProfile.setOnClickListener { runQwenProfile() }
     }
 

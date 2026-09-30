@@ -252,6 +252,17 @@ object QwenTtsRuntimeManager {
         }
     }
 
+    /** Runs the ggml matvec micro-benchmark (no model needed); serialised with synthesis so they never compete for the CPU. */
+    suspend fun benchmarkMatvec(): String = lock.withLock {
+        if (!Qwen3TtsNative.isLoaded) throw QwenTtsException("Native Qwen3-TTS library could not be loaded")
+        try {
+            runNative(null) { Qwen3TtsNative.benchmarkMatvec() }
+        } catch (e: CancellationException) {
+            Qwen3TtsNative.cancelBenchmark()
+            throw e
+        }
+    }
+
     /** Frees the model and voice prompt; safe to call at any time, including after a cancel. */
     suspend fun release() = lock.withLock {
         if (handle != 0L) {

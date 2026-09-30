@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "qwen3_tts_c.h"
+#include "ggml_matvec_bench.h"
 
 #define TAG "Qwen3TtsBridge"
 
@@ -367,6 +368,19 @@ JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_setStreaming(
 
 JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_setVocoderThreads(JNIEnv*, jobject, jint threads) {
     g_vocoder_threads.store(threads > 0 ? threads : 0);
+}
+
+// Not tied to a model handle: a self-contained ggml micro-benchmark. Flipped by cancelBenchmark().
+std::atomic<bool> g_bench_cancel{false};
+
+JNIEXPORT jstring JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_benchmarkMatvec(JNIEnv* env, jobject) {
+    g_bench_cancel.store(false);
+    const std::string report = run_matvec_benchmark([]() { return g_bench_cancel.load(); });
+    return env->NewStringUTF(report.c_str());
+}
+
+JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_cancelBenchmark(JNIEnv*, jobject) {
+    g_bench_cancel.store(true);
 }
 
 JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_cancel(JNIEnv*, jobject, jlong handle) {

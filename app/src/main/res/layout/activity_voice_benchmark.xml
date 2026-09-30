@@ -246,6 +246,13 @@
                 android:minHeight="48dp" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/voiceBenchQwenMatvec"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/voice_bench_qwen_matvec" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/voiceBenchQwenProfile"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"

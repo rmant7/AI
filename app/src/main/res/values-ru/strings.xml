@@ -594,4 +594,5 @@ RTF: %3$.2f</string>
     <string name="avatar_test_qwen_parallel">Эксперимент: два предложения одновременно (роняло приложение на Pixel, по умолчанию выключено)</string>
     <string name="avatar_test_status_preparing">Готовится речь… осталось предложений: %1$d</string>
     <string name="avatar_test_status_speaking">Говорит… осталось предложений: %1$d</string>
+    <string name="voice_bench_qwen_matvec">Тест ggml matvec (потоки 1-6, около 30 с)</string>
 </resources>

@@ -170,6 +170,15 @@ class VoiceBenchmarkViewModel private constructor(application: Application) : An
         }
     }
 
+    /** ggml matvec micro-benchmark: is the Code Predictor's arithmetic limited by compute or by thread sync? */
+    fun runMatvecBenchmark() = launchRun {
+        AppContainer.get(app).releaseLocalModels()
+        QwenTtsRuntimeManager.release()
+        _state.update { it.copy(profileReport = "ggml matvec benchmark … (about 30 s, keep the app open)") }
+        val report = QwenTtsRuntimeManager.benchmarkMatvec()
+        _state.update { it.copy(profileReport = report) }
+    }
+
     fun cancel() {
         job?.cancel()
     }

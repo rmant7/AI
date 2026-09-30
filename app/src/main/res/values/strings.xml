@@ -611,4 +611,5 @@ RTF: %3$.2f</string>
     <string name="avatar_test_qwen_parallel">Experimental: two sentences at once (crashed on a Pixel, off by default)</string>
     <string name="avatar_test_status_preparing">Preparing speech… sentences left: %1$d</string>
     <string name="avatar_test_status_speaking">Speaking… sentences left: %1$d</string>
+    <string name="voice_bench_qwen_matvec">ggml matvec test (threads: 1-6, about 30 s)</string>
 </resources>

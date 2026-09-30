@@ -46,6 +46,11 @@ object Qwen3TtsNative {
     /** Threads for the streaming vocoder (0 = same as the model); takes effect for a model loaded after this call. */
     external fun setVocoderThreads(threads: Int)
 
+    /** Diagnostics: ggml matvec/matmul micro-benchmark on 1..6 threads (blocks for about half a minute); returns the report. */
+    external fun benchmarkMatvec(): String
+
+    external fun cancelBenchmark()
+
     external fun cancel(handle: Long)
 
     /** Milliseconds from the start of the last [synthesize] to its first audio chunk, or -1. */
