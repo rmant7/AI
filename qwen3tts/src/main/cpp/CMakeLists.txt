@@ -43,6 +43,73 @@ if(NOT qwen3ttscpp_POPULATED)
 endif()
 set(QWEN3_TTS_ROOT "${qwen3ttscpp_SOURCE_DIR}")
 
+# One source patch to upstream (applied to the fetched copy at configure time, idempotent, and a hard
+# error if upstream no longer matches). ggml's CPU thread count is one process-wide setting on a shared
+# backend, so "N threads" applied to the talker, the Code Predictor and the vocoder alike. Measured on
+# a Pixel: the talker/Code Predictor are hundreds of tiny matrix-vector products per frame and get
+# SLOWER with more threads (each operation pays ~70 us of thread synchronisation: 1 thread 0.03 ms,
+# 4 threads 0.15 ms per 1024x1024 product), while the vocoder's big convolutions want many. This
+# switches the thread count around every vocoder decode (voice priming, each frame push, the final
+# flush) to the value given by qwen3_tts::phase_vocoder_threads() (defined in the bridge; 0 = no switch).
+set(_pipeline_src "${QWEN3_TTS_ROOT}/src/pipeline/pipeline_synthesize.cpp")
+file(READ "${_pipeline_src}" _src)
+string(FIND "${_src}" "VocoderThreadScope" _already)
+if(_already EQUAL -1)
+    set(_helper [=[
+// --- Android app patch: the streaming vocoder gets its own thread count -------------------------------
+int32_t phase_vocoder_threads();  // defined by the host app; 0 = same thread count as the rest
+namespace {
+struct VocoderThreadScope {
+    int32_t base_ = 0;
+    bool explicit_ = false;
+    bool active_ = false;
+    VocoderThreadScope() {
+        const int32_t vt = phase_vocoder_threads();
+        const int32_t cur = get_cpu_thread_count();
+        if (vt > 0 && vt != cur) {
+            base_ = cur;
+            explicit_ = cpu_thread_count_is_explicit();
+            set_cpu_thread_count(vt, explicit_);
+            active_ = true;
+        }
+    }
+    ~VocoderThreadScope() {
+        if (active_) set_cpu_thread_count(base_, explicit_);
+    }
+};
+}  // namespace
+// ---------------------------------------------------------------------------------------------------
+]=])
+    string(FIND "${_src}" "namespace qwen3_tts {\n" _ns_pos)
+    if(_ns_pos EQUAL -1)
+        message(FATAL_ERROR "qwen3-tts.cpp patch: 'namespace qwen3_tts {' not found in pipeline_synthesize.cpp")
+    endif()
+    math(EXPR _ns_end "${_ns_pos} + 22")
+    string(SUBSTRING "${_src}" 0 ${_ns_end} _head)
+    string(SUBSTRING "${_src}" ${_ns_end} -1 _tail)
+    set(_src "${_head}${_helper}${_tail}")
+
+    function(_q3_patch_replace from to)
+        string(FIND "${_src}" "${from}" _at)
+        if(_at EQUAL -1)
+            message(FATAL_ERROR "qwen3-tts.cpp patch: expected text not found: ${from}")
+        endif()
+        string(REPLACE "${from}" "${to}" _out "${_src}")
+        set(_src "${_out}" PARENT_SCOPE)
+    endfunction()
+    _q3_patch_replace(
+        "return stream.push_frame(frame_codes);"
+        "{ VocoderThreadScope vocoder_threads_scope; return stream.push_frame(frame_codes); }")
+    _q3_patch_replace(
+        "if (streaming && !stream.flush()) {"
+        "if (streaming && !([&]() { VocoderThreadScope vocoder_threads_scope; return stream.flush(); })()) {")
+    _q3_patch_replace(
+        "if (!stream.preload_context(reference_codes_ptr->codes.data(), reference_codes_ptr->n_frames)) {"
+        "if (!([&]() { VocoderThreadScope vocoder_threads_scope; return stream.preload_context(reference_codes_ptr->codes.data(), reference_codes_ptr->n_frames); })()) {")
+    file(WRITE "${_pipeline_src}" "${_src}")
+    message(STATUS "qwen3-tts.cpp: patched pipeline_synthesize.cpp (vocoder thread scope)")
+endif()
+
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

@@ -21,6 +21,15 @@
 
 #define TAG "Qwen3TtsBridge"
 
+// Read by the patched pipeline_synthesize.cpp (see CMakeLists.txt): threads for the vocoder decode only.
+namespace {
+std::atomic<int32_t> g_vocoder_threads_hook{0};
+}
+namespace qwen3_tts {
+int32_t phase_vocoder_threads() { return g_vocoder_threads_hook.load(); }
+}
+
+
 namespace {
 
 // Streaming parameters, set from Kotlin (diagnostics): audio chunk length and vocoder left context.
@@ -309,11 +318,8 @@ JNIEXPORT jint JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_synthesize(
     Stream stream{h, now_ms()};
     StderrCapture capture(h);
     capture.start();
-    const int32_t vocoder_threads = g_vocoder_threads.load();
-    if (vocoder_threads > 0) qwen3_tts_set_cpu_threads(vocoder_threads);
     qwen3_tts_result_t r = qwen3_tts_synthesize_with_icl_prompt_streaming(
         h->ctx, utterance.c_str(), prompt.c_str(), params, on_chunk, &stream);
-    if (vocoder_threads > 0) qwen3_tts_set_cpu_threads(h->threads);
     const int64_t native_ms = now_ms() - stream.started_ms;
     h->gen_end_ms.store(now_ms());
     std::string runtime_log = capture.finish();
@@ -368,6 +374,7 @@ JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_setStreaming(
 
 JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_setVocoderThreads(JNIEnv*, jobject, jint threads) {
     g_vocoder_threads.store(threads > 0 ? threads : 0);
+    g_vocoder_threads_hook.store(threads > 0 ? threads : 0);
 }
 
 // Not tied to a model handle: a self-contained ggml micro-benchmark. Flipped by cancelBenchmark().
