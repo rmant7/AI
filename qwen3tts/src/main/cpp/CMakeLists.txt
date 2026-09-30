@@ -53,8 +53,9 @@ set(QWEN3_TTS_ROOT "${qwen3ttscpp_SOURCE_DIR}")
 # flush) to the value given by qwen3_tts::phase_vocoder_threads() (defined in the bridge; 0 = no switch).
 set(_pipeline_src "${QWEN3_TTS_ROOT}/src/pipeline/pipeline_synthesize.cpp")
 file(READ "${_pipeline_src}" _src)
-string(FIND "${_src}" "VocoderThreadScope" _already)
-if(_already EQUAL -1)
+string(FIND "${_src}" "struct VocoderThreadScope" _helper_present)
+set(_patched_any FALSE)
+if(_helper_present EQUAL -1)
     set(_helper [=[
 // --- Android app patch: the streaming vocoder gets its own thread count -------------------------------
 int32_t phase_vocoder_threads();  // defined by the host app; 0 = same thread count as the rest
@@ -88,27 +89,42 @@ struct VocoderThreadScope {
     string(SUBSTRING "${_src}" 0 ${_ns_end} _head)
     string(SUBSTRING "${_src}" ${_ns_end} -1 _tail)
     set(_src "${_head}${_helper}${_tail}")
+    set(_patched_any TRUE)
+endif()
 
-    function(_q3_patch_replace from to)
-        string(FIND "${_src}" "${from}" _at)
-        if(_at EQUAL -1)
-            message(FATAL_ERROR "qwen3-tts.cpp patch: expected text not found: ${from}")
-        endif()
-        string(REPLACE "${from}" "${to}" _out "${_src}")
-        set(_src "${_out}" PARENT_SCOPE)
-    endfunction()
-    _q3_patch_replace(
-        "return stream.push_frame(frame_codes);"
-        "{ VocoderThreadScope vocoder_threads_scope; return stream.push_frame(frame_codes); }")
-    _q3_patch_replace(
-        "if (streaming && !stream.flush()) {"
-        "if (streaming && !([&]() { VocoderThreadScope vocoder_threads_scope; return stream.flush(); })()) {")
-    _q3_patch_replace(
-        "if (!stream.preload_context(reference_codes_ptr->codes.data(), reference_codes_ptr->n_frames)) {"
-        "if (!([&]() { VocoderThreadScope vocoder_threads_scope; return stream.preload_context(reference_codes_ptr->codes.data(), reference_codes_ptr->n_frames); })()) {")
+# Each replacement is applied once: skipped if already in place, a hard error if upstream changed.
+function(_q3_patch_replace from to)
+    string(FIND "${_src}" "${to}" _done)
+    if(NOT _done EQUAL -1)
+        return()
+    endif()
+    string(FIND "${_src}" "${from}" _at)
+    if(_at EQUAL -1)
+        message(FATAL_ERROR "qwen3-tts.cpp patch: expected text not found: ${from}")
+    endif()
+    string(REPLACE "${from}" "${to}" _out "${_src}")
+    set(_src "${_out}" PARENT_SCOPE)
+    set(_patched_any TRUE PARENT_SCOPE)
+endfunction()
+# The streaming vocoder is a DEDICATED backend (load_model_dedicated -> init_cpu_backend) that takes the
+# thread count at the moment it is created and keeps it: create it under the vocoder's count.
+_q3_patch_replace(
+    "if (!self.streaming_audio_decoder_.load_model_dedicated(self.decoder_model_path_)) {"
+    "if (!([&]() { VocoderThreadScope vocoder_threads_scope; return self.streaming_audio_decoder_.load_model_dedicated(self.decoder_model_path_); })()) {")
+_q3_patch_replace(
+    "return stream.push_frame(frame_codes);"
+    "{ VocoderThreadScope vocoder_threads_scope; return stream.push_frame(frame_codes); }")
+_q3_patch_replace(
+    "if (streaming && !stream.flush()) {"
+    "if (streaming && !([&]() { VocoderThreadScope vocoder_threads_scope; return stream.flush(); })()) {")
+_q3_patch_replace(
+    "if (!stream.preload_context(reference_codes_ptr->codes.data(), reference_codes_ptr->n_frames)) {"
+    "if (!([&]() { VocoderThreadScope vocoder_threads_scope; return stream.preload_context(reference_codes_ptr->codes.data(), reference_codes_ptr->n_frames); })()) {")
+if(_patched_any)
     file(WRITE "${_pipeline_src}" "${_src}")
     message(STATUS "qwen3-tts.cpp: patched pipeline_synthesize.cpp (vocoder thread scope)")
 endif()
+
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
