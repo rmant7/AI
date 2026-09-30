@@ -567,7 +567,7 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_trim">Использовать только первые 8 с записи образца</string>
     <string name="voice_bench_qwen_threads_auto">Потоки: авто (%1$d)</string>
     <string name="voice_bench_qwen_threads_n">Потоки: %1$d</string>
-    <string name="voice_bench_qwen_profile">Профиль скорости: 2 запуска (холодный, затем тот же голос и новый текст)</string>
+    <string name="voice_bench_qwen_profile">Профиль скорости: 4 запуска (1 холодный, затем 3 тёплых с тем же голосом)</string>
     <string name="voice_bench_profile_run_cold">Запуск %1$d — холодный: загрузка модели + подготовка голоса</string>
     <string name="voice_bench_profile_run_warm">Запуск %1$d — тот же голос, новый текст</string>
     <string name="voice_bench_qwen_profile_need_reference">Сначала запиши образец и введи его транскрипт.</string>

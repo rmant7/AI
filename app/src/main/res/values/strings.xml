@@ -580,7 +580,7 @@ RTF: %3$.2f</string>
     <string name="voice_bench_qwen_trim">Use only the first 8 s of the reference recording</string>
     <string name="voice_bench_qwen_threads_auto">Threads: auto (%1$d)</string>
     <string name="voice_bench_qwen_threads_n">Threads: %1$d</string>
-    <string name="voice_bench_qwen_profile">Speed profile: 2 runs (cold, then same voice + new text)</string>
+    <string name="voice_bench_qwen_profile">Speed profile: 4 runs (1 cold, then 3 warm with the same voice)</string>
     <string name="voice_bench_profile_run_cold">Run %1$d — cold: model load + voice preparation</string>
     <string name="voice_bench_profile_run_warm">Run %1$d — same voice, new text</string>
     <string name="voice_bench_qwen_profile_need_reference">Record a reference and type its transcript first.</string>
