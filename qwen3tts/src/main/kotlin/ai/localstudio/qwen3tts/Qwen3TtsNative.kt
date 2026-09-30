@@ -49,6 +49,9 @@ object Qwen3TtsNative {
     /** Diagnostics: ggml matvec/matmul micro-benchmark on 1..6 threads (blocks for about half a minute); returns the report. */
     external fun benchmarkMatvec(): String
 
+    /** "<threads>\n<report>": a ~1 s test that picks the model thread count for this device (1..4). */
+    external fun tuneThreads(): String
+
     external fun cancelBenchmark()
 
     external fun cancel(handle: Long)

@@ -386,6 +386,14 @@ JNIEXPORT jstring JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_benchmarkM
     return env->NewStringUTF(report.c_str());
 }
 
+// "<threads>\n<report>": the model thread count that suits this device.
+JNIEXPORT jstring JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_tuneThreads(JNIEnv* env, jobject) {
+    int chosen = 0;
+    const std::string report = tune_threads(&chosen);
+    const std::string result = std::to_string(chosen) + "\n" + report;
+    return env->NewStringUTF(result.c_str());
+}
+
 JNIEXPORT void JNICALL Java_ai_localstudio_qwen3tts_Qwen3TtsNative_cancelBenchmark(JNIEnv*, jobject) {
     g_bench_cancel.store(true);
 }

@@ -131,7 +131,12 @@ object QwenTtsRuntimeManager {
 
     suspend fun ensureLoaded(context: Context, provider: QwenTtsModelProvider, threadsHint: Int? = null, vocoderHint: Int? = null): LoadInfo = lock.withLock {
         val app = context.applicationContext
-        val wantedThreads = threadsOverride ?: threadsHint ?: defaultThreads()
+        var tuneNote = ""
+        val wantedThreads = threadsOverride ?: threadsHint ?: run {
+            val (tuned, note) = tunedThreads(app)
+            tuneNote = note
+            tuned ?: defaultThreads()
+        }
         // A different thread count needs a fresh context.
         val wantedVocoder = vocoderThreadsOverride ?: vocoderHint ?: defaultVocoderThreads()
         val wantedVariant = talkerVariant
@@ -168,7 +173,7 @@ object QwenTtsRuntimeManager {
         loadedThreads = wantedThreads
         loadedVocoderThreads = wantedVocoder
         loadedVariant = wantedVariant
-        LoadInfo(SystemClock.elapsedRealtime() - started, false, avail, pssBefore, pssMb(), wantedThreads, log)
+        LoadInfo(SystemClock.elapsedRealtime() - started, false, avail, pssBefore, pssMb(), wantedThreads, tuneNote + log)
     }
 
     /**

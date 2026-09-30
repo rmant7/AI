@@ -159,3 +159,40 @@ std::string run_matvec_benchmark(bool (*cancelled)()) {
     ggml_backend_free(be);
     return out;
 }
+
+// Quick per-device choice of the model's thread count (talker + Code Predictor): the same kind of
+// products as the Code Predictor's, on 1..4 threads, about a second in total. On some phones (Pixel 10
+// Pro) every extra thread makes those tiny products slower, on others (Snapdragon 865) 4 threads are
+// 2.5x faster, so this cannot be a constant. More threads are only chosen if at least 10% faster.
+std::string tune_threads(int * chosen) {
+    *chosen = 0;
+    ggml_backend_t be = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+    if (!be) return "no CPU backend\n";
+
+    struct Shape { int k; int n; int ops; };
+    const Shape shapes[] = {{1024, 1024, 24}, {1024, 2048, 24}, {3072, 1024, 24}};
+    const std::vector<int> threads = {1, 2, 3, 4};
+    std::vector<double> total(threads.size(), 0.0);
+    for (const Shape & sh : shapes) {
+        Measurement m = measure(be, GGML_TYPE_Q4_K, sh.k, sh.n, 1, sh.ops, threads, 60.0);
+        for (size_t i = 0; i < threads.size(); ++i) {
+            total[i] = (total[i] < 0 || m.ms[i] < 0) ? -1.0 : total[i] + m.ms[i];
+        }
+    }
+    ggml_backend_free(be);
+
+    size_t best = 0;
+    for (size_t i = 1; i < threads.size(); ++i) {
+        if (total[i] > 0 && total[best] > 0 && total[i] < total[best] * 0.9) best = i;
+    }
+    *chosen = threads[best];
+    std::string out = "Thread auto-tune (Code Predictor-like products, ms per 3 products):";
+    char line[96];
+    for (size_t i = 0; i < threads.size(); ++i) {
+        snprintf(line, sizeof(line), "  %dt=%.3f", threads[i], total[i]);
+        out += line;
+    }
+    snprintf(line, sizeof(line), "  -> %d\n", *chosen);
+    out += line;
+    return out;
+}
