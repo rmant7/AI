@@ -152,12 +152,20 @@ class VoiceBenchmarkViewModel private constructor(application: Application) : An
             val frames = num("emitted=(\\d+)", d)?.takeIf { it > 0 } ?: return@mapNotNull null
             (code - decode) / 1000.0 / frames
         }
+        // From upstream's detailed profile (QWEN3_TTS_TIMING): the first "Total: … (x ms/frame)" line after each heading.
+        fun perFrameAfter(heading: String, text: String) =
+            Regex(Regex.escape(heading) + ".*?Total:[^(]*\\((\\d+(?:\\.\\d+)?) ms/frame\\)", RegexOption.DOT_MATCHES_ALL)
+                .find(text)?.groupValues?.get(1)?.toDoubleOrNull()
+        val talker = warm.mapNotNull { r -> r.details?.let { perFrameAfter("Talker forward_step", it) } }
+        val codePred = warm.mapNotNull { r -> r.details?.let { perFrameAfter("Code predictor (total", it) } }
         val rtfs = warm.mapNotNull { it.rtf }
         fun median(v: List<Double>) = v.sorted().let { if (it.isEmpty()) Double.NaN else it[it.size / 2] }
         fun list(v: List<Double>) = v.joinToString(", ") { "%.2f".format(it) }
         return buildString {
             append("##### WARM RUNS (${warm.size}) #####\n")
             append("code s/frame: ${list(perFrame)}  -> median ${"%.3f".format(median(perFrame))}\n")
+            if (talker.isNotEmpty()) append("Talker ms/frame: ${list(talker)}  -> median ${"%.1f".format(median(talker))}\n")
+            if (codePred.isNotEmpty()) append("Code Predictor ms/frame: ${list(codePred)}  -> median ${"%.1f".format(median(codePred))}\n")
             append("RTF: ${list(rtfs)}  -> median ${"%.2f".format(median(rtfs))}\n\n")
         }
     }

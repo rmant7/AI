@@ -71,6 +71,10 @@ list(FILTER QWEN3_TTS_SOURCES EXCLUDE REGEX ".*/(main|qwen3_tts_jni|qwen3_tts_qu
 add_library(qwen3_tts_core STATIC ${QWEN3_TTS_SOURCES})
 target_include_directories(qwen3_tts_core PUBLIC "${QWEN3_TTS_ROOT}/src" "${QWEN3_TTS_ROOT}/ggml/include")
 target_compile_definitions(qwen3_tts_core PRIVATE QWEN3_TTS_EXPORT)
+# Upstream's own per-frame profile (Talker vs Code Predictor, each split into graph build / alloc /
+# compute / data I/O), printed to stderr after every generation and so shown on the result card.
+# The cost is a few clock reads per graph call.
+target_compile_definitions(qwen3_tts_core PUBLIC QWEN3_TTS_TIMING)
 target_link_libraries(qwen3_tts_core PUBLIC ggml ggml-base ggml-cpu Threads::Threads)
 
 add_library(qwen3_tts_bridge SHARED qwen3_tts_bridge.cpp)
