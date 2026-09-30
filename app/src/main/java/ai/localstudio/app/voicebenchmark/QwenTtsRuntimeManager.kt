@@ -133,7 +133,8 @@ object QwenTtsRuntimeManager {
      */
     private suspend fun tunedThreads(context: Context): Pair<Int?, String> {
         val prefs = context.getSharedPreferences("qwen_tuning", Context.MODE_PRIVATE)
-        val fingerprint = android.os.Build.FINGERPRINT
+        // ":v2": the measurement method changed (CPU warm-up, best of two rounds), so earlier results are not reused.
+        val fingerprint = android.os.Build.FINGERPRINT + ":v2"
         if (prefs.getString("fingerprint", null) == fingerprint) {
             val saved = prefs.getInt("threads", 0)
             if (saved > 0) return saved to "Thread auto-tune: $saved (measured earlier on this device)\n"

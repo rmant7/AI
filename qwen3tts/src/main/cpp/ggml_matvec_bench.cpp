@@ -172,11 +172,23 @@ std::string tune_threads(int * chosen) {
     struct Shape { int k; int n; int ops; };
     const Shape shapes[] = {{1024, 1024, 24}, {1024, 2048, 24}, {3072, 1024, 24}};
     const std::vector<int> threads = {1, 2, 3, 4};
-    std::vector<double> total(threads.size(), 0.0);
-    for (const Shape & sh : shapes) {
-        Measurement m = measure(be, GGML_TYPE_Q4_K, sh.k, sh.n, 1, sh.ops, threads, 60.0);
+
+    // A short measurement on an idle phone catches the CPU before its clocks have ramped up and its
+    // threads before the scheduler has put them on the fast cores (a 4-thread run measured 0.38 ms in
+    // the test and 0.24 ms in the full benchmark). So: burn the CPU for ~250 ms first, then measure in
+    // two rounds and keep each thread count's best time.
+    measure(be, GGML_TYPE_Q4_K, 1024, 2048, 1, 24, {4}, 250.0);
+    std::vector<double> total(threads.size(), -1.0);
+    for (int round = 0; round < 2; ++round) {
+        std::vector<double> sum(threads.size(), 0.0);
+        for (const Shape & sh : shapes) {
+            Measurement m = measure(be, GGML_TYPE_Q4_K, sh.k, sh.n, 1, sh.ops, threads, 80.0);
+            for (size_t i = 0; i < threads.size(); ++i) {
+                sum[i] = (sum[i] < 0 || m.ms[i] < 0) ? -1.0 : sum[i] + m.ms[i];
+            }
+        }
         for (size_t i = 0; i < threads.size(); ++i) {
-            total[i] = (total[i] < 0 || m.ms[i] < 0) ? -1.0 : total[i] + m.ms[i];
+            if (sum[i] > 0 && (total[i] < 0 || sum[i] < total[i])) total[i] = sum[i];
         }
     }
     ggml_backend_free(be);
@@ -186,7 +198,7 @@ std::string tune_threads(int * chosen) {
         if (total[i] > 0 && total[best] > 0 && total[i] < total[best] * 0.9) best = i;
     }
     *chosen = threads[best];
-    std::string out = "Thread auto-tune (Code Predictor-like products, ms per 3 products):";
+    std::string out = "Thread auto-tune (Code Predictor-like products, best of 2 rounds, ms per 3 products):";
     char line[96];
     for (size_t i = 0; i < threads.size(); ++i) {
         snprintf(line, sizeof(line), "  %dt=%.3f", threads[i], total[i]);
