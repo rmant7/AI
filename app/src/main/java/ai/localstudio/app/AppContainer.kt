@@ -72,7 +72,7 @@ import ai.localstudio.app.llama.readMemAvailableBytes
 import ai.localstudio.app.modelinstall.ModelInstallation
 import ai.localstudio.app.modelinstall.DiscoveryRun
 import ai.localstudio.app.modelinstall.DiscoveryStore
-import HuggingFaceApiClient
+import ai.localstudio.app.modelinstall.HuggingFaceApiClient
 import ai.localstudio.core.registry.ArtifactResolver
 import ai.localstudio.model.install.ModelDiscovery
 import ai.localstudio.model.install.ModelSearchQuery
