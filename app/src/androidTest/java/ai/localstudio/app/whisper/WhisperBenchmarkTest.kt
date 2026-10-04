@@ -5,6 +5,7 @@ import ai.localstudio.core.model.AudioRef
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
+import ai.localstudio.whisper.WhisperBridge
 import android.media.MediaMetadataRetriever
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4

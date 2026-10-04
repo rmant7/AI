@@ -242,7 +242,7 @@ jobs:
             echo "sha: ${GITHUB_SHA}"
             echo "job status: ${{ job.status }}"
             echo "---"
-            grep -E "FAILED|PASSED|tests? completed|BUILD (SUCCESSFUL|FAILED)|Execution failed|^\s+> |Error|error:" smoke.log 2>/dev/null | tail -40 || echo "no smoke log"
+            grep -E "^e: |FAILED|PASSED|tests? completed|BUILD (SUCCESSFUL|FAILED)|Execution failed|^\s+> |Error|error:" smoke.log 2>/dev/null | tail -40 || echo "no smoke log"
             echo "--- test results ---"
             # AGP nests these under the variant directory; find is more durable
             # than a fixed path across plugin versions.
