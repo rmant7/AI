@@ -9,13 +9,19 @@ import java.io.File
 @Serializable
 data class DiscoveredCandidate(
     val repoId: String,
+    /** Display only -- the last path segment. Installing uses [filePath], never this. */
     val fileName: String,
+    /** The file's full path inside the repository -- some repos keep quants in a subdirectory, so this is what actually resolves; [fileName] alone would miss it. */
+    val filePath: String,
     val sizeBytes: Long,
+    val sha256: String? = null,
     val architecture: String,
     val contextLength: Long?,
     val notes: List<String>,
     val commit: String,
     val downloads: Long,
+    /** Null until a real device has tried to load and use this exact file -- see [CandidateTier]. */
+    val verification: ai.localstudio.model.install.DeviceVerification? = null,
 )
 
 /** One label's ("chat"/"translation") sweep -- what [DiscoveryStore] keeps. */
@@ -88,11 +94,31 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
         write(read().copy(lastSeenAtEpochMs = System.currentTimeMillis()))
     }
 
+    /**
+     * Attaches [verification] to the one candidate [repoId] in [label]'s run
+     * -- the only way a stored candidate's tier ever changes, and only to
+     * whatever this call was actually given. False (nothing written) when
+     * that run or that candidate is no longer there, e.g. a newer sweep for
+     * the same label already replaced it; the caller decides what that's
+     * worth, this method does not guess.
+     */
+    @Synchronized
+    fun recordVerification(label: String, repoId: String, verification: ai.localstudio.model.install.DeviceVerification): Boolean {
+        val current = read()
+        val run = current.runs.firstOrNull { it.label == label } ?: return false
+        if (run.candidates.none { it.repoId == repoId }) return false
+        val updatedRun = run.copy(candidates = run.candidates.map { if (it.repoId == repoId) it.copy(verification = verification) else it })
+        write(current.copy(runs = current.runs.map { if (it.label == label) updatedRun else it }))
+        return true
+    }
+
     companion object {
         fun candidateOf(outcome: ModelDiscovery.Outcome.Candidate) = DiscoveredCandidate(
             repoId = outcome.repo.id,
             fileName = outcome.file.name,
+            filePath = outcome.file.path,
             sizeBytes = outcome.file.sizeBytes,
+            sha256 = outcome.file.lfsSha256,
             architecture = outcome.architecture,
             contextLength = outcome.contextLength,
             notes = outcome.notes,

@@ -1,10 +1,12 @@
 package ai.localstudio.app.modelinstall
 
+import ai.localstudio.model.install.DeviceVerification
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,9 +28,14 @@ class DiscoveryStoreTest {
     private fun store() = DiscoveryStore(context, baseDir = base)
 
     private fun candidate(id: String) = DiscoveredCandidate(
-        repoId = id, fileName = "model-Q4_K_M.gguf", sizeBytes = 2_000_000_000,
+        repoId = id, fileName = "model-Q4_K_M.gguf", filePath = "model-Q4_K_M.gguf", sizeBytes = 2_000_000_000,
         architecture = "qwen3", contextLength = 32768, notes = emptyList(),
         commit = "a".repeat(40), downloads = 1234,
+    )
+
+    private fun verification(loaded: Boolean = true, inferenceOk: Boolean = true) = DeviceVerification(
+        deviceProfile = "Pixel 10 Pro / API 37 / 16.3 GB / llama.cpp b10448 (i8mm)",
+        runtimeId = "llama_cpp", loaded = loaded, inferenceOk = inferenceOk, verifiedAtEpochMs = 5_000L,
     )
 
     @After
@@ -88,5 +95,36 @@ class DiscoveryStoreTest {
     fun an_empty_store_has_nothing_unseen() {
         assertFalse(store().hasUnseen())
         assertTrue(store().runs().isEmpty())
+    }
+
+    @Test
+    fun recording_a_verification_touches_only_that_one_candidate() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 2, listOf(candidate("acme/a-GGUF"), candidate("acme/b-GGUF"))))
+
+        assertTrue(store.recordVerification("chat", "acme/a-GGUF", verification()))
+
+        val byId = store.runs().single().candidates.associateBy { it.repoId }
+        assertEquals(verification(), byId.getValue("acme/a-GGUF").verification)
+        assertNull("the other candidate is untouched", byId.getValue("acme/b-GGUF").verification)
+    }
+
+    @Test
+    fun a_verification_survives_a_fresh_instance() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(candidate("acme/a-GGUF"))))
+        store.recordVerification("chat", "acme/a-GGUF", verification(loaded = true, inferenceOk = false))
+
+        val reloaded = store().runs().single().candidates.single()
+        assertEquals(false, reloaded.verification!!.inferenceOk)
+    }
+
+    @Test
+    fun recording_a_verification_for_a_candidate_no_longer_there_is_told_apart() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(candidate("acme/a-GGUF"))))
+
+        assertFalse("wrong label", store.recordVerification("translation", "acme/a-GGUF", verification()))
+        assertFalse("a sweep since replaced this run without that repo", store.recordVerification("chat", "acme/gone-GGUF", verification()))
     }
 }
