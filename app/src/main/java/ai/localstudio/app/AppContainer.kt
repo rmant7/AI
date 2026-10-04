@@ -490,6 +490,15 @@ class AppContainer private constructor(private val context: Context) {
     private val documentMemoryIds = mutableMapOf<String, List<String>>()
 
     /**
+     * The new install chain (model-store/): semantic memory's embedding model
+     * and the chat/translation GGUF models install through it (Phase 3b.3,
+     * 3c.1); one instance, so the two never run two installers over the same
+     * directory unaware of each other. Declared before [init] for the same
+     * reason as [experimentalEmbeddingStore] below.
+     */
+    val modelInstallation = ModelInstallation(context, token = { settings.huggingFaceToken.ifBlank { null } })
+
+    /**
      * Where semantic memory's embedding model ([ExperimentalEmbeddingModels.E5_BASE])
      * lives: the model store first, the legacy directory as fallback (see
      * [ExperimentalEmbeddingStore]). Entirely separate from [downloads]/[modelStore]:
@@ -507,7 +516,7 @@ class AppContainer private constructor(private val context: Context) {
      */
     val experimentalEmbeddingStore = ExperimentalEmbeddingStore(
         context,
-        installation = ModelInstallation(context, token = { settings.huggingFaceToken.ifBlank { null } }),
+        installation = modelInstallation,
         log = { appLog.record("SEMANTIC_MEMORY", it) },
     )
 
@@ -1094,7 +1103,7 @@ class AppContainer private constructor(private val context: Context) {
     /** Recomputed on demand: free memory moves, and the budget is user-settable. */
     val device: DeviceProfile get() = profileOf(context, settings.ramBudgetFraction, sharedRuntimeManager.residentBytes)
 
-    val modelStore = ModelStore(context)
+    val modelStore = ModelStore(context, modelInstallation)
 
     val downloads = ModelDownloads(
         modelStore,
@@ -1463,7 +1472,7 @@ class AppContainer private constructor(private val context: Context) {
             }
             settings.customModelsMigrated = true
         }
-        val known = (LocalModels.SEEDS + TranslationModels.SEEDS + allCustomSeeds()).map { modelStore.fileFor(it).name }.toSet()
+        val known = (LocalModels.SEEDS + TranslationModels.SEEDS + allCustomSeeds()).map { modelStore.legacyFileFor(it).name }.toSet()
         modelStore.directory().listFiles().orEmpty()
             .filter { it.isFile && it.name !in known }
             .mapNotNull { LocalModels.repoIdFromCustomFileName(it.name) }

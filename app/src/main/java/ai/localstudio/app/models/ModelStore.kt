@@ -1,5 +1,12 @@
 package ai.localstudio.app.models
 
+import ai.localstudio.app.modelinstall.ModelInstallation
+import ai.localstudio.app.models.catalog.LegacyCatalogMapper
+import ai.localstudio.model.ArtifactRole
+import ai.localstudio.model.ArtifactRoles
+import ai.localstudio.model.VariantId
+import ai.localstudio.model.install.InstallHealth
+import ai.localstudio.model.install.InstallManifest
 import android.content.Context
 import java.io.File
 
@@ -13,18 +20,39 @@ import java.io.File
  * The directory is app-private storage rather than the cache directory —
  * several gigabytes fetched over mobile data must not be something the system
  * can reclaim on a whim.
+ *
+ * Phase 3c.1: with an [installation], a model installed through the new
+ * chain (commit-pinned, sha256-verified, manifest) is found in the model
+ * store first; the legacy `models/<id>.gguf` (and `<id>.mmproj.gguf`) stay
+ * the fallback, so every model already on a phone keeps working exactly as
+ * before. Legacy files are not moved into the store yet: proving a
+ * multi-gigabyte file means hashing it, which needs its own idle-time step.
  */
-class ModelStore(private val context: Context) {
+class ModelStore(
+    context: Context,
+    val installation: ModelInstallation? = null,
+    private val baseDir: File = context.filesDir,
+) {
 
-    fun directory(): File = File(context.filesDir, "models").apply { mkdirs() }
+    fun directory(): File = File(baseDir, "models").apply { mkdirs() }
 
-    fun fileFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.gguf")
+    /** The file to load: the store's copy when installed and intact there, else the legacy one. */
+    fun fileFor(seed: LocalModelSeed): File = storeFile(seed, ArtifactRoles.WEIGHTS) ?: legacyFileFor(seed)
+
+    /** Where the legacy download code writes, and the fallback. */
+    fun legacyFileFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.gguf")
 
     fun partFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.gguf.part")
 
     /** A truncated download is not an installed model, hence the size floor. */
     fun isInstalled(seed: LocalModelSeed): Boolean =
-        fileFor(seed).let { it.isFile && it.length() > MIN_PLAUSIBLE_SIZE }
+        isInNewStore(seed) || legacyFileFor(seed).let { it.isFile && it.length() > MIN_PLAUSIBLE_SIZE }
+
+    /** Whether [fileFor] points into the model store (for logs and status lines). */
+    fun isInNewStore(seed: LocalModelSeed): Boolean = intactManifest(seed) != null
+
+    /** The variant the new chain installs [seed] as -- the same mapping as model-catalog/local-models.json. */
+    fun variantId(seed: LocalModelSeed): VariantId = VariantId(seed.id + LegacyCatalogMapper.LEGACY_VARIANT_SUFFIX)
 
     /**
      * Total disk footprint of this model — the main GGUF plus its projector
@@ -37,12 +65,15 @@ class ModelStore(private val context: Context) {
         (fileFor(seed).takeIf { it.isFile }?.length() ?: 0) +
             (mmprojFileFor(seed).takeIf { it.isFile }?.length() ?: 0)
 
-    fun partialSize(seed: LocalModelSeed): Long = partFor(seed).takeIf { it.isFile }?.length() ?: 0
+    /** Bytes already on disk toward a resumable download: the legacy part, or the new chain's staging. */
+    fun partialSize(seed: LocalModelSeed): Long =
+        (partFor(seed).takeIf { it.isFile }?.length() ?: 0) + stagingBytes(seed)
 
     fun delete(seed: LocalModelSeed) {
-        fileFor(seed).delete()
+        installation?.let { it.installed.uninstall(variantId(seed)); it.layout.stagingDir(variantId(seed)).deleteRecursively() }
+        legacyFileFor(seed).delete()
         partFor(seed).delete()
-        mmprojFileFor(seed).delete()
+        legacyMmprojFileFor(seed).delete()
         mmprojPartFor(seed).delete()
     }
 
@@ -51,7 +82,14 @@ class ModelStore(private val context: Context) {
      * from its main GGUF — llama.cpp keeps the two apart, and this app
      * mirrors that rather than trying to merge them into one file.
      */
-    fun mmprojFileFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.mmproj.gguf")
+    fun mmprojFileFor(seed: LocalModelSeed): File = storeFile(seed, ArtifactRoles.PROJECTOR) ?: legacyMmprojFileFor(seed)
+
+    /**
+     * Also where a projector is backfilled for a store-installed model whose
+     * projector was skipped (optional): re-running the install would fetch
+     * the multi-gigabyte weights again.
+     */
+    fun legacyMmprojFileFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.mmproj.gguf")
 
     fun mmprojPartFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.mmproj.gguf.part")
 
@@ -78,12 +116,28 @@ class ModelStore(private val context: Context) {
      */
     fun orphanedFiles(knownSeeds: List<LocalModelSeed>): List<File> {
         val known = knownSeeds.flatMap {
-            listOf(fileFor(it).name, partFor(it).name, mmprojFileFor(it).name, mmprojPartFor(it).name)
+            listOf(legacyFileFor(it).name, partFor(it).name, legacyMmprojFileFor(it).name, mmprojPartFor(it).name)
         }.toSet()
         return directory().listFiles()?.filter { it.isFile && it.name !in known }.orEmpty()
     }
 
     fun freeSpaceBytes(): Long = directory().freeSpace
+
+    private fun intactManifest(seed: LocalModelSeed): InstallManifest? {
+        val installed = installation?.installed ?: return null
+        return installed.manifest(variantId(seed))?.takeIf { installed.health(it) == InstallHealth.Intact }
+    }
+
+    private fun storeFile(seed: LocalModelSeed, role: ArtifactRole): File? {
+        val manifest = intactManifest(seed) ?: return null
+        val artifact = manifest.artifacts.firstOrNull { it.role == role } ?: return null
+        return installation!!.installed.pathOf(manifest, artifact).takeIf { it.isFile }
+    }
+
+    private fun stagingBytes(seed: LocalModelSeed): Long {
+        val staging = installation?.layout?.stagingDir(variantId(seed)) ?: return 0
+        return staging.listFiles().orEmpty().filter { it.isFile && !it.name.endsWith(".json") }.sumOf { it.length() }
+    }
 
     private companion object {
         const val MIN_PLAUSIBLE_SIZE = 50L * 1024 * 1024

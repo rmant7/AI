@@ -1,6 +1,10 @@
 package ai.localstudio.app.models
 
+import ai.localstudio.app.modelinstall.ModelInstallation
+import ai.localstudio.app.models.catalog.LegacyCatalogMapper
 import ai.localstudio.core.registry.ArtifactResolver
+import ai.localstudio.model.install.InstallResult
+import ai.localstudio.model.install.TransferCancelledException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -8,6 +12,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed interface DownloadState {
     data object Idle : DownloadState
@@ -63,6 +68,9 @@ class ModelDownloads(
     private val jobs = mutableMapOf<String, Job>()
     private val downloaders = mutableMapOf<String, ModelDownloader>()
 
+    /** Cancellation for the new chain's blocking install (see [installViaStore]). */
+    private val cancelled = mutableMapOf<String, AtomicBoolean>()
+
     /**
      * When a backfill attempt (see [start]'s own comment) may next retry for
      * a given seed, keyed by seed id — set only after a *failed* attempt.
@@ -116,9 +124,39 @@ class ModelDownloads(
         onDownloadStarted()
         val downloader = ModelDownloader()
         downloaders[seed.id] = downloader
+        val cancel = AtomicBoolean(false).also { cancelled[seed.id] = it }
         jobs[seed.id] = scope.launch {
             log("MODEL_DOWNLOAD", "${seed.id}: resolving from ${seed.repoIds}")
             publish(seed, DownloadState.Resolving(seed.repoIds.first()))
+            // Phase 3c.1: the new chain first (commit-pinned, sha256-verified,
+            // manifest) -- unless a legacy .part is already on disk: resuming
+            // it beats fetching those gigabytes again into the store.
+            val installation = store.installation
+            if (installation != null && !store.partFor(seed).isFile) {
+                val outcome = try {
+                    installViaStore(installation, seed, cancel)
+                } catch (e: TransferCancelledException) {
+                    downloaders.remove(seed.id)
+                    return@launch
+                } catch (e: Exception) {
+                    NewChainOutcome.Failed("${e.javaClass.simpleName}: ${e.message}")
+                }
+                when (outcome) {
+                    NewChainOutcome.Installed -> {
+                        publish(seed, DownloadState.Installed)
+                        downloaders.remove(seed.id)
+                        return@launch
+                    }
+                    is NewChainOutcome.Final -> {
+                        log("MODEL_DOWNLOAD", "${seed.id}: FAILED: ${outcome.message}")
+                        publish(seed, DownloadState.Failed(outcome.message))
+                        downloaders.remove(seed.id)
+                        return@launch
+                    }
+                    is NewChainOutcome.Failed ->
+                        log("MODEL_DOWNLOAD", "${seed.id}: model store install failed (${outcome.message}); falling back to the legacy download")
+                }
+            }
             try {
                 val (source, resolved) = HuggingFaceResolver.resolveAny(
                     seed.repoIds,
@@ -140,7 +178,7 @@ class ModelDownloads(
                 )
                 downloader.download(
                     url = resolved.downloadUrl,
-                    destination = store.fileFor(seed),
+                    destination = store.legacyFileFor(seed),
                     tempFile = store.partFor(seed),
                 ) { progress -> publish(seed, DownloadState.Running(progress, source)) }
 
@@ -152,7 +190,7 @@ class ModelDownloads(
                 // for — and it is exactly the kind of corruption that produces
                 // a model which loads, then misbehaves or crashes mid-generation
                 // instead of failing cleanly up front.
-                val installedFile = store.fileFor(seed)
+                val installedFile = store.legacyFileFor(seed)
                 val installedSize = installedFile.length()
                 if (resolved.sizeBytes > 0 && installedSize != resolved.sizeBytes) {
                     installedFile.delete()
@@ -175,6 +213,50 @@ class ModelDownloads(
         }
     }
 
+    private sealed interface NewChainOutcome {
+        data object Installed : NewChainOutcome
+
+        /** Not worth a legacy retry (no space, refused): shown as is. */
+        data class Final(val message: String) : NewChainOutcome
+
+        data class Failed(val message: String) : NewChainOutcome
+    }
+
+    private fun installViaStore(installation: ModelInstallation, seed: LocalModelSeed, cancel: AtomicBoolean): NewChainOutcome {
+        val model = LegacyCatalogMapper.customModel(seed)
+        val source = seed.repoIds.first()
+        val result = installation.installer.install(
+            LegacyCatalogMapper.CATALOG_ID,
+            LegacyCatalogMapper.CATALOG_VERSION,
+            model,
+            model.variants.single(),
+            installation::freeBytes,
+            cancel = { cancel.get() },
+        ) { progress ->
+            publish(seed, DownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: 0), source))
+        }
+        return when (result) {
+            is InstallResult.Installed -> {
+                result.manifest.artifacts.forEach { artifact ->
+                    log(
+                        "MODEL_DOWNLOAD",
+                        "${seed.id}: ${artifact.role.id} installed in the model store from " +
+                            "${artifact.source.repo}/${artifact.source.path}@${artifact.source.commit?.take(8)} (${gb(artifact.sizeBytes)}, ${artifact.integrity})",
+                    )
+                }
+                result.manifest.skippedOptional.forEach {
+                    log("MMPROJ_DOWNLOAD", "${seed.id}: optional ${it.role.id} skipped (${it.reason}); text-only until it is backfilled")
+                }
+                NewChainOutcome.Installed
+            }
+            is InstallResult.AlreadyInstalled -> NewChainOutcome.Installed
+            is InstallResult.InsufficientStorage ->
+                NewChainOutcome.Final("Not enough space: need ${gb(result.neededBytes)}, ${gb(result.freeBytes)} free")
+            is InstallResult.Refused -> NewChainOutcome.Final("${seed.title} is ${result.status.name.lowercase()} in the catalogue")
+            is InstallResult.Failed -> NewChainOutcome.Failed("${result.fileName}: ${result.failures.joinToString("; ")}")
+        }
+    }
+
     /**
      * Best-effort: failure here does not fail [start] as a whole. The main
      * GGUF is a model this app cannot run at all without; the projector is a
@@ -191,22 +273,23 @@ class ModelDownloads(
             return
         }
         val (source, file) = resolved
-        publish(seed, DownloadState.Running(DownloadProgress(store.mmprojFileFor(seed).length(), file.sizeBytes), source))
+        publish(seed, DownloadState.Running(DownloadProgress(store.legacyMmprojFileFor(seed).length(), file.sizeBytes), source))
         runCatching {
             downloader.download(
                 url = file.downloadUrl,
-                destination = store.mmprojFileFor(seed),
+                destination = store.legacyMmprojFileFor(seed),
                 tempFile = store.mmprojPartFor(seed),
             ) { progress -> publish(seed, DownloadState.Running(progress, source)) }
         }.onFailure {
             // A corrupt or half-downloaded projector must not look installed —
             // ModelStore.hasMmproj checks file presence, not validity beyond size.
-            store.mmprojFileFor(seed).delete()
+            store.legacyMmprojFileFor(seed).delete()
             log("MMPROJ_DOWNLOAD", "mmproj download failed for ${seed.id}: ${it.message}")
         }
     }
 
     fun cancel(seed: LocalModelSeed) {
+        cancelled[seed.id]?.set(true)
         downloaders[seed.id]?.cancel()
         jobs[seed.id]?.cancel()
         // The partial file is kept on purpose: the next attempt resumes from
