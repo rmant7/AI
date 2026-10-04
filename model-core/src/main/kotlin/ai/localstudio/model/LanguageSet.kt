@@ -24,7 +24,13 @@ import kotlinx.serialization.json.jsonPrimitive
 sealed interface LanguageSet {
     fun contains(tag: String): Boolean
 
-    /** Any language at all — MADLAD-400's 400+ targets, Whisper's language-ID. */
+    /**
+     * Unconstrained: the catalog states no restriction — written `"*"`.
+     * Not a verified claim that every language works; most entries carry
+     * this because their language support was simply never declared (the
+     * legacy catalogue), and a model with a known list says so with [Of].
+     * Matching treats it as "may be tried", ranking (later) as "unknown".
+     */
     data object All : LanguageSet {
         override fun contains(tag: String): Boolean = true
     }

@@ -22,6 +22,12 @@ import java.security.MessageDigest
  * to the artifacts and runtime config the embedding path really consumes is
  * a decision for when installation/runtime integration exists (Phase 3+).
  *
+ * A dynamic source ([ArtifactSource.HuggingFaceSelection]) only identifies
+ * the *selection rule*, not the bytes: an upstream re-upload under the same
+ * name keeps the same id. That is the price of such an entry being
+ * UNVERIFIED; the installation layer is expected to key an installed copy on
+ * what it actually resolved.
+ *
  * 128 bits of the SHA-256: ids are long-lived and decide whether an index is
  * still valid, so collision room is not worth saving a few characters on.
  */
@@ -59,5 +65,11 @@ object EmbeddingSpace {
     private fun sourceIdentity(source: ArtifactSource): String = when (source) {
         is ArtifactSource.HuggingFace -> "hf:${source.repo}@${source.revision}/${source.path}"
         is ArtifactSource.DirectUrl -> "url:${source.url}"
+        is ArtifactSource.HuggingFaceSelection -> "hfsel:${source.repoIds.joinToString("|")}@${source.revision}/${selectorIdentity(source.file)}"
+    }
+
+    private fun selectorIdentity(selector: FileSelector): String = when (selector) {
+        is FileSelector.ByQuantization -> "quant:${selector.quantPriority.joinToString("|")}*${selector.extension}"
+        is FileSelector.ExactName -> "exact:${selector.fileName}"
     }
 }

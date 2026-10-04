@@ -131,6 +131,13 @@ sealed interface ArtifactSource {
     /** URL scheme — only https is ever accepted. */
     val scheme: String?
 
+    /**
+     * True when this source does not name the bytes at all — which file gets
+     * downloaded is decided at install time. Such a source can never back a
+     * reproducible entry; see [HuggingFaceSelection].
+     */
+    val isDynamic: Boolean get() = false
+
     @Serializable
     @SerialName("huggingface")
     data class HuggingFace(
@@ -150,6 +157,36 @@ sealed interface ArtifactSource {
         }
     }
 
+    /**
+     * Legacy dynamic selection, kept so the catalogue that exists today can be
+     * described honestly rather than pretending it is pinned: at install time
+     * the file listing of each of [repoIds] at [revision] is fetched, in
+     * order, and [file] picks one file out of the first repository that has a
+     * match. Two installs of the same entry can therefore get different bytes
+     * — a new upload to the branch, a different repo answering first.
+     *
+     * [repoIds] is a fallback priority list (a gated, renamed or deleted repo
+     * falls through to the next), not mirrors: different repositories hold
+     * different conversions and quantizations, and a file of the same name in
+     * two of them is not assumed to be the same bytes. [revision] is whatever
+     * branch the entry was written against — typically "main", which is
+     * exactly what makes this dynamic; it is stored explicitly, never implied.
+     *
+     * [CatalogValidator] accepts this only in UNVERIFIED entries, never as a
+     * mirror, never alongside a sha256; the entry's sizeBytes is an estimate.
+     */
+    @Serializable
+    @SerialName("huggingface_selection")
+    data class HuggingFaceSelection(
+        val repoIds: List<String>,
+        val revision: String,
+        val file: FileSelector,
+    ) : ArtifactSource {
+        override val host: String get() = HuggingFace.HOST
+        override val scheme: String get() = "https"
+        override val isDynamic: Boolean get() = true
+    }
+
     @Serializable
     @SerialName("url")
     data class DirectUrl(val url: String) : ArtifactSource {
@@ -159,11 +196,34 @@ sealed interface ArtifactSource {
     }
 }
 
-/** The artifact is an archive to unpack on install; [unpackedSizeBytes] counts toward the free-space check. */
+/** How a [ArtifactSource.HuggingFaceSelection] picks one file out of a repository listing. */
+@Serializable
+sealed interface FileSelector {
+    /**
+     * The first file ending in [extension] whose name contains the first
+     * matching entry of [quantPriority] (case-insensitive); multi-part files
+     * ("-00001-of-00003") are never picked; when nothing matches, the
+     * smallest candidate.
+     */
+    @Serializable
+    @SerialName("quantization")
+    data class ByQuantization(val quantPriority: List<String>, val extension: String) : FileSelector
+
+    /** A file whose base name is exactly [fileName], wherever it sits in the repository. */
+    @Serializable
+    @SerialName("exact")
+    data class ExactName(val fileName: String) : FileSelector
+}
+
+/**
+ * The artifact is an archive to unpack on install; [unpackedSizeBytes]
+ * counts toward the free-space check, 0 when unknown — which, like an
+ * unknown artifact size, only an UNVERIFIED entry may be.
+ */
 @Serializable
 data class UnpackSpec(
     val format: String,
-    val unpackedSizeBytes: Long,
+    val unpackedSizeBytes: Long = 0,
 ) {
     companion object {
         val KNOWN_FORMATS = setOf("zip", "tar", "tar.gz", "tar.bz2", "tar.xz")

@@ -181,6 +181,9 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    // The unified local-model domain. Phase 2: only LegacyCatalogMapper uses
+    // it, and nothing at runtime calls that yet.
+    implementation(project(":model-core"))
     // NodeExecutors — :core itself no longer depends on :commercial-memory/
     // Mobile_mem0 (see MOBILE_MEM0_DEPENDENCY.md), so this app, which
     // actually wants memory-aware chat, needs both explicitly now instead of
@@ -233,8 +236,26 @@ dependencies {
     // `repositories` block above), no native code of this app's own.
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
 
+    testImplementation(kotlin("test"))
+    testImplementation("junit:junit:4.13.2")
+
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+}
+
+// JVM unit tests (testDebugUnitTest): the legacy → domain catalogue tests
+// read the repository's files directly rather than through Android assets.
+// -PupdateCatalogSnapshot=true rewrites model-catalog/local-models.json from
+// the current mapping instead of comparing against it.
+tasks.withType<Test>().configureEach {
+    val catalogSnapshot = rootProject.file("model-catalog/local-models.json")
+    val madladLanguages = file("src/main/assets/madlad_languages.json")
+    inputs.files(catalogSnapshot, madladLanguages).withPropertyName("catalogFiles")
+    systemProperty("localai.catalogSnapshot", catalogSnapshot.absolutePath)
+    systemProperty("localai.madladLanguages", madladLanguages.absolutePath)
+    val update = providers.gradleProperty("updateCatalogSnapshot").orNull
+    inputs.property("updateCatalogSnapshot", update ?: "false")
+    if (update != null) systemProperty("localai.updateCatalogSnapshot", update)
 }

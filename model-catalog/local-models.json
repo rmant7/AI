@@ -1,0 +1,4636 @@
+{
+  "schema": 1,
+  "catalogId": "local-models-legacy",
+  "catalogVersion": "legacy-mapping-1",
+  "allowedHosts": [
+    "huggingface.co",
+    "alphacephei.com"
+  ],
+  "models": [
+    {
+      "id": "gemma-4-e4b-it-q4",
+      "family": "gemma-4",
+      "displayName": "Gemma 4 E4B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {},
+        "vision.understanding": {
+          "requiresRoles": [
+            "projector"
+          ]
+        }
+      },
+      "variants": [
+        {
+          "id": "gemma-4-e4b-it-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 4980000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-4-E4B-it-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            },
+            {
+              "role": "projector",
+              "fileName": "projector.gguf",
+              "sizeBytes": 990000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-4-E4B-it-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "exact",
+                  "fileName": "mmproj-F16.gguf"
+                }
+              },
+              "optional": true
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "optionalRoles": [
+                "projector"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemma-4-12b-it-q4",
+      "family": "gemma-4",
+      "displayName": "Gemma 4 12B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {}
+      },
+      "variants": [
+        {
+          "id": "gemma-4-12b-it-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 7200000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-4-12B-it-GGUF",
+                  "bartowski/gemma-4-12B-it-GGUF",
+                  "unsloth/gemma-4-12B-it-qat-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemma-4-26b-a4b-it-q4",
+      "family": "gemma-4",
+      "displayName": "Gemma 4 26B-A4B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {}
+      },
+      "variants": [
+        {
+          "id": "gemma-4-26b-a4b-it-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 15600000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-4-26B-A4B-it-GGUF",
+                  "unsloth/gemma-4-26B-A4B-it-qat-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemma-4-31b-it-q4",
+      "family": "gemma-4",
+      "displayName": "Gemma 4 31B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {}
+      },
+      "variants": [
+        {
+          "id": "gemma-4-31b-it-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 18600000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-4-31B-it-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemma-3-1b-it-q4",
+      "family": "gemma-3",
+      "displayName": "Gemma 3 1B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {}
+      },
+      "variants": [
+        {
+          "id": "gemma-3-1b-it-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 800000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-3-1b-it-GGUF",
+                  "ggml-org/gemma-3-1b-it-GGUF",
+                  "google/gemma-3-1b-it-qat-q4_0-gguf"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemma-3-4b-it-q4",
+      "family": "gemma-3",
+      "displayName": "Gemma 3 4B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {}
+      },
+      "variants": [
+        {
+          "id": "gemma-3-4b-it-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 2700000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-3-4b-it-GGUF",
+                  "ggml-org/gemma-3-4b-it-GGUF",
+                  "bartowski/google_gemma-3-4b-it-GGUF",
+                  "google/gemma-3-4b-it-qat-q4_0-gguf"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemma-3-12b-it-q4",
+      "family": "gemma-3",
+      "displayName": "Gemma 3 12B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {}
+      },
+      "variants": [
+        {
+          "id": "gemma-3-12b-it-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 7300000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-3-12b-it-GGUF",
+                  "bartowski/google_gemma-3-12b-it-GGUF",
+                  "google/gemma-3-12b-it-qat-q4_0-gguf"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemma-3-27b-it-q4",
+      "family": "gemma-3",
+      "displayName": "Gemma 3 27B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {}
+      },
+      "variants": [
+        {
+          "id": "gemma-3-27b-it-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 16000000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/gemma-3-27b-it-GGUF",
+                  "bartowski/google_gemma-3-27b-it-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "qwen3.5-9b-q4",
+      "family": "qwen3.5",
+      "displayName": "Qwen3.5 9B",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {},
+        "text.coding": {}
+      },
+      "variants": [
+        {
+          "id": "qwen3.5-9b-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 5680000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/Qwen3.5-9B-GGUF",
+                  "bartowski/Qwen3.5-9B-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "qwen3.5-4b-q4",
+      "family": "qwen3.5",
+      "displayName": "Qwen3.5 4B",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {},
+        "text.coding": {}
+      },
+      "variants": [
+        {
+          "id": "qwen3.5-4b-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 2500000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/Qwen3.5-4B-GGUF",
+                  "bartowski/Qwen3.5-4B-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "qwen3.5-0.8b-q4",
+      "family": "qwen3.5",
+      "displayName": "Qwen3.5 0.8B",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {},
+        "text.coding": {}
+      },
+      "variants": [
+        {
+          "id": "qwen3.5-0.8b-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 550000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "unsloth/Qwen3.5-0.8B-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "llama-3.1-8b-instruct-q4",
+      "family": "llama-3.1",
+      "displayName": "Llama 3.1 8B Instruct",
+      "status": "unverified",
+      "capabilities": {
+        "text.generation": {},
+        "text.reasoning": {}
+      },
+      "variants": [
+        {
+          "id": "llama-3.1-8b-instruct-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 4900000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
+                  "unsloth/Meta-Llama-3.1-8B-Instruct-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "madlad400-3b-mt-q4",
+      "family": "madlad400",
+      "displayName": "MADLAD-400 3B",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": [
+            "aa",
+            "abt",
+            "ace",
+            "acf",
+            "ach",
+            "ada",
+            "adh",
+            "ady",
+            "af",
+            "agr",
+            "ahk",
+            "ak",
+            "akb",
+            "alt",
+            "alz",
+            "am",
+            "amu",
+            "ang",
+            "ann",
+            "ape",
+            "ar",
+            "arn",
+            "as",
+            "av",
+            "awa",
+            "ay",
+            "az",
+            "ba",
+            "ban",
+            "bas",
+            "bbc",
+            "bci",
+            "be",
+            "ber",
+            "bew",
+            "bg",
+            "bgp",
+            "bgz",
+            "bho",
+            "bi",
+            "bik",
+            "bim",
+            "bjj",
+            "bm",
+            "bn",
+            "bo",
+            "bqc",
+            "br",
+            "bru",
+            "brx",
+            "bs",
+            "bts",
+            "btx",
+            "bua",
+            "bum",
+            "bus",
+            "bzj",
+            "ca",
+            "cab",
+            "cac",
+            "cak",
+            "cbk",
+            "cce",
+            "ce",
+            "ceb",
+            "cfm",
+            "ch",
+            "chk",
+            "chm",
+            "chr",
+            "cjk",
+            "ckb",
+            "cnh",
+            "cni",
+            "co",
+            "crh",
+            "crs",
+            "cs",
+            "ctu",
+            "cuk",
+            "cv",
+            "cy",
+            "da",
+            "de",
+            "din",
+            "dje",
+            "djk",
+            "dov",
+            "dtp",
+            "dv",
+            "dwr",
+            "dyu",
+            "dz",
+            "ee",
+            "el",
+            "emp",
+            "en",
+            "enq",
+            "eo",
+            "es",
+            "et",
+            "eu",
+            "fa",
+            "ff",
+            "ffm",
+            "fi",
+            "fil",
+            "fip",
+            "fj",
+            "fo",
+            "fon",
+            "fr",
+            "frp",
+            "fy",
+            "ga",
+            "gag",
+            "gbm",
+            "gd",
+            "gil",
+            "gl",
+            "gn",
+            "gof",
+            "gom",
+            "gor",
+            "grc",
+            "gsw",
+            "gu",
+            "gub",
+            "guc",
+            "guh",
+            "gui",
+            "gv",
+            "gvl",
+            "gym",
+            "gyn",
+            "ha",
+            "haw",
+            "he",
+            "hi",
+            "hif",
+            "hil",
+            "hmn",
+            "hne",
+            "ho",
+            "hr",
+            "ht",
+            "hu",
+            "hui",
+            "hus",
+            "hvn",
+            "hy",
+            "iba",
+            "ibb",
+            "id",
+            "ify",
+            "ig",
+            "ilo",
+            "inb",
+            "is",
+            "iso",
+            "it",
+            "iu",
+            "ium",
+            "izz",
+            "ja",
+            "jac",
+            "jam",
+            "jax",
+            "jiv",
+            "jv",
+            "jvn",
+            "ka",
+            "kaa",
+            "kaa-latn",
+            "kac",
+            "kbd",
+            "kbp",
+            "kek",
+            "kg",
+            "kha",
+            "kj",
+            "kjg",
+            "kjh",
+            "kk",
+            "kl",
+            "km",
+            "kmb",
+            "kn",
+            "knj",
+            "ko",
+            "koi",
+            "kos",
+            "krc",
+            "kri",
+            "krj",
+            "ks",
+            "ksd",
+            "ksw",
+            "ktu",
+            "ku",
+            "kum",
+            "kv",
+            "kw",
+            "kwi",
+            "ky",
+            "la",
+            "laj",
+            "lb",
+            "lg",
+            "lhu",
+            "ln",
+            "lo",
+            "lrc",
+            "lt",
+            "ltg",
+            "lu",
+            "lus",
+            "luz",
+            "lv",
+            "mad",
+            "mag",
+            "mai",
+            "mak",
+            "mam",
+            "mas",
+            "maz",
+            "mbt",
+            "mdf",
+            "mel",
+            "meo",
+            "meu",
+            "mey",
+            "mfe",
+            "mg",
+            "mgh",
+            "mh",
+            "mi",
+            "min",
+            "miq",
+            "mk",
+            "mkn",
+            "ml",
+            "mn",
+            "mni",
+            "mnw",
+            "mps",
+            "mqy",
+            "mr",
+            "mrj",
+            "mrw",
+            "ms",
+            "msb",
+            "msi",
+            "msm",
+            "mt",
+            "mtr",
+            "my",
+            "myv",
+            "ne",
+            "new",
+            "ngu",
+            "nhe",
+            "nia",
+            "nij",
+            "niq",
+            "nl",
+            "nnb",
+            "no",
+            "noa",
+            "noe",
+            "nog",
+            "nr",
+            "nso",
+            "nut",
+            "nv",
+            "ny",
+            "nyu",
+            "nzi",
+            "oc",
+            "oj",
+            "om",
+            "or",
+            "os",
+            "otq",
+            "pa",
+            "pag",
+            "pam",
+            "pap",
+            "pau",
+            "pck",
+            "pis",
+            "pl",
+            "pon",
+            "ppk",
+            "prk",
+            "ps",
+            "pt",
+            "qu",
+            "qub",
+            "quc",
+            "quf",
+            "quh",
+            "qup",
+            "quy",
+            "qvc",
+            "qvi",
+            "qvz",
+            "qxr",
+            "raj",
+            "rcf",
+            "rki",
+            "rm",
+            "rmc",
+            "rn",
+            "ro",
+            "rom",
+            "ru",
+            "rw",
+            "rwo",
+            "sa",
+            "sah",
+            "sd",
+            "sda",
+            "se",
+            "seh",
+            "sg",
+            "shn",
+            "shp",
+            "si",
+            "sja",
+            "sjp",
+            "sk",
+            "skr",
+            "sl",
+            "sm",
+            "smt",
+            "sn",
+            "so",
+            "spp",
+            "sq",
+            "sr",
+            "srm",
+            "srn",
+            "srr",
+            "ss",
+            "st",
+            "stq",
+            "su",
+            "sus",
+            "suz",
+            "sv",
+            "sw",
+            "sxn",
+            "syl",
+            "syr",
+            "ta",
+            "tab",
+            "taj",
+            "tbz",
+            "tca",
+            "tcy",
+            "tdx",
+            "te",
+            "teo",
+            "tet",
+            "tg",
+            "th",
+            "ti",
+            "tiv",
+            "tk",
+            "tks",
+            "tlh",
+            "tll",
+            "tn",
+            "to",
+            "toj",
+            "tr",
+            "trp",
+            "ts",
+            "tsc",
+            "tsg",
+            "tt",
+            "tuc",
+            "tvl",
+            "twu",
+            "tyv",
+            "tyz",
+            "tzh",
+            "tzj",
+            "tzo",
+            "ubu",
+            "udm",
+            "ug",
+            "uk",
+            "ur",
+            "uz",
+            "ve",
+            "vec",
+            "vi",
+            "wa",
+            "wal",
+            "war",
+            "wo",
+            "xal",
+            "xh",
+            "xmm",
+            "yap",
+            "yi",
+            "yo",
+            "yua",
+            "yue",
+            "za",
+            "zap",
+            "zh",
+            "zne",
+            "zu",
+            "zza"
+          ],
+          "promptFormat": "madlad_tag"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "madlad400-3b-mt-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 1650000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "mtsdurica/madlad400-3b-mt-Q4_K_M-GGUF",
+                  "jbochi/madlad400-3b-mt"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "madlad400-7b-mt-q5",
+      "family": "madlad400",
+      "displayName": "MADLAD-400 7B (Q5_K_M)",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": [
+            "aa",
+            "abt",
+            "ace",
+            "acf",
+            "ach",
+            "ada",
+            "adh",
+            "ady",
+            "af",
+            "agr",
+            "ahk",
+            "ak",
+            "akb",
+            "alt",
+            "alz",
+            "am",
+            "amu",
+            "ang",
+            "ann",
+            "ape",
+            "ar",
+            "arn",
+            "as",
+            "av",
+            "awa",
+            "ay",
+            "az",
+            "ba",
+            "ban",
+            "bas",
+            "bbc",
+            "bci",
+            "be",
+            "ber",
+            "bew",
+            "bg",
+            "bgp",
+            "bgz",
+            "bho",
+            "bi",
+            "bik",
+            "bim",
+            "bjj",
+            "bm",
+            "bn",
+            "bo",
+            "bqc",
+            "br",
+            "bru",
+            "brx",
+            "bs",
+            "bts",
+            "btx",
+            "bua",
+            "bum",
+            "bus",
+            "bzj",
+            "ca",
+            "cab",
+            "cac",
+            "cak",
+            "cbk",
+            "cce",
+            "ce",
+            "ceb",
+            "cfm",
+            "ch",
+            "chk",
+            "chm",
+            "chr",
+            "cjk",
+            "ckb",
+            "cnh",
+            "cni",
+            "co",
+            "crh",
+            "crs",
+            "cs",
+            "ctu",
+            "cuk",
+            "cv",
+            "cy",
+            "da",
+            "de",
+            "din",
+            "dje",
+            "djk",
+            "dov",
+            "dtp",
+            "dv",
+            "dwr",
+            "dyu",
+            "dz",
+            "ee",
+            "el",
+            "emp",
+            "en",
+            "enq",
+            "eo",
+            "es",
+            "et",
+            "eu",
+            "fa",
+            "ff",
+            "ffm",
+            "fi",
+            "fil",
+            "fip",
+            "fj",
+            "fo",
+            "fon",
+            "fr",
+            "frp",
+            "fy",
+            "ga",
+            "gag",
+            "gbm",
+            "gd",
+            "gil",
+            "gl",
+            "gn",
+            "gof",
+            "gom",
+            "gor",
+            "grc",
+            "gsw",
+            "gu",
+            "gub",
+            "guc",
+            "guh",
+            "gui",
+            "gv",
+            "gvl",
+            "gym",
+            "gyn",
+            "ha",
+            "haw",
+            "he",
+            "hi",
+            "hif",
+            "hil",
+            "hmn",
+            "hne",
+            "ho",
+            "hr",
+            "ht",
+            "hu",
+            "hui",
+            "hus",
+            "hvn",
+            "hy",
+            "iba",
+            "ibb",
+            "id",
+            "ify",
+            "ig",
+            "ilo",
+            "inb",
+            "is",
+            "iso",
+            "it",
+            "iu",
+            "ium",
+            "izz",
+            "ja",
+            "jac",
+            "jam",
+            "jax",
+            "jiv",
+            "jv",
+            "jvn",
+            "ka",
+            "kaa",
+            "kaa-latn",
+            "kac",
+            "kbd",
+            "kbp",
+            "kek",
+            "kg",
+            "kha",
+            "kj",
+            "kjg",
+            "kjh",
+            "kk",
+            "kl",
+            "km",
+            "kmb",
+            "kn",
+            "knj",
+            "ko",
+            "koi",
+            "kos",
+            "krc",
+            "kri",
+            "krj",
+            "ks",
+            "ksd",
+            "ksw",
+            "ktu",
+            "ku",
+            "kum",
+            "kv",
+            "kw",
+            "kwi",
+            "ky",
+            "la",
+            "laj",
+            "lb",
+            "lg",
+            "lhu",
+            "ln",
+            "lo",
+            "lrc",
+            "lt",
+            "ltg",
+            "lu",
+            "lus",
+            "luz",
+            "lv",
+            "mad",
+            "mag",
+            "mai",
+            "mak",
+            "mam",
+            "mas",
+            "maz",
+            "mbt",
+            "mdf",
+            "mel",
+            "meo",
+            "meu",
+            "mey",
+            "mfe",
+            "mg",
+            "mgh",
+            "mh",
+            "mi",
+            "min",
+            "miq",
+            "mk",
+            "mkn",
+            "ml",
+            "mn",
+            "mni",
+            "mnw",
+            "mps",
+            "mqy",
+            "mr",
+            "mrj",
+            "mrw",
+            "ms",
+            "msb",
+            "msi",
+            "msm",
+            "mt",
+            "mtr",
+            "my",
+            "myv",
+            "ne",
+            "new",
+            "ngu",
+            "nhe",
+            "nia",
+            "nij",
+            "niq",
+            "nl",
+            "nnb",
+            "no",
+            "noa",
+            "noe",
+            "nog",
+            "nr",
+            "nso",
+            "nut",
+            "nv",
+            "ny",
+            "nyu",
+            "nzi",
+            "oc",
+            "oj",
+            "om",
+            "or",
+            "os",
+            "otq",
+            "pa",
+            "pag",
+            "pam",
+            "pap",
+            "pau",
+            "pck",
+            "pis",
+            "pl",
+            "pon",
+            "ppk",
+            "prk",
+            "ps",
+            "pt",
+            "qu",
+            "qub",
+            "quc",
+            "quf",
+            "quh",
+            "qup",
+            "quy",
+            "qvc",
+            "qvi",
+            "qvz",
+            "qxr",
+            "raj",
+            "rcf",
+            "rki",
+            "rm",
+            "rmc",
+            "rn",
+            "ro",
+            "rom",
+            "ru",
+            "rw",
+            "rwo",
+            "sa",
+            "sah",
+            "sd",
+            "sda",
+            "se",
+            "seh",
+            "sg",
+            "shn",
+            "shp",
+            "si",
+            "sja",
+            "sjp",
+            "sk",
+            "skr",
+            "sl",
+            "sm",
+            "smt",
+            "sn",
+            "so",
+            "spp",
+            "sq",
+            "sr",
+            "srm",
+            "srn",
+            "srr",
+            "ss",
+            "st",
+            "stq",
+            "su",
+            "sus",
+            "suz",
+            "sv",
+            "sw",
+            "sxn",
+            "syl",
+            "syr",
+            "ta",
+            "tab",
+            "taj",
+            "tbz",
+            "tca",
+            "tcy",
+            "tdx",
+            "te",
+            "teo",
+            "tet",
+            "tg",
+            "th",
+            "ti",
+            "tiv",
+            "tk",
+            "tks",
+            "tlh",
+            "tll",
+            "tn",
+            "to",
+            "toj",
+            "tr",
+            "trp",
+            "ts",
+            "tsc",
+            "tsg",
+            "tt",
+            "tuc",
+            "tvl",
+            "twu",
+            "tyv",
+            "tyz",
+            "tzh",
+            "tzj",
+            "tzo",
+            "ubu",
+            "udm",
+            "ug",
+            "uk",
+            "ur",
+            "uz",
+            "ve",
+            "vec",
+            "vi",
+            "wa",
+            "wal",
+            "war",
+            "wo",
+            "xal",
+            "xh",
+            "xmm",
+            "yap",
+            "yi",
+            "yo",
+            "yua",
+            "yue",
+            "za",
+            "zap",
+            "zh",
+            "zne",
+            "zu",
+            "zza"
+          ],
+          "promptFormat": "madlad_tag"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "madlad400-7b-mt-q5@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 5200000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "egekocabas/madlad400-7b-mt-Q5_K_M-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "madlad400-10b-mt-q3",
+      "family": "madlad400",
+      "displayName": "MADLAD-400 10B (Q3_K)",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": [
+            "aa",
+            "abt",
+            "ace",
+            "acf",
+            "ach",
+            "ada",
+            "adh",
+            "ady",
+            "af",
+            "agr",
+            "ahk",
+            "ak",
+            "akb",
+            "alt",
+            "alz",
+            "am",
+            "amu",
+            "ang",
+            "ann",
+            "ape",
+            "ar",
+            "arn",
+            "as",
+            "av",
+            "awa",
+            "ay",
+            "az",
+            "ba",
+            "ban",
+            "bas",
+            "bbc",
+            "bci",
+            "be",
+            "ber",
+            "bew",
+            "bg",
+            "bgp",
+            "bgz",
+            "bho",
+            "bi",
+            "bik",
+            "bim",
+            "bjj",
+            "bm",
+            "bn",
+            "bo",
+            "bqc",
+            "br",
+            "bru",
+            "brx",
+            "bs",
+            "bts",
+            "btx",
+            "bua",
+            "bum",
+            "bus",
+            "bzj",
+            "ca",
+            "cab",
+            "cac",
+            "cak",
+            "cbk",
+            "cce",
+            "ce",
+            "ceb",
+            "cfm",
+            "ch",
+            "chk",
+            "chm",
+            "chr",
+            "cjk",
+            "ckb",
+            "cnh",
+            "cni",
+            "co",
+            "crh",
+            "crs",
+            "cs",
+            "ctu",
+            "cuk",
+            "cv",
+            "cy",
+            "da",
+            "de",
+            "din",
+            "dje",
+            "djk",
+            "dov",
+            "dtp",
+            "dv",
+            "dwr",
+            "dyu",
+            "dz",
+            "ee",
+            "el",
+            "emp",
+            "en",
+            "enq",
+            "eo",
+            "es",
+            "et",
+            "eu",
+            "fa",
+            "ff",
+            "ffm",
+            "fi",
+            "fil",
+            "fip",
+            "fj",
+            "fo",
+            "fon",
+            "fr",
+            "frp",
+            "fy",
+            "ga",
+            "gag",
+            "gbm",
+            "gd",
+            "gil",
+            "gl",
+            "gn",
+            "gof",
+            "gom",
+            "gor",
+            "grc",
+            "gsw",
+            "gu",
+            "gub",
+            "guc",
+            "guh",
+            "gui",
+            "gv",
+            "gvl",
+            "gym",
+            "gyn",
+            "ha",
+            "haw",
+            "he",
+            "hi",
+            "hif",
+            "hil",
+            "hmn",
+            "hne",
+            "ho",
+            "hr",
+            "ht",
+            "hu",
+            "hui",
+            "hus",
+            "hvn",
+            "hy",
+            "iba",
+            "ibb",
+            "id",
+            "ify",
+            "ig",
+            "ilo",
+            "inb",
+            "is",
+            "iso",
+            "it",
+            "iu",
+            "ium",
+            "izz",
+            "ja",
+            "jac",
+            "jam",
+            "jax",
+            "jiv",
+            "jv",
+            "jvn",
+            "ka",
+            "kaa",
+            "kaa-latn",
+            "kac",
+            "kbd",
+            "kbp",
+            "kek",
+            "kg",
+            "kha",
+            "kj",
+            "kjg",
+            "kjh",
+            "kk",
+            "kl",
+            "km",
+            "kmb",
+            "kn",
+            "knj",
+            "ko",
+            "koi",
+            "kos",
+            "krc",
+            "kri",
+            "krj",
+            "ks",
+            "ksd",
+            "ksw",
+            "ktu",
+            "ku",
+            "kum",
+            "kv",
+            "kw",
+            "kwi",
+            "ky",
+            "la",
+            "laj",
+            "lb",
+            "lg",
+            "lhu",
+            "ln",
+            "lo",
+            "lrc",
+            "lt",
+            "ltg",
+            "lu",
+            "lus",
+            "luz",
+            "lv",
+            "mad",
+            "mag",
+            "mai",
+            "mak",
+            "mam",
+            "mas",
+            "maz",
+            "mbt",
+            "mdf",
+            "mel",
+            "meo",
+            "meu",
+            "mey",
+            "mfe",
+            "mg",
+            "mgh",
+            "mh",
+            "mi",
+            "min",
+            "miq",
+            "mk",
+            "mkn",
+            "ml",
+            "mn",
+            "mni",
+            "mnw",
+            "mps",
+            "mqy",
+            "mr",
+            "mrj",
+            "mrw",
+            "ms",
+            "msb",
+            "msi",
+            "msm",
+            "mt",
+            "mtr",
+            "my",
+            "myv",
+            "ne",
+            "new",
+            "ngu",
+            "nhe",
+            "nia",
+            "nij",
+            "niq",
+            "nl",
+            "nnb",
+            "no",
+            "noa",
+            "noe",
+            "nog",
+            "nr",
+            "nso",
+            "nut",
+            "nv",
+            "ny",
+            "nyu",
+            "nzi",
+            "oc",
+            "oj",
+            "om",
+            "or",
+            "os",
+            "otq",
+            "pa",
+            "pag",
+            "pam",
+            "pap",
+            "pau",
+            "pck",
+            "pis",
+            "pl",
+            "pon",
+            "ppk",
+            "prk",
+            "ps",
+            "pt",
+            "qu",
+            "qub",
+            "quc",
+            "quf",
+            "quh",
+            "qup",
+            "quy",
+            "qvc",
+            "qvi",
+            "qvz",
+            "qxr",
+            "raj",
+            "rcf",
+            "rki",
+            "rm",
+            "rmc",
+            "rn",
+            "ro",
+            "rom",
+            "ru",
+            "rw",
+            "rwo",
+            "sa",
+            "sah",
+            "sd",
+            "sda",
+            "se",
+            "seh",
+            "sg",
+            "shn",
+            "shp",
+            "si",
+            "sja",
+            "sjp",
+            "sk",
+            "skr",
+            "sl",
+            "sm",
+            "smt",
+            "sn",
+            "so",
+            "spp",
+            "sq",
+            "sr",
+            "srm",
+            "srn",
+            "srr",
+            "ss",
+            "st",
+            "stq",
+            "su",
+            "sus",
+            "suz",
+            "sv",
+            "sw",
+            "sxn",
+            "syl",
+            "syr",
+            "ta",
+            "tab",
+            "taj",
+            "tbz",
+            "tca",
+            "tcy",
+            "tdx",
+            "te",
+            "teo",
+            "tet",
+            "tg",
+            "th",
+            "ti",
+            "tiv",
+            "tk",
+            "tks",
+            "tlh",
+            "tll",
+            "tn",
+            "to",
+            "toj",
+            "tr",
+            "trp",
+            "ts",
+            "tsc",
+            "tsg",
+            "tt",
+            "tuc",
+            "tvl",
+            "twu",
+            "tyv",
+            "tyz",
+            "tzh",
+            "tzj",
+            "tzo",
+            "ubu",
+            "udm",
+            "ug",
+            "uk",
+            "ur",
+            "uz",
+            "ve",
+            "vec",
+            "vi",
+            "wa",
+            "wal",
+            "war",
+            "wo",
+            "xal",
+            "xh",
+            "xmm",
+            "yap",
+            "yi",
+            "yo",
+            "yua",
+            "yue",
+            "za",
+            "zap",
+            "zh",
+            "zne",
+            "zu",
+            "zza"
+          ],
+          "promptFormat": "madlad_tag"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "madlad400-10b-mt-q3@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 5220000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "thirteenbit/madlad400-10b-mt-gguf"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q3_K"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "madlad400-10b-mt-q4",
+      "family": "madlad400",
+      "displayName": "MADLAD-400 10B (Q4_K)",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": [
+            "aa",
+            "abt",
+            "ace",
+            "acf",
+            "ach",
+            "ada",
+            "adh",
+            "ady",
+            "af",
+            "agr",
+            "ahk",
+            "ak",
+            "akb",
+            "alt",
+            "alz",
+            "am",
+            "amu",
+            "ang",
+            "ann",
+            "ape",
+            "ar",
+            "arn",
+            "as",
+            "av",
+            "awa",
+            "ay",
+            "az",
+            "ba",
+            "ban",
+            "bas",
+            "bbc",
+            "bci",
+            "be",
+            "ber",
+            "bew",
+            "bg",
+            "bgp",
+            "bgz",
+            "bho",
+            "bi",
+            "bik",
+            "bim",
+            "bjj",
+            "bm",
+            "bn",
+            "bo",
+            "bqc",
+            "br",
+            "bru",
+            "brx",
+            "bs",
+            "bts",
+            "btx",
+            "bua",
+            "bum",
+            "bus",
+            "bzj",
+            "ca",
+            "cab",
+            "cac",
+            "cak",
+            "cbk",
+            "cce",
+            "ce",
+            "ceb",
+            "cfm",
+            "ch",
+            "chk",
+            "chm",
+            "chr",
+            "cjk",
+            "ckb",
+            "cnh",
+            "cni",
+            "co",
+            "crh",
+            "crs",
+            "cs",
+            "ctu",
+            "cuk",
+            "cv",
+            "cy",
+            "da",
+            "de",
+            "din",
+            "dje",
+            "djk",
+            "dov",
+            "dtp",
+            "dv",
+            "dwr",
+            "dyu",
+            "dz",
+            "ee",
+            "el",
+            "emp",
+            "en",
+            "enq",
+            "eo",
+            "es",
+            "et",
+            "eu",
+            "fa",
+            "ff",
+            "ffm",
+            "fi",
+            "fil",
+            "fip",
+            "fj",
+            "fo",
+            "fon",
+            "fr",
+            "frp",
+            "fy",
+            "ga",
+            "gag",
+            "gbm",
+            "gd",
+            "gil",
+            "gl",
+            "gn",
+            "gof",
+            "gom",
+            "gor",
+            "grc",
+            "gsw",
+            "gu",
+            "gub",
+            "guc",
+            "guh",
+            "gui",
+            "gv",
+            "gvl",
+            "gym",
+            "gyn",
+            "ha",
+            "haw",
+            "he",
+            "hi",
+            "hif",
+            "hil",
+            "hmn",
+            "hne",
+            "ho",
+            "hr",
+            "ht",
+            "hu",
+            "hui",
+            "hus",
+            "hvn",
+            "hy",
+            "iba",
+            "ibb",
+            "id",
+            "ify",
+            "ig",
+            "ilo",
+            "inb",
+            "is",
+            "iso",
+            "it",
+            "iu",
+            "ium",
+            "izz",
+            "ja",
+            "jac",
+            "jam",
+            "jax",
+            "jiv",
+            "jv",
+            "jvn",
+            "ka",
+            "kaa",
+            "kaa-latn",
+            "kac",
+            "kbd",
+            "kbp",
+            "kek",
+            "kg",
+            "kha",
+            "kj",
+            "kjg",
+            "kjh",
+            "kk",
+            "kl",
+            "km",
+            "kmb",
+            "kn",
+            "knj",
+            "ko",
+            "koi",
+            "kos",
+            "krc",
+            "kri",
+            "krj",
+            "ks",
+            "ksd",
+            "ksw",
+            "ktu",
+            "ku",
+            "kum",
+            "kv",
+            "kw",
+            "kwi",
+            "ky",
+            "la",
+            "laj",
+            "lb",
+            "lg",
+            "lhu",
+            "ln",
+            "lo",
+            "lrc",
+            "lt",
+            "ltg",
+            "lu",
+            "lus",
+            "luz",
+            "lv",
+            "mad",
+            "mag",
+            "mai",
+            "mak",
+            "mam",
+            "mas",
+            "maz",
+            "mbt",
+            "mdf",
+            "mel",
+            "meo",
+            "meu",
+            "mey",
+            "mfe",
+            "mg",
+            "mgh",
+            "mh",
+            "mi",
+            "min",
+            "miq",
+            "mk",
+            "mkn",
+            "ml",
+            "mn",
+            "mni",
+            "mnw",
+            "mps",
+            "mqy",
+            "mr",
+            "mrj",
+            "mrw",
+            "ms",
+            "msb",
+            "msi",
+            "msm",
+            "mt",
+            "mtr",
+            "my",
+            "myv",
+            "ne",
+            "new",
+            "ngu",
+            "nhe",
+            "nia",
+            "nij",
+            "niq",
+            "nl",
+            "nnb",
+            "no",
+            "noa",
+            "noe",
+            "nog",
+            "nr",
+            "nso",
+            "nut",
+            "nv",
+            "ny",
+            "nyu",
+            "nzi",
+            "oc",
+            "oj",
+            "om",
+            "or",
+            "os",
+            "otq",
+            "pa",
+            "pag",
+            "pam",
+            "pap",
+            "pau",
+            "pck",
+            "pis",
+            "pl",
+            "pon",
+            "ppk",
+            "prk",
+            "ps",
+            "pt",
+            "qu",
+            "qub",
+            "quc",
+            "quf",
+            "quh",
+            "qup",
+            "quy",
+            "qvc",
+            "qvi",
+            "qvz",
+            "qxr",
+            "raj",
+            "rcf",
+            "rki",
+            "rm",
+            "rmc",
+            "rn",
+            "ro",
+            "rom",
+            "ru",
+            "rw",
+            "rwo",
+            "sa",
+            "sah",
+            "sd",
+            "sda",
+            "se",
+            "seh",
+            "sg",
+            "shn",
+            "shp",
+            "si",
+            "sja",
+            "sjp",
+            "sk",
+            "skr",
+            "sl",
+            "sm",
+            "smt",
+            "sn",
+            "so",
+            "spp",
+            "sq",
+            "sr",
+            "srm",
+            "srn",
+            "srr",
+            "ss",
+            "st",
+            "stq",
+            "su",
+            "sus",
+            "suz",
+            "sv",
+            "sw",
+            "sxn",
+            "syl",
+            "syr",
+            "ta",
+            "tab",
+            "taj",
+            "tbz",
+            "tca",
+            "tcy",
+            "tdx",
+            "te",
+            "teo",
+            "tet",
+            "tg",
+            "th",
+            "ti",
+            "tiv",
+            "tk",
+            "tks",
+            "tlh",
+            "tll",
+            "tn",
+            "to",
+            "toj",
+            "tr",
+            "trp",
+            "ts",
+            "tsc",
+            "tsg",
+            "tt",
+            "tuc",
+            "tvl",
+            "twu",
+            "tyv",
+            "tyz",
+            "tzh",
+            "tzj",
+            "tzo",
+            "ubu",
+            "udm",
+            "ug",
+            "uk",
+            "ur",
+            "uz",
+            "ve",
+            "vec",
+            "vi",
+            "wa",
+            "wal",
+            "war",
+            "wo",
+            "xal",
+            "xh",
+            "xmm",
+            "yap",
+            "yi",
+            "yo",
+            "yua",
+            "yue",
+            "za",
+            "zap",
+            "zh",
+            "zne",
+            "zu",
+            "zza"
+          ],
+          "promptFormat": "madlad_tag"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "madlad400-10b-mt-q4@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 6690000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "thirteenbit/madlad400-10b-mt-gguf"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "madlad400-10b-mt-q5",
+      "family": "madlad400",
+      "displayName": "MADLAD-400 10B (Q5_K)",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": [
+            "aa",
+            "abt",
+            "ace",
+            "acf",
+            "ach",
+            "ada",
+            "adh",
+            "ady",
+            "af",
+            "agr",
+            "ahk",
+            "ak",
+            "akb",
+            "alt",
+            "alz",
+            "am",
+            "amu",
+            "ang",
+            "ann",
+            "ape",
+            "ar",
+            "arn",
+            "as",
+            "av",
+            "awa",
+            "ay",
+            "az",
+            "ba",
+            "ban",
+            "bas",
+            "bbc",
+            "bci",
+            "be",
+            "ber",
+            "bew",
+            "bg",
+            "bgp",
+            "bgz",
+            "bho",
+            "bi",
+            "bik",
+            "bim",
+            "bjj",
+            "bm",
+            "bn",
+            "bo",
+            "bqc",
+            "br",
+            "bru",
+            "brx",
+            "bs",
+            "bts",
+            "btx",
+            "bua",
+            "bum",
+            "bus",
+            "bzj",
+            "ca",
+            "cab",
+            "cac",
+            "cak",
+            "cbk",
+            "cce",
+            "ce",
+            "ceb",
+            "cfm",
+            "ch",
+            "chk",
+            "chm",
+            "chr",
+            "cjk",
+            "ckb",
+            "cnh",
+            "cni",
+            "co",
+            "crh",
+            "crs",
+            "cs",
+            "ctu",
+            "cuk",
+            "cv",
+            "cy",
+            "da",
+            "de",
+            "din",
+            "dje",
+            "djk",
+            "dov",
+            "dtp",
+            "dv",
+            "dwr",
+            "dyu",
+            "dz",
+            "ee",
+            "el",
+            "emp",
+            "en",
+            "enq",
+            "eo",
+            "es",
+            "et",
+            "eu",
+            "fa",
+            "ff",
+            "ffm",
+            "fi",
+            "fil",
+            "fip",
+            "fj",
+            "fo",
+            "fon",
+            "fr",
+            "frp",
+            "fy",
+            "ga",
+            "gag",
+            "gbm",
+            "gd",
+            "gil",
+            "gl",
+            "gn",
+            "gof",
+            "gom",
+            "gor",
+            "grc",
+            "gsw",
+            "gu",
+            "gub",
+            "guc",
+            "guh",
+            "gui",
+            "gv",
+            "gvl",
+            "gym",
+            "gyn",
+            "ha",
+            "haw",
+            "he",
+            "hi",
+            "hif",
+            "hil",
+            "hmn",
+            "hne",
+            "ho",
+            "hr",
+            "ht",
+            "hu",
+            "hui",
+            "hus",
+            "hvn",
+            "hy",
+            "iba",
+            "ibb",
+            "id",
+            "ify",
+            "ig",
+            "ilo",
+            "inb",
+            "is",
+            "iso",
+            "it",
+            "iu",
+            "ium",
+            "izz",
+            "ja",
+            "jac",
+            "jam",
+            "jax",
+            "jiv",
+            "jv",
+            "jvn",
+            "ka",
+            "kaa",
+            "kaa-latn",
+            "kac",
+            "kbd",
+            "kbp",
+            "kek",
+            "kg",
+            "kha",
+            "kj",
+            "kjg",
+            "kjh",
+            "kk",
+            "kl",
+            "km",
+            "kmb",
+            "kn",
+            "knj",
+            "ko",
+            "koi",
+            "kos",
+            "krc",
+            "kri",
+            "krj",
+            "ks",
+            "ksd",
+            "ksw",
+            "ktu",
+            "ku",
+            "kum",
+            "kv",
+            "kw",
+            "kwi",
+            "ky",
+            "la",
+            "laj",
+            "lb",
+            "lg",
+            "lhu",
+            "ln",
+            "lo",
+            "lrc",
+            "lt",
+            "ltg",
+            "lu",
+            "lus",
+            "luz",
+            "lv",
+            "mad",
+            "mag",
+            "mai",
+            "mak",
+            "mam",
+            "mas",
+            "maz",
+            "mbt",
+            "mdf",
+            "mel",
+            "meo",
+            "meu",
+            "mey",
+            "mfe",
+            "mg",
+            "mgh",
+            "mh",
+            "mi",
+            "min",
+            "miq",
+            "mk",
+            "mkn",
+            "ml",
+            "mn",
+            "mni",
+            "mnw",
+            "mps",
+            "mqy",
+            "mr",
+            "mrj",
+            "mrw",
+            "ms",
+            "msb",
+            "msi",
+            "msm",
+            "mt",
+            "mtr",
+            "my",
+            "myv",
+            "ne",
+            "new",
+            "ngu",
+            "nhe",
+            "nia",
+            "nij",
+            "niq",
+            "nl",
+            "nnb",
+            "no",
+            "noa",
+            "noe",
+            "nog",
+            "nr",
+            "nso",
+            "nut",
+            "nv",
+            "ny",
+            "nyu",
+            "nzi",
+            "oc",
+            "oj",
+            "om",
+            "or",
+            "os",
+            "otq",
+            "pa",
+            "pag",
+            "pam",
+            "pap",
+            "pau",
+            "pck",
+            "pis",
+            "pl",
+            "pon",
+            "ppk",
+            "prk",
+            "ps",
+            "pt",
+            "qu",
+            "qub",
+            "quc",
+            "quf",
+            "quh",
+            "qup",
+            "quy",
+            "qvc",
+            "qvi",
+            "qvz",
+            "qxr",
+            "raj",
+            "rcf",
+            "rki",
+            "rm",
+            "rmc",
+            "rn",
+            "ro",
+            "rom",
+            "ru",
+            "rw",
+            "rwo",
+            "sa",
+            "sah",
+            "sd",
+            "sda",
+            "se",
+            "seh",
+            "sg",
+            "shn",
+            "shp",
+            "si",
+            "sja",
+            "sjp",
+            "sk",
+            "skr",
+            "sl",
+            "sm",
+            "smt",
+            "sn",
+            "so",
+            "spp",
+            "sq",
+            "sr",
+            "srm",
+            "srn",
+            "srr",
+            "ss",
+            "st",
+            "stq",
+            "su",
+            "sus",
+            "suz",
+            "sv",
+            "sw",
+            "sxn",
+            "syl",
+            "syr",
+            "ta",
+            "tab",
+            "taj",
+            "tbz",
+            "tca",
+            "tcy",
+            "tdx",
+            "te",
+            "teo",
+            "tet",
+            "tg",
+            "th",
+            "ti",
+            "tiv",
+            "tk",
+            "tks",
+            "tlh",
+            "tll",
+            "tn",
+            "to",
+            "toj",
+            "tr",
+            "trp",
+            "ts",
+            "tsc",
+            "tsg",
+            "tt",
+            "tuc",
+            "tvl",
+            "twu",
+            "tyv",
+            "tyz",
+            "tzh",
+            "tzj",
+            "tzo",
+            "ubu",
+            "udm",
+            "ug",
+            "uk",
+            "ur",
+            "uz",
+            "ve",
+            "vec",
+            "vi",
+            "wa",
+            "wal",
+            "war",
+            "wo",
+            "xal",
+            "xh",
+            "xmm",
+            "yap",
+            "yi",
+            "yo",
+            "yua",
+            "yue",
+            "za",
+            "zap",
+            "zh",
+            "zne",
+            "zu",
+            "zza"
+          ],
+          "promptFormat": "madlad_tag"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "madlad400-10b-mt-q5@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 7710000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "thirteenbit/madlad400-10b-mt-gguf"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q5_K"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "madlad400-10b-mt-q6",
+      "family": "madlad400",
+      "displayName": "MADLAD-400 10B (Q6_K)",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": [
+            "aa",
+            "abt",
+            "ace",
+            "acf",
+            "ach",
+            "ada",
+            "adh",
+            "ady",
+            "af",
+            "agr",
+            "ahk",
+            "ak",
+            "akb",
+            "alt",
+            "alz",
+            "am",
+            "amu",
+            "ang",
+            "ann",
+            "ape",
+            "ar",
+            "arn",
+            "as",
+            "av",
+            "awa",
+            "ay",
+            "az",
+            "ba",
+            "ban",
+            "bas",
+            "bbc",
+            "bci",
+            "be",
+            "ber",
+            "bew",
+            "bg",
+            "bgp",
+            "bgz",
+            "bho",
+            "bi",
+            "bik",
+            "bim",
+            "bjj",
+            "bm",
+            "bn",
+            "bo",
+            "bqc",
+            "br",
+            "bru",
+            "brx",
+            "bs",
+            "bts",
+            "btx",
+            "bua",
+            "bum",
+            "bus",
+            "bzj",
+            "ca",
+            "cab",
+            "cac",
+            "cak",
+            "cbk",
+            "cce",
+            "ce",
+            "ceb",
+            "cfm",
+            "ch",
+            "chk",
+            "chm",
+            "chr",
+            "cjk",
+            "ckb",
+            "cnh",
+            "cni",
+            "co",
+            "crh",
+            "crs",
+            "cs",
+            "ctu",
+            "cuk",
+            "cv",
+            "cy",
+            "da",
+            "de",
+            "din",
+            "dje",
+            "djk",
+            "dov",
+            "dtp",
+            "dv",
+            "dwr",
+            "dyu",
+            "dz",
+            "ee",
+            "el",
+            "emp",
+            "en",
+            "enq",
+            "eo",
+            "es",
+            "et",
+            "eu",
+            "fa",
+            "ff",
+            "ffm",
+            "fi",
+            "fil",
+            "fip",
+            "fj",
+            "fo",
+            "fon",
+            "fr",
+            "frp",
+            "fy",
+            "ga",
+            "gag",
+            "gbm",
+            "gd",
+            "gil",
+            "gl",
+            "gn",
+            "gof",
+            "gom",
+            "gor",
+            "grc",
+            "gsw",
+            "gu",
+            "gub",
+            "guc",
+            "guh",
+            "gui",
+            "gv",
+            "gvl",
+            "gym",
+            "gyn",
+            "ha",
+            "haw",
+            "he",
+            "hi",
+            "hif",
+            "hil",
+            "hmn",
+            "hne",
+            "ho",
+            "hr",
+            "ht",
+            "hu",
+            "hui",
+            "hus",
+            "hvn",
+            "hy",
+            "iba",
+            "ibb",
+            "id",
+            "ify",
+            "ig",
+            "ilo",
+            "inb",
+            "is",
+            "iso",
+            "it",
+            "iu",
+            "ium",
+            "izz",
+            "ja",
+            "jac",
+            "jam",
+            "jax",
+            "jiv",
+            "jv",
+            "jvn",
+            "ka",
+            "kaa",
+            "kaa-latn",
+            "kac",
+            "kbd",
+            "kbp",
+            "kek",
+            "kg",
+            "kha",
+            "kj",
+            "kjg",
+            "kjh",
+            "kk",
+            "kl",
+            "km",
+            "kmb",
+            "kn",
+            "knj",
+            "ko",
+            "koi",
+            "kos",
+            "krc",
+            "kri",
+            "krj",
+            "ks",
+            "ksd",
+            "ksw",
+            "ktu",
+            "ku",
+            "kum",
+            "kv",
+            "kw",
+            "kwi",
+            "ky",
+            "la",
+            "laj",
+            "lb",
+            "lg",
+            "lhu",
+            "ln",
+            "lo",
+            "lrc",
+            "lt",
+            "ltg",
+            "lu",
+            "lus",
+            "luz",
+            "lv",
+            "mad",
+            "mag",
+            "mai",
+            "mak",
+            "mam",
+            "mas",
+            "maz",
+            "mbt",
+            "mdf",
+            "mel",
+            "meo",
+            "meu",
+            "mey",
+            "mfe",
+            "mg",
+            "mgh",
+            "mh",
+            "mi",
+            "min",
+            "miq",
+            "mk",
+            "mkn",
+            "ml",
+            "mn",
+            "mni",
+            "mnw",
+            "mps",
+            "mqy",
+            "mr",
+            "mrj",
+            "mrw",
+            "ms",
+            "msb",
+            "msi",
+            "msm",
+            "mt",
+            "mtr",
+            "my",
+            "myv",
+            "ne",
+            "new",
+            "ngu",
+            "nhe",
+            "nia",
+            "nij",
+            "niq",
+            "nl",
+            "nnb",
+            "no",
+            "noa",
+            "noe",
+            "nog",
+            "nr",
+            "nso",
+            "nut",
+            "nv",
+            "ny",
+            "nyu",
+            "nzi",
+            "oc",
+            "oj",
+            "om",
+            "or",
+            "os",
+            "otq",
+            "pa",
+            "pag",
+            "pam",
+            "pap",
+            "pau",
+            "pck",
+            "pis",
+            "pl",
+            "pon",
+            "ppk",
+            "prk",
+            "ps",
+            "pt",
+            "qu",
+            "qub",
+            "quc",
+            "quf",
+            "quh",
+            "qup",
+            "quy",
+            "qvc",
+            "qvi",
+            "qvz",
+            "qxr",
+            "raj",
+            "rcf",
+            "rki",
+            "rm",
+            "rmc",
+            "rn",
+            "ro",
+            "rom",
+            "ru",
+            "rw",
+            "rwo",
+            "sa",
+            "sah",
+            "sd",
+            "sda",
+            "se",
+            "seh",
+            "sg",
+            "shn",
+            "shp",
+            "si",
+            "sja",
+            "sjp",
+            "sk",
+            "skr",
+            "sl",
+            "sm",
+            "smt",
+            "sn",
+            "so",
+            "spp",
+            "sq",
+            "sr",
+            "srm",
+            "srn",
+            "srr",
+            "ss",
+            "st",
+            "stq",
+            "su",
+            "sus",
+            "suz",
+            "sv",
+            "sw",
+            "sxn",
+            "syl",
+            "syr",
+            "ta",
+            "tab",
+            "taj",
+            "tbz",
+            "tca",
+            "tcy",
+            "tdx",
+            "te",
+            "teo",
+            "tet",
+            "tg",
+            "th",
+            "ti",
+            "tiv",
+            "tk",
+            "tks",
+            "tlh",
+            "tll",
+            "tn",
+            "to",
+            "toj",
+            "tr",
+            "trp",
+            "ts",
+            "tsc",
+            "tsg",
+            "tt",
+            "tuc",
+            "tvl",
+            "twu",
+            "tyv",
+            "tyz",
+            "tzh",
+            "tzj",
+            "tzo",
+            "ubu",
+            "udm",
+            "ug",
+            "uk",
+            "ur",
+            "uz",
+            "ve",
+            "vec",
+            "vi",
+            "wa",
+            "wal",
+            "war",
+            "wo",
+            "xal",
+            "xh",
+            "xmm",
+            "yap",
+            "yi",
+            "yo",
+            "yua",
+            "yue",
+            "za",
+            "zap",
+            "zh",
+            "zne",
+            "zu",
+            "zza"
+          ],
+          "promptFormat": "madlad_tag"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "madlad400-10b-mt-q6@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 8800000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "thirteenbit/madlad400-10b-mt-gguf"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q6_K"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "madlad400-10b-mt-q8",
+      "family": "madlad400",
+      "displayName": "MADLAD-400 10B (Q8_0)",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": [
+            "aa",
+            "abt",
+            "ace",
+            "acf",
+            "ach",
+            "ada",
+            "adh",
+            "ady",
+            "af",
+            "agr",
+            "ahk",
+            "ak",
+            "akb",
+            "alt",
+            "alz",
+            "am",
+            "amu",
+            "ang",
+            "ann",
+            "ape",
+            "ar",
+            "arn",
+            "as",
+            "av",
+            "awa",
+            "ay",
+            "az",
+            "ba",
+            "ban",
+            "bas",
+            "bbc",
+            "bci",
+            "be",
+            "ber",
+            "bew",
+            "bg",
+            "bgp",
+            "bgz",
+            "bho",
+            "bi",
+            "bik",
+            "bim",
+            "bjj",
+            "bm",
+            "bn",
+            "bo",
+            "bqc",
+            "br",
+            "bru",
+            "brx",
+            "bs",
+            "bts",
+            "btx",
+            "bua",
+            "bum",
+            "bus",
+            "bzj",
+            "ca",
+            "cab",
+            "cac",
+            "cak",
+            "cbk",
+            "cce",
+            "ce",
+            "ceb",
+            "cfm",
+            "ch",
+            "chk",
+            "chm",
+            "chr",
+            "cjk",
+            "ckb",
+            "cnh",
+            "cni",
+            "co",
+            "crh",
+            "crs",
+            "cs",
+            "ctu",
+            "cuk",
+            "cv",
+            "cy",
+            "da",
+            "de",
+            "din",
+            "dje",
+            "djk",
+            "dov",
+            "dtp",
+            "dv",
+            "dwr",
+            "dyu",
+            "dz",
+            "ee",
+            "el",
+            "emp",
+            "en",
+            "enq",
+            "eo",
+            "es",
+            "et",
+            "eu",
+            "fa",
+            "ff",
+            "ffm",
+            "fi",
+            "fil",
+            "fip",
+            "fj",
+            "fo",
+            "fon",
+            "fr",
+            "frp",
+            "fy",
+            "ga",
+            "gag",
+            "gbm",
+            "gd",
+            "gil",
+            "gl",
+            "gn",
+            "gof",
+            "gom",
+            "gor",
+            "grc",
+            "gsw",
+            "gu",
+            "gub",
+            "guc",
+            "guh",
+            "gui",
+            "gv",
+            "gvl",
+            "gym",
+            "gyn",
+            "ha",
+            "haw",
+            "he",
+            "hi",
+            "hif",
+            "hil",
+            "hmn",
+            "hne",
+            "ho",
+            "hr",
+            "ht",
+            "hu",
+            "hui",
+            "hus",
+            "hvn",
+            "hy",
+            "iba",
+            "ibb",
+            "id",
+            "ify",
+            "ig",
+            "ilo",
+            "inb",
+            "is",
+            "iso",
+            "it",
+            "iu",
+            "ium",
+            "izz",
+            "ja",
+            "jac",
+            "jam",
+            "jax",
+            "jiv",
+            "jv",
+            "jvn",
+            "ka",
+            "kaa",
+            "kaa-latn",
+            "kac",
+            "kbd",
+            "kbp",
+            "kek",
+            "kg",
+            "kha",
+            "kj",
+            "kjg",
+            "kjh",
+            "kk",
+            "kl",
+            "km",
+            "kmb",
+            "kn",
+            "knj",
+            "ko",
+            "koi",
+            "kos",
+            "krc",
+            "kri",
+            "krj",
+            "ks",
+            "ksd",
+            "ksw",
+            "ktu",
+            "ku",
+            "kum",
+            "kv",
+            "kw",
+            "kwi",
+            "ky",
+            "la",
+            "laj",
+            "lb",
+            "lg",
+            "lhu",
+            "ln",
+            "lo",
+            "lrc",
+            "lt",
+            "ltg",
+            "lu",
+            "lus",
+            "luz",
+            "lv",
+            "mad",
+            "mag",
+            "mai",
+            "mak",
+            "mam",
+            "mas",
+            "maz",
+            "mbt",
+            "mdf",
+            "mel",
+            "meo",
+            "meu",
+            "mey",
+            "mfe",
+            "mg",
+            "mgh",
+            "mh",
+            "mi",
+            "min",
+            "miq",
+            "mk",
+            "mkn",
+            "ml",
+            "mn",
+            "mni",
+            "mnw",
+            "mps",
+            "mqy",
+            "mr",
+            "mrj",
+            "mrw",
+            "ms",
+            "msb",
+            "msi",
+            "msm",
+            "mt",
+            "mtr",
+            "my",
+            "myv",
+            "ne",
+            "new",
+            "ngu",
+            "nhe",
+            "nia",
+            "nij",
+            "niq",
+            "nl",
+            "nnb",
+            "no",
+            "noa",
+            "noe",
+            "nog",
+            "nr",
+            "nso",
+            "nut",
+            "nv",
+            "ny",
+            "nyu",
+            "nzi",
+            "oc",
+            "oj",
+            "om",
+            "or",
+            "os",
+            "otq",
+            "pa",
+            "pag",
+            "pam",
+            "pap",
+            "pau",
+            "pck",
+            "pis",
+            "pl",
+            "pon",
+            "ppk",
+            "prk",
+            "ps",
+            "pt",
+            "qu",
+            "qub",
+            "quc",
+            "quf",
+            "quh",
+            "qup",
+            "quy",
+            "qvc",
+            "qvi",
+            "qvz",
+            "qxr",
+            "raj",
+            "rcf",
+            "rki",
+            "rm",
+            "rmc",
+            "rn",
+            "ro",
+            "rom",
+            "ru",
+            "rw",
+            "rwo",
+            "sa",
+            "sah",
+            "sd",
+            "sda",
+            "se",
+            "seh",
+            "sg",
+            "shn",
+            "shp",
+            "si",
+            "sja",
+            "sjp",
+            "sk",
+            "skr",
+            "sl",
+            "sm",
+            "smt",
+            "sn",
+            "so",
+            "spp",
+            "sq",
+            "sr",
+            "srm",
+            "srn",
+            "srr",
+            "ss",
+            "st",
+            "stq",
+            "su",
+            "sus",
+            "suz",
+            "sv",
+            "sw",
+            "sxn",
+            "syl",
+            "syr",
+            "ta",
+            "tab",
+            "taj",
+            "tbz",
+            "tca",
+            "tcy",
+            "tdx",
+            "te",
+            "teo",
+            "tet",
+            "tg",
+            "th",
+            "ti",
+            "tiv",
+            "tk",
+            "tks",
+            "tlh",
+            "tll",
+            "tn",
+            "to",
+            "toj",
+            "tr",
+            "trp",
+            "ts",
+            "tsc",
+            "tsg",
+            "tt",
+            "tuc",
+            "tvl",
+            "twu",
+            "tyv",
+            "tyz",
+            "tzh",
+            "tzj",
+            "tzo",
+            "ubu",
+            "udm",
+            "ug",
+            "uk",
+            "ur",
+            "uz",
+            "ve",
+            "vec",
+            "vi",
+            "wa",
+            "wal",
+            "war",
+            "wo",
+            "xal",
+            "xh",
+            "xmm",
+            "yap",
+            "yi",
+            "yo",
+            "yua",
+            "yue",
+            "za",
+            "zap",
+            "zh",
+            "zne",
+            "zu",
+            "zza"
+          ],
+          "promptFormat": "madlad_tag"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "madlad400-10b-mt-q8@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 11400000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "thirteenbit/madlad400-10b-mt-gguf"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "translategemma-4b",
+      "family": "translategemma",
+      "displayName": "TranslateGemma 4B",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": "*",
+          "promptFormat": "chat"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "translategemma-4b@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 2450000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "42ailab/TranslateGemma-4B-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "omnitranslate-1-1",
+      "family": "omnitranslate",
+      "displayName": "OmniTranslate 1.1",
+      "status": "unverified",
+      "capabilities": {
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": "*",
+          "promptFormat": "chat"
+        },
+        "text.generation": {}
+      },
+      "variants": [
+        {
+          "id": "omnitranslate-1-1@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 500000000,
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "mradermacher/OmniTranslate-1.1-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M",
+                    "Q4_K_S",
+                    "Q4_0",
+                    "IQ4_XS",
+                    "Q3_K_M",
+                    "Q5_K_M",
+                    "Q8_0"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "contextTokens": "4096"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-tiny",
+      "family": "whisper",
+      "displayName": "Whisper Tiny",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": "*",
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "whisper-tiny@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.bin",
+              "sizeBytes": 75000000,
+              "source": {
+                "type": "huggingface",
+                "repo": "ggerganov/whisper.cpp",
+                "revision": "main",
+                "path": "ggml-tiny.bin"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "whisper_cpp",
+              "requiredRoles": [
+                "weights"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-base",
+      "family": "whisper",
+      "displayName": "Whisper Base",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": "*",
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "whisper-base@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.bin",
+              "sizeBytes": 142000000,
+              "source": {
+                "type": "huggingface",
+                "repo": "ggerganov/whisper.cpp",
+                "revision": "main",
+                "path": "ggml-base.bin"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "whisper_cpp",
+              "requiredRoles": [
+                "weights"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-small",
+      "family": "whisper",
+      "displayName": "Whisper Small",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": "*",
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "whisper-small@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.bin",
+              "sizeBytes": 466000000,
+              "source": {
+                "type": "huggingface",
+                "repo": "ggerganov/whisper.cpp",
+                "revision": "main",
+                "path": "ggml-small.bin"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "whisper_cpp",
+              "requiredRoles": [
+                "weights"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-medium",
+      "family": "whisper",
+      "displayName": "Whisper Medium",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": "*",
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "whisper-medium@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.bin",
+              "sizeBytes": 539000000,
+              "source": {
+                "type": "huggingface",
+                "repo": "ggerganov/whisper.cpp",
+                "revision": "main",
+                "path": "ggml-medium-q5_0.bin"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "whisper_cpp",
+              "requiredRoles": [
+                "weights"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-large-turbo",
+      "family": "whisper",
+      "displayName": "Whisper Large v3 Turbo",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": "*",
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "whisper-large-turbo@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.bin",
+              "sizeBytes": 574000000,
+              "source": {
+                "type": "huggingface",
+                "repo": "ggerganov/whisper.cpp",
+                "revision": "main",
+                "path": "ggml-large-v3-turbo-q5_0.bin"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "whisper_cpp",
+              "requiredRoles": [
+                "weights"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-large",
+      "family": "whisper",
+      "displayName": "Whisper Large v3",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": "*",
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "whisper-large@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.bin",
+              "sizeBytes": 1181000000,
+              "source": {
+                "type": "huggingface",
+                "repo": "ggerganov/whisper.cpp",
+                "revision": "main",
+                "path": "ggml-large-v3-q5_0.bin"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "whisper_cpp",
+              "requiredRoles": [
+                "weights"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-ivrit-large-turbo",
+      "family": "whisper-ivrit",
+      "displayName": "ivrit.ai Whisper Large v3 Turbo (Hebrew)",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": "*",
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "whisper-ivrit-large-turbo@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.bin",
+              "sizeBytes": 1624555275,
+              "source": {
+                "type": "huggingface",
+                "repo": "ivrit-ai/whisper-large-v3-turbo-ggml",
+                "revision": "main",
+                "path": "ggml-model.bin"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "whisper_cpp",
+              "requiredRoles": [
+                "weights"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-ivrit-large",
+      "family": "whisper-ivrit",
+      "displayName": "ivrit.ai Whisper Large v3 (Hebrew)",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": "*",
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "whisper-ivrit-large@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.bin",
+              "sizeBytes": 3095033483,
+              "source": {
+                "type": "huggingface",
+                "repo": "ivrit-ai/whisper-large-v3-ggml",
+                "revision": "main",
+                "path": "ggml-model.bin"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "whisper_cpp",
+              "requiredRoles": [
+                "weights"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vosk-small-ru",
+      "family": "vosk",
+      "displayName": "Vosk Small — Russian",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": [
+            "ru"
+          ],
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "vosk-small-ru@legacy",
+          "artifacts": [
+            {
+              "role": "archive",
+              "fileName": "model.zip",
+              "sizeBytes": 45000000,
+              "source": {
+                "type": "url",
+                "url": "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+              },
+              "unpack": {
+                "format": "zip"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "vosk",
+              "requiredRoles": [
+                "archive"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vosk-small-en",
+      "family": "vosk",
+      "displayName": "Vosk Small — English",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": [
+            "en"
+          ],
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "vosk-small-en@legacy",
+          "artifacts": [
+            {
+              "role": "archive",
+              "fileName": "model.zip",
+              "sizeBytes": 40000000,
+              "source": {
+                "type": "url",
+                "url": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+              },
+              "mirrors": [
+                {
+                  "type": "huggingface",
+                  "repo": "grimso/vosk-models",
+                  "revision": "main",
+                  "path": "vosk-model-small-en-us-0.15.zip"
+                }
+              ],
+              "unpack": {
+                "format": "zip"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "vosk",
+              "requiredRoles": [
+                "archive"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vosk-ru",
+      "family": "vosk",
+      "displayName": "Vosk — Russian (large, more accurate)",
+      "status": "unverified",
+      "capabilities": {
+        "audio.stt": {
+          "languages": [
+            "ru"
+          ],
+          "streaming": true
+        }
+      },
+      "variants": [
+        {
+          "id": "vosk-ru@legacy",
+          "artifacts": [
+            {
+              "role": "archive",
+              "fileName": "model.zip",
+              "sizeBytes": 1800000000,
+              "source": {
+                "type": "url",
+                "url": "https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip"
+              },
+              "unpack": {
+                "format": "zip"
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "vosk",
+              "requiredRoles": [
+                "archive"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multilingual-e5-small-iq4xs",
+      "family": "multilingual-e5",
+      "displayName": "Multilingual E5 Small",
+      "status": "unverified",
+      "capabilities": {
+        "embedding.text": {
+          "dimensions": 384,
+          "pooling": "mean",
+          "normalized": true,
+          "queryPrefix": "query: ",
+          "documentPrefix": "passage: "
+        }
+      },
+      "variants": [
+        {
+          "id": "multilingual-e5-small-iq4xs@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "cstr/multilingual-e5-small-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "IQ4_XS"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "mode": "embedding"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multilingual-e5-base-q4km",
+      "family": "multilingual-e5",
+      "displayName": "Multilingual E5 Base",
+      "status": "unverified",
+      "capabilities": {
+        "embedding.text": {
+          "dimensions": 768,
+          "pooling": "mean",
+          "normalized": true,
+          "queryPrefix": "query: ",
+          "documentPrefix": "passage: "
+        }
+      },
+      "variants": [
+        {
+          "id": "multilingual-e5-base-q4km@legacy",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "source": {
+                "type": "huggingface_selection",
+                "repoIds": [
+                  "groonga/multilingual-e5-base-Q4_K_M-GGUF"
+                ],
+                "revision": "main",
+                "file": {
+                  "type": "quantization",
+                  "quantPriority": [
+                    "Q4_K_M"
+                  ],
+                  "extension": ".gguf"
+                }
+              }
+            }
+          ],
+          "bindings": [
+            {
+              "runtime": "llama_cpp",
+              "requiredRoles": [
+                "weights"
+              ],
+              "config": {
+                "mode": "embedding"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -80,6 +80,13 @@ jobs:
           GIGACHAT_API_KEY_5: ${{ secrets.GIGACHAT_API_KEY_5 }}
         run: ./gradlew --no-daemon --max-workers=1 :app:assembleDebug 2>&1 | tee -a build.log
 
+      # :app's own JVM unit tests (app/src/test) — the legacy → domain model
+      # catalogue golden and snapshot tests. After the APK build so the
+      # compiled :app classes are reused; before publishing, so a red test
+      # never ships an APK.
+      - name: Unit-test app
+        run: ./gradlew --no-daemon --max-workers=1 :app:testDebugUnitTest 2>&1 | tee -a build.log
+
       - name: Name the APK after the build
         id: apk
         run: |

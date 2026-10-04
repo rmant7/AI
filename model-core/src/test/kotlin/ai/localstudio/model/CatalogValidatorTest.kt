@@ -168,6 +168,21 @@ class CatalogValidatorTest {
     }
 
     @Test
+    fun `an unknown unpacked size is acceptable only below experimental`() {
+        fun archiveModel(status: CatalogStatus) = model(
+            status = status,
+            variants = listOf(
+                variant(
+                    artifacts = listOf(artifact(role = ArtifactRoles.ARCHIVE, fileName = "m.zip", source = hf("m.zip", revision = "main"), sha256 = null, unpack = UnpackSpec("zip"))),
+                    bindings = listOf(binding(required = setOf(ArtifactRoles.ARCHIVE))),
+                ),
+            ),
+        )
+        assertEquals(1, validate(archiveModel(CatalogStatus.UNVERIFIED)).models.size)
+        rejects(archiveModel(CatalogStatus.EXPERIMENTAL), "requires a known unpacked size")
+    }
+
+    @Test
     fun `duplicate model and variant ids drop the later model only`() {
         val result = validate(model(id = "a"), model(id = "a"))
         assertEquals(1, result.models.size)

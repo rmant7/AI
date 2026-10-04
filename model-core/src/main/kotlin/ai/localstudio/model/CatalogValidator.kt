@@ -9,8 +9,13 @@ package ai.localstudio.model
  * - VERIFIED: every artifact has a size and a sha256, every Hugging Face
  *   source is pinned to a commit. A direct URL is acceptable here only
  *   because the sha256 then pins the bytes.
- * - EXPERIMENTAL: sizes known, Hugging Face sources pinned; sha256 optional.
+ * - EXPERIMENTAL: sizes (and unpacked sizes) known, Hugging Face sources
+ *   pinned; sha256 optional.
  * - UNVERIFIED / DEPRECATED / WITHDRAWN: structure only.
+ *
+ * A dynamic source ([ArtifactSource.HuggingFaceSelection]) is accepted only
+ * in an UNVERIFIED entry, only as the primary source (a mirror must be the
+ * same bytes, and a selection doesn't name any), and never with a sha256.
  *
  * Every source, at every level, must be https and on the allowlist for the
  * given [CatalogTrust].
@@ -18,6 +23,7 @@ package ai.localstudio.model
 object CatalogValidator {
 
     private val SHA256 = Regex("^[0-9a-f]{64}$")
+    private val HF_REPO_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
     fun validate(document: CatalogDocument, trust: CatalogTrust): ValidatedCatalog {
         val allowedHosts = when (trust) {
@@ -76,11 +82,12 @@ object CatalogValidator {
             artifact.sha256?.let { if (!SHA256.matches(it)) problems += "$label: sha256 must be 64 lowercase hex characters" }
             artifact.unpack?.let { unpack ->
                 if (unpack.format !in UnpackSpec.KNOWN_FORMATS) problems += "$label: unknown archive format ${unpack.format}"
-                if (unpack.unpackedSizeBytes <= 0) problems += "$label: unpackedSizeBytes must be positive"
+                if (unpack.unpackedSizeBytes < 0) problems += "$label: negative unpackedSizeBytes"
             }
             for (source in listOf(artifact.source) + artifact.mirrors) {
                 sourceProblem(source, allowedHosts)?.let { problems += "$label: $it" }
             }
+            problems += dynamicSourceProblems(artifact, status).map { "$label: $it" }
             problems += integrityProblems(artifact, status).map { "$label: $it" }
         }
 
@@ -110,6 +117,7 @@ object CatalogValidator {
         val pinsRequired = status == CatalogStatus.VERIFIED || status == CatalogStatus.EXPERIMENTAL
         if (pinsRequired) {
             if (artifact.sizeBytes <= 0) problems += "${status.name.lowercase()} requires a known size"
+            artifact.unpack?.let { if (it.unpackedSizeBytes <= 0) problems += "${status.name.lowercase()} requires a known unpacked size" }
             val unpinned = (listOf(artifact.source) + artifact.mirrors)
                 .filterIsInstance<ArtifactSource.HuggingFace>()
                 .filterNot { it.isPinned }
@@ -121,12 +129,36 @@ object CatalogValidator {
         return problems
     }
 
+    private fun dynamicSourceProblems(artifact: ArtifactSpec, status: CatalogStatus): List<String> {
+        val problems = mutableListOf<String>()
+        if (artifact.mirrors.any { it.isDynamic }) problems += "a dynamic source cannot be a mirror"
+        if (artifact.source.isDynamic) {
+            if (status != CatalogStatus.UNVERIFIED) problems += "a dynamic source is allowed only in unverified entries"
+            if (artifact.sha256 != null) problems += "a dynamic source cannot carry a sha256: it names no fixed bytes"
+        }
+        return problems
+    }
+
     private fun sourceProblem(source: ArtifactSource, allowedHosts: Set<String>): String? {
         if (source.scheme != "https") return "source must be https, got ${source.scheme ?: "no scheme"}"
         val host = source.host ?: return "source has no host"
         if (host !in allowedHosts) return "host $host is not in the allowlist"
-        if (source is ArtifactSource.HuggingFace) {
-            if (source.repo.isBlank() || source.revision.isBlank() || source.path.isBlank()) return "huggingface source needs repo, revision and path"
+        when (source) {
+            is ArtifactSource.HuggingFace ->
+                if (source.repo.isBlank() || source.revision.isBlank() || source.path.isBlank()) return "huggingface source needs repo, revision and path"
+            is ArtifactSource.HuggingFaceSelection -> {
+                if (source.repoIds.isEmpty()) return "huggingface selection needs at least one repository"
+                source.repoIds.firstOrNull { !HF_REPO_ID.matches(it) }?.let { return "malformed repository id '$it'" }
+                if (source.repoIds.toSet().size != source.repoIds.size) return "repository ids must be unique"
+                if (source.revision.isBlank()) return "huggingface selection needs a revision"
+                when (val file = source.file) {
+                    is FileSelector.ByQuantization ->
+                        if (!file.extension.startsWith(".") || file.extension.length < 2) return "selection extension must look like '.gguf'"
+                    is FileSelector.ExactName ->
+                        if (file.fileName.isBlank() || '/' in file.fileName) return "exact selection needs a bare file name"
+                }
+            }
+            is ArtifactSource.DirectUrl -> Unit
         }
         return null
     }
