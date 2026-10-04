@@ -1,5 +1,6 @@
 package ai.localstudio.app.llama
 
+import ai.localstudio.app.modelinstall.ModelInstallation
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CoroutineScope
@@ -61,7 +62,8 @@ class MemoryPressureLifecycleTest {
         assumeTrue("llama_jni did not load for this ABI", LlamaBridge.isAvailable)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val store = ExperimentalEmbeddingStore(context)
+        // With the model store: after 3b.3 the app may have adopted the file there.
+        val store = ExperimentalEmbeddingStore(context, ModelInstallation(context))
         val spec = ExperimentalEmbeddingModels.E5_BASE
 
         // Step 1: E5 downloaded.

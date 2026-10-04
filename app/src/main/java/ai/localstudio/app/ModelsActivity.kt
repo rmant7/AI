@@ -759,10 +759,8 @@ class ModelsActivity : AppCompatActivity() {
     // ── Embedding model ────────────────────────────────────────────────────
 
     /**
-     * [ExperimentalEmbeddingModels.E5_BASE] only — not E5_SMALL, which never
-     * loads at all (see its own doc comment) and stays reachable purely as
-     * an experimental candidate under Settings → Advanced, not here. This
-     * is the app's one production semantic-memory model, shown with the
+     * [ExperimentalEmbeddingModels.E5_BASE] — the app's one production
+     * semantic-memory model, shown with the
      * two things "installed" conflates for a chat model but genuinely don't
      * for this one: whether the GGUF is on disk, and whether it's actually
      * the loaded embedder memory retrieval is using right now (see

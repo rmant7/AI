@@ -54,12 +54,10 @@ class ModelInstallEndToEndTest {
         val catalogText = testAssets.open("local-models.json").bufferedReader().use { it.readText() }
         val catalog = CatalogLoader.load(catalogText, CatalogTrust.Bundled)
         assertEquals(emptyList<Any>(), catalog.violations)
-        // e5-base, not e5-small: the e5-small file the legacy entry selects
-        // (cstr/multilingual-e5-small-GGUF, multilingual-e5-small-iq4_xs.gguf)
-        // downloads and verifies fine but this app's llama.cpp refuses it —
-        // "bert model needs to define token type count" (an older conversion
-        // without bert.token_type_count). That is a model-file problem the
-        // legacy Experimental-embeddings screen has too, not an install one.
+        // e5-base: the only embedding model left. e5-small's file
+        // (cstr/multilingual-e5-small-GGUF) downloaded and verified fine but
+        // this app's llama.cpp refused it — "bert model needs to define token
+        // type count" — so it was removed from the app and the catalogue.
         val model = catalog.models.single { it.id.id == "multilingual-e5-base-q4km" }
         val variant = model.variants.single()
         val facet = model.facet(Capabilities.TEXT_EMBEDDING) as EmbeddingFacet

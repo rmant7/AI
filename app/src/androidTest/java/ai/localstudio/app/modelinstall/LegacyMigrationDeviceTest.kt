@@ -66,10 +66,10 @@ class LegacyMigrationDeviceTest {
     @Test
     fun legacy_stores_are_scanned_and_proven_without_touching_a_file_then_adopted_by_rename() {
         hub.publish("ggerganov/whisper.cpp", "main", "c".repeat(40), "ggml-base.bin" to whisperBytes)
-        hub.publish("cstr/multilingual-e5-small-GGUF", "main", "d".repeat(40), "multilingual-e5-small-iq4_xs.gguf" to e5Bytes)
+        hub.publish("groonga/multilingual-e5-base-Q4_K_M-GGUF", "main", "d".repeat(40), "multilingual-e5-base-q4_k_m.gguf" to e5Bytes)
 
         val whisper = legacy("whisper/whisper-base.bin", whisperBytes)
-        val e5 = legacy("experimental_embeddings/multilingual-e5-small-iq4xs.gguf", e5Bytes)
+        val e5 = legacy("experimental_embeddings/multilingual-e5-base-q4km.gguf", e5Bytes)
         // Right name, wrong bytes: the name is only a claim.
         legacy("models/gemma-3-4b-it-q4.gguf", ByteArray(4096) { 1 })
         legacy("vosk-models/vosk-small-ru/am/final.mdl", ByteArray(10) { 2 })
@@ -78,7 +78,7 @@ class LegacyMigrationDeviceTest {
 
         val scan = LegacyInstallationScanner(base, models).scan()
         assertEquals(
-            listOf("experimental_embeddings/multilingual-e5-small-iq4xs.gguf", "models/gemma-3-4b-it-q4.gguf", "vosk-models/vosk-small-ru/", "whisper/whisper-base.bin"),
+            listOf("experimental_embeddings/multilingual-e5-base-q4km.gguf", "models/gemma-3-4b-it-q4.gguf", "vosk-models/vosk-small-ru/", "whisper/whisper-base.bin"),
             scan.installations.map { it.origin },
         )
         assertEquals(listOf("not-a-catalogue-model.gguf"), scan.unrecognized.map { it.name })
@@ -90,7 +90,7 @@ class LegacyMigrationDeviceTest {
         val whisperProof = (outcomes.getValue("whisper/whisper-base.bin") as MigrationOutcome.Proven).record.proofs.single()
         assertEquals("c".repeat(40), whisperProof.source.commit)
         assertEquals(LocalHub.sha256(whisperBytes), whisperProof.sha256)
-        assertTrue(outcomes.getValue("experimental_embeddings/multilingual-e5-small-iq4xs.gguf") is MigrationOutcome.Proven)
+        assertTrue(outcomes.getValue("experimental_embeddings/multilingual-e5-base-q4km.gguf") is MigrationOutcome.Proven)
         assertTrue(outcomes.getValue("models/gemma-3-4b-it-q4.gguf") is MigrationOutcome.Unproven)
         val vosk = outcomes.getValue("vosk-models/vosk-small-ru/") as MigrationOutcome.Unproven
         assertTrue(vosk.record.reason!!, "archive is gone" in vosk.record.reason!!)
@@ -103,7 +103,7 @@ class LegacyMigrationDeviceTest {
         assertEquals(
             mapOf(
                 "gemma-3-4b-it-q4@legacy" to LegacyRecord.UNVERIFIED,
-                "multilingual-e5-small-iq4xs@legacy" to LegacyRecord.PROVEN,
+                "multilingual-e5-base-q4km@legacy" to LegacyRecord.PROVEN,
                 "vosk-small-ru@legacy" to LegacyRecord.UNVERIFIED,
                 "whisper-base@legacy" to LegacyRecord.PROVEN,
             ),

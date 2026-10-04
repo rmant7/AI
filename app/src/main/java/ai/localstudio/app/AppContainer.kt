@@ -69,6 +69,7 @@ import ai.localstudio.app.llama.LlamaCppRuntime
 import ai.localstudio.app.llama.MeasuredRamStore
 import ai.localstudio.app.llama.RamMeasuringRuntime
 import ai.localstudio.app.llama.readMemAvailableBytes
+import ai.localstudio.app.modelinstall.ModelInstallation
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
@@ -492,7 +493,11 @@ class AppContainer private constructor(private val context: Context) {
      * NullPointerException on `experimentalEmbeddingStore.isInstalled(...)`
      * for exactly that reason before this property moved up here.
      */
-    val experimentalEmbeddingStore = ExperimentalEmbeddingStore(context)
+    val experimentalEmbeddingStore = ExperimentalEmbeddingStore(
+        context,
+        installation = ModelInstallation(context, token = { settings.huggingFaceToken.ifBlank { null } }),
+        log = { appLog.record("SEMANTIC_MEMORY", it) },
+    )
 
     init {
         // Must run before sync() below: a cooldown sync() would otherwise
@@ -602,6 +607,7 @@ class AppContainer private constructor(private val context: Context) {
                 appLog.record("SEMANTIC_MEMORY", "auto-download of Multilingual E5 Base skipped: long-term memory is off")
                 return@launch
             }
+            experimentalEmbeddingStore.deleteRemovedModels()
             val spec = ExperimentalEmbeddingModels.E5_BASE
             // Reading isAvailable, not just checking it: this is what
             // actually triggers its lazy System.loadLibrary() call. Skipping
@@ -967,6 +973,11 @@ class AppContainer private constructor(private val context: Context) {
             appLog.record("SEMANTIC_MEMORY", "E5 load deferred: $reason")
             return@withLock false
         }
+        // A legacy download moves into the model store only once proven
+        // byte-identical to the catalogue's file; anything short of that
+        // leaves it where it is and fileFor() keeps pointing at it.
+        withContext(Dispatchers.IO) { runCatching { experimentalEmbeddingStore.adoptLegacy(spec) } }
+            .exceptionOrNull()?.let { appLog.record("SEMANTIC_MEMORY", "${spec.title}: adoption failed, legacy file used: ${it.message}") }
 
         val embedder = runCatching {
             LlamaCppMemoryEmbedder.load(
@@ -1452,6 +1463,7 @@ class AppContainer private constructor(private val context: Context) {
     val experimentalEmbeddingDownloads = ExperimentalEmbeddingDownloads(
         experimentalEmbeddingStore,
         tokenProvider = { settings.huggingFaceToken.ifBlank { null } },
+        log = { appLog.record("SEMANTIC_MEMORY", it) },
     )
 
     private var cachedOrchestrator: Orchestrator? = null

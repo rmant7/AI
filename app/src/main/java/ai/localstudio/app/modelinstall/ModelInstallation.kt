@@ -15,8 +15,9 @@ import java.io.File
  * [root] (manifests, staging parts and their identity sidecars), so a fresh
  * instance after a process death picks up exactly where the last one stopped.
  *
- * Phase 3b, first step: built and tested on device, but no consumer uses it
- * yet — the app still installs through the legacy download classes, into
+ * Phase 3b.3: semantic memory's embedding model (see
+ * [ai.localstudio.app.llama.ExperimentalEmbeddingStore]) is the first consumer;
+ * every other model still installs through the legacy download classes, into
  * their own directories, untouched by this.
  */
 class ModelInstallation(
@@ -33,7 +34,7 @@ class ModelInstallation(
     val installed = InstalledVariants(layout)
     val installer = ModelInstaller(layout, ArtifactResolver(hub), TransferEngine(transport, attemptsPerSource, retryDelayMs))
 
-    /** Adopts proven legacy installations (see [LegacyInstallationScanner]); not run by the app yet. */
+    /** Adopts proven legacy installations (see [LegacyInstallationScanner]); run for the embedding model only so far. */
     val migrator = LegacyMigrator(layout, hub)
 
     /** Free space for an install under [root], for [ModelInstaller.install]'s `freeBytes`. */

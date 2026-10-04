@@ -4537,57 +4537,6 @@
       ]
     },
     {
-      "id": "multilingual-e5-small-iq4xs",
-      "family": "multilingual-e5",
-      "displayName": "Multilingual E5 Small",
-      "status": "unverified",
-      "capabilities": {
-        "embedding.text": {
-          "dimensions": 384,
-          "pooling": "mean",
-          "normalized": true,
-          "queryPrefix": "query: ",
-          "documentPrefix": "passage: "
-        }
-      },
-      "variants": [
-        {
-          "id": "multilingual-e5-small-iq4xs@legacy",
-          "artifacts": [
-            {
-              "role": "weights",
-              "fileName": "model.gguf",
-              "source": {
-                "type": "huggingface_selection",
-                "repoIds": [
-                  "cstr/multilingual-e5-small-GGUF"
-                ],
-                "revision": "main",
-                "file": {
-                  "type": "quantization",
-                  "quantPriority": [
-                    "IQ4_XS"
-                  ],
-                  "extension": ".gguf"
-                }
-              }
-            }
-          ],
-          "bindings": [
-            {
-              "runtime": "llama_cpp",
-              "requiredRoles": [
-                "weights"
-              ],
-              "config": {
-                "mode": "embedding"
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
       "id": "multilingual-e5-base-q4km",
       "family": "multilingual-e5",
       "displayName": "Multilingual E5 Base",

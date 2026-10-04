@@ -1,8 +1,12 @@
 package ai.localstudio.app.llama
 
+import ai.localstudio.app.modelinstall.ModelInstallation
 import ai.localstudio.app.models.DownloadProgress
 import ai.localstudio.app.models.HuggingFaceResolver
 import ai.localstudio.app.models.ModelDownloader
+import ai.localstudio.app.models.catalog.LegacyCatalogMapper
+import ai.localstudio.model.install.InstallResult
+import ai.localstudio.model.install.TransferCancelledException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -10,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed interface ExperimentalDownloadState {
     data object Idle : ExperimentalDownloadState
@@ -43,6 +48,7 @@ class ExperimentalEmbeddingDownloads(
     private val store: ExperimentalEmbeddingStore,
     private val tokenProvider: () -> String? = { null },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val log: (String) -> Unit = {},
 ) {
 
     private val states = MutableStateFlow<Map<String, ExperimentalDownloadState>>(emptyMap())
@@ -54,13 +60,40 @@ class ExperimentalEmbeddingDownloads(
     fun stateOf(spec: EmbeddingModelSpec): ExperimentalDownloadState =
         states.value[spec.id] ?: if (store.isInstalled(spec)) ExperimentalDownloadState.Installed else ExperimentalDownloadState.Idle
 
+    private val cancelled = mutableMapOf<String, AtomicBoolean>()
+
+    /**
+     * Phase 3b.3: installs through the new chain (resolve to a commit, Range
+     * download, sha256 check, manifest -- [ai.localstudio.app.modelinstall.ModelInstallation])
+     * when the store has one; the legacy download below is the fallback when
+     * that fails for any reason other than cancellation or lack of space.
+     */
     fun start(spec: EmbeddingModelSpec) {
         if (jobs[spec.id]?.isActive == true) return
 
         val downloader = ModelDownloader()
         downloaders[spec.id] = downloader
+        val cancel = AtomicBoolean(false).also { cancelled[spec.id] = it }
         jobs[spec.id] = scope.launch {
             publish(spec, ExperimentalDownloadState.Resolving)
+            store.installation?.let { installation ->
+                val outcome = runCatching { installViaStore(installation, spec, cancel) }
+                    .getOrElse { e -> if (e is TransferCancelledException) return@launch else NewChainOutcome.Failed(e.message ?: e.toString()) }
+                when (outcome) {
+                    NewChainOutcome.Installed -> {
+                        store.partFor(spec).delete()
+                        publish(spec, ExperimentalDownloadState.Installed)
+                        downloaders.remove(spec.id)
+                        return@launch
+                    }
+                    is NewChainOutcome.Final -> {
+                        publish(spec, ExperimentalDownloadState.Failed(outcome.message))
+                        downloaders.remove(spec.id)
+                        return@launch
+                    }
+                    is NewChainOutcome.Failed -> log("${spec.title}: model store install failed (${outcome.message}); falling back to the legacy download")
+                }
+            }
             try {
                 val (_, resolved) = HuggingFaceResolver.resolveAny(
                     listOf(spec.repoId),
@@ -76,13 +109,13 @@ class ExperimentalEmbeddingDownloads(
                 publish(spec, ExperimentalDownloadState.Running(DownloadProgress(store.partialSize(spec), resolved.sizeBytes)))
                 downloader.download(
                     url = resolved.downloadUrl,
-                    destination = store.fileFor(spec),
+                    destination = store.legacyFileFor(spec),
                     tempFile = store.partFor(spec),
                 ) { progress -> publish(spec, ExperimentalDownloadState.Running(progress)) }
 
-                val installedSize = store.fileFor(spec).length()
+                val installedSize = store.legacyFileFor(spec).length()
                 if (resolved.sizeBytes > 0 && installedSize != resolved.sizeBytes) {
-                    store.fileFor(spec).delete()
+                    store.legacyFileFor(spec).delete()
                     publish(spec, ExperimentalDownloadState.Failed("File corrupted: got $installedSize bytes, expected ${resolved.sizeBytes}"))
                     return@launch
                 }
@@ -96,7 +129,43 @@ class ExperimentalEmbeddingDownloads(
         }
     }
 
+    private sealed interface NewChainOutcome {
+        data object Installed : NewChainOutcome
+
+        /** Not worth a legacy retry (no space, refused): shown as is. */
+        data class Final(val message: String) : NewChainOutcome
+
+        data class Failed(val message: String) : NewChainOutcome
+    }
+
+    private fun installViaStore(installation: ModelInstallation, spec: EmbeddingModelSpec, cancel: AtomicBoolean): NewChainOutcome {
+        val model = store.model(spec)
+        val result = installation.installer.install(
+            LegacyCatalogMapper.CATALOG_ID,
+            LegacyCatalogMapper.CATALOG_VERSION,
+            model,
+            model.variants.single(),
+            installation::freeBytes,
+            cancel = { cancel.get() },
+        ) { progress ->
+            publish(spec, ExperimentalDownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: 0)))
+        }
+        return when (result) {
+            is InstallResult.Installed -> {
+                val weights = result.manifest.artifacts.single()
+                log("${spec.title}: installed in the model store from ${weights.source.repo}/${weights.source.path}@${weights.source.commit?.take(8)} (${weights.integrity})")
+                NewChainOutcome.Installed
+            }
+            is InstallResult.AlreadyInstalled -> NewChainOutcome.Installed
+            is InstallResult.InsufficientStorage ->
+                NewChainOutcome.Final("Not enough space: need ${mb(result.neededBytes)}, ${mb(result.freeBytes)} free")
+            is InstallResult.Refused -> NewChainOutcome.Final("${spec.title} is ${result.status.name.lowercase()} in the catalogue")
+            is InstallResult.Failed -> NewChainOutcome.Failed("${result.fileName}: ${result.failures.joinToString("; ")}")
+        }
+    }
+
     fun cancel(spec: EmbeddingModelSpec) {
+        cancelled[spec.id]?.set(true)
         downloaders[spec.id]?.cancel()
         jobs[spec.id]?.cancel()
         publish(spec, ExperimentalDownloadState.Idle)

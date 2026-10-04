@@ -2,9 +2,10 @@ package ai.localstudio.app.llama
 
 /**
  * Embedding models for [ai.localstudio.memory.MemorySemanticIndex] — one
- * production model ([E5_BASE]) and one still-experimental candidate
- * ([E5_SMALL], which does not currently load at all — see its own doc
- * comment). Not referenced by [ai.localstudio.app.models.LocalModels] or its
+ * production model ([E5_BASE]). (Multilingual E5 Small, cstr/multilingual-
+ * e5-small-GGUF IQ4_XS, was removed: that conversion never loaded —
+ * "bert model needs to define token type count" — on device and in CI.)
+ * Not referenced by [ai.localstudio.app.models.LocalModels] or its
  * download UI either way: those are the *chat*-model catalog, a different
  * concept this app's Models screen exposes for a different kind of model —
  * see `Mobile_mem0/SEMANTIC_RETRIEVAL_DESIGN.md`'s "Choosing the concrete
@@ -35,30 +36,6 @@ data class EmbeddingModelSpec(
 object ExperimentalEmbeddingModels {
 
     /**
-     * Still experimental, and currently broken: on-device verification via
-     * [ai.localstudio.app.ExperimentalEmbeddingsActivity] failed to load
-     * this exact file with `llama_model_load: error loading model: bert
-     * model needs to define token type count` — a metadata field missing
-     * from this specific GGUF conversion, not something this app's own JNI
-     * code can work around. Never auto-loaded by
-     * [ai.localstudio.app.AppContainer] for that reason; kept here (rather
-     * than deleted) as a record of what was tried, and because the
-     * Experimental screen still needs something to show alongside [E5_BASE].
-     * A different Small conversion could replace this entry once verified —
-     * this one specifically should not be retried as-is.
-     */
-    val E5_SMALL = EmbeddingModelSpec(
-        id = "multilingual-e5-small-iq4xs",
-        title = "Multilingual E5 Small",
-        repoId = "cstr/multilingual-e5-small-GGUF",
-        quantLabel = "IQ4_XS",
-        dimension = 384,
-        pooling = EmbeddingPooling.MEAN,
-        queryPrefix = "query: ",
-        passagePrefix = "passage: ",
-    )
-
-    /**
      * The app's production semantic-memory embedding model — the only one
      * [ai.localstudio.app.AppContainer] downloads and loads automatically.
      * Verified twice: on-device via
@@ -81,5 +58,5 @@ object ExperimentalEmbeddingModels {
     )
 
     /** Every candidate, for [ExperimentalEmbeddingsActivity] to list. */
-    val ALL = listOf(E5_SMALL, E5_BASE)
+    val ALL = listOf(E5_BASE)
 }
