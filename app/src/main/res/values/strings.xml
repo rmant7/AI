@@ -473,6 +473,7 @@
     <string name="phrasebook_badge_verified">checked</string>
     <string name="phrasebook_badge_unverified">unverified</string>
     <string name="phrasebook_load_failed">Couldn\'t load the phrasebook. See Error log for details.</string>
+    <string name="discover_unavailable">Nothing to search with: the app has no way to list Hugging Face models right now</string>
     <string name="discover_menu">Find new models (beta)</string>
     <string name="discover_running">Searching Hugging Face… this takes a minute</string>
     <string name="discover_title">New model candidates</string>

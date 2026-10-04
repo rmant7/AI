@@ -186,7 +186,18 @@ class ModelsActivity : AppCompatActivity() {
      * checked.
      */
     private fun runDiscovery() {
-        val discovery = container.modelInstallation.discovery ?: return
+        // Logged before anything else, synchronously (AppLog.record writes
+        // to disk on the spot) -- a device report (build #455) showed zero
+        // DISCOVERY lines and no visible effect at all after tapping this,
+        // with no crash either. Either this method was never reached, or it
+        // returned right here with discovery == null; this line tells the
+        // two apart on the next attempt regardless of which it was.
+        val discovery = container.modelInstallation.discovery
+        container.appLog.record("DISCOVERY", "menu item tapped; discovery ${if (discovery != null) "available" else "unavailable (hub cannot search)"}")
+        if (discovery == null) {
+            Toast.makeText(this, R.string.discover_unavailable, Toast.LENGTH_LONG).show()
+            return
+        }
         Toast.makeText(this, R.string.discover_running, Toast.LENGTH_SHORT).show()
         val known = (LocalModels.SEEDS + TranslationModels.SEEDS + container.allCustomSeeds()).flatMap { it.repoIds }.toSet()
         // The same 1.3x file-size-to-RAM estimate DeviceProfile.fitsBudget uses.
