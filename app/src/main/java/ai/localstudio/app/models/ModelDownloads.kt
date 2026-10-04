@@ -3,6 +3,10 @@ package ai.localstudio.app.models
 import ai.localstudio.app.modelinstall.ModelInstallation
 import ai.localstudio.app.models.catalog.LegacyCatalogMapper
 import ai.localstudio.core.registry.ArtifactResolver
+import ai.localstudio.model.ArtifactRoles
+import ai.localstudio.model.install.ArtifactResolution
+import ai.localstudio.model.install.GgufCompatibility
+import ai.localstudio.model.install.GgufProbe
 import ai.localstudio.model.install.InstallResult
 import ai.localstudio.model.install.TransferCancelledException
 import kotlinx.coroutines.CoroutineScope
@@ -229,6 +233,7 @@ class ModelDownloads(
     private fun installViaStore(installation: ModelInstallation, seed: LocalModelSeed, cancel: AtomicBoolean): NewChainOutcome {
         val model = LegacyCatalogMapper.customModel(seed)
         val source = seed.repoIds.first()
+        if (seed.isCustom) incompatibility(installation, seed, model)?.let { return NewChainOutcome.Final(it) }
         val result = installation.installer.install(
             LegacyCatalogMapper.CATALOG_ID,
             LegacyCatalogMapper.CATALOG_VERSION,
@@ -258,6 +263,35 @@ class ModelDownloads(
                 NewChainOutcome.Final("Not enough space: need ${gb(result.neededBytes)}, ${gb(result.freeBytes)} free")
             is InstallResult.Refused -> NewChainOutcome.Final("${seed.title} is ${result.status.name.lowercase()} in the catalogue")
             is InstallResult.Failed -> NewChainOutcome.Failed("${result.fileName}: ${result.failures.joinToString("; ")}")
+        }
+    }
+
+    /**
+     * A user-added repository's GGUF judged by its own header before the
+     * download (bundled seeds are curated, so not probed): an architecture
+     * the bundled llama.cpp cannot load used to cost the whole multi-GB
+     * download and then fail at load. The reason when it cannot load; null
+     * when it can, or when the header could not be read -- that is not a
+     * verdict, so the install goes ahead as before.
+     */
+    private fun incompatibility(installation: ModelInstallation, seed: LocalModelSeed, model: ai.localstudio.model.ModelDefinition): String? {
+        val weights = model.variants.single().artifacts.firstOrNull { it.role == ArtifactRoles.WEIGHTS } ?: return null
+        val resolved = (installation.resolver.resolve(weights, model.status) as? ArtifactResolution.Resolved)?.artifact ?: return null
+        return when (val probe = installation.ggufProbe.probe(resolved)) {
+            is GgufProbe.Result.Probed -> when (val verdict = probe.compatibility) {
+                is GgufCompatibility.NotLoadable -> {
+                    log("MODEL_DOWNLOAD", "${seed.id}: not downloaded -- ${verdict.reason} (${resolved.candidates.first().origin.path}, header read in ${probe.bytesRead} bytes)")
+                    "This model cannot run in this app: ${verdict.reason}"
+                }
+                is GgufCompatibility.Loadable -> {
+                    log("MODEL_DOWNLOAD", "${seed.id}: header OK -- ${verdict.architecture}, context ${verdict.contextLength ?: "?"}${verdict.notes.joinToString("") { "; $it" }}")
+                    null
+                }
+            }
+            is GgufProbe.Result.Unreadable -> {
+                log("MODEL_DOWNLOAD", "${seed.id}: header not checked (${probe.reason}); downloading anyway")
+                null
+            }
         }
     }
 

@@ -150,6 +150,42 @@ class GgufStoreSwitchDeviceTest {
         assertEquals(0L, store.partialSize(seed))
     }
 
+    /** A GGUF header (v3, little-endian) naming [architecture], then [payload] bytes standing in for the weights. */
+    private fun gguf(architecture: String, payload: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        fun le(size: Int, put: java.nio.ByteBuffer.() -> Unit) =
+            out.write(java.nio.ByteBuffer.allocate(size).order(java.nio.ByteOrder.LITTLE_ENDIAN).apply(put).array())
+        fun str(v: String) { val b = v.toByteArray(); le(8) { putLong(b.size.toLong()) }; out.write(b) }
+        le(4) { putInt(0x46554747) }; le(4) { putInt(3) }; le(8) { putLong(1) }; le(8) { putLong(2) }
+        str("general.architecture"); le(4) { putInt(8) }; str(architecture)
+        str("$architecture.context_length"); le(4) { putInt(4) }; le(4) { putInt(8192) }
+        out.write(ByteArray(payload))
+        return out.toByteArray()
+    }
+
+    @Test
+    fun a_custom_model_llama_cpp_cannot_load_is_refused_before_the_download() {
+        val big = gguf("gemma9", payload = 3_000_000)
+        hub.publish("test/vision-model-GGUF", "main", "d".repeat(40), "model-Q4_K_M.gguf" to big, "mmproj-F16.gguf" to projector)
+        val store = store()
+
+        val state = install(store)
+        assertTrue("got $state", state is DownloadState.Failed && "gemma9" in state.message)
+        assertFalse(store.isInstalled(seed))
+        assertEquals("nothing staged", 0L, store.partialSize(seed))
+        assertFalse("no legacy fallback download either", store.partFor(seed).exists())
+    }
+
+    @Test
+    fun a_custom_model_with_a_known_architecture_installs_as_before() {
+        val real = gguf("qwen3", payload = 1_000_000)
+        hub.publish("test/vision-model-GGUF", "main", "e".repeat(40), "model-Q4_K_M.gguf" to real)
+        val store = store()
+
+        assertEquals(DownloadState.Installed, install(store))
+        assertArrayEquals(real, store.fileFor(seed).readBytes())
+    }
+
     @Test
     fun without_the_new_chain_the_store_is_the_legacy_store() {
         val store = store(installation = null)

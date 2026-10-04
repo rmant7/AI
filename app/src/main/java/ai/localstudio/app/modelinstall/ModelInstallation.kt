@@ -1,6 +1,7 @@
 package ai.localstudio.app.modelinstall
 
 import ai.localstudio.model.install.ArtifactResolver
+import ai.localstudio.model.install.GgufProbe
 import ai.localstudio.model.install.InstallLayout
 import ai.localstudio.model.install.InstalledVariants
 import ai.localstudio.model.install.LegacyMigrator
@@ -32,7 +33,11 @@ class ModelInstallation(
     val probe = AndroidDeviceProbe(context)
     val layout = InstallLayout(root)
     val installed = InstalledVariants(layout)
-    val installer = ModelInstaller(layout, ArtifactResolver(hub), TransferEngine(transport, attemptsPerSource, retryDelayMs))
+    val resolver = ArtifactResolver(hub)
+    val installer = ModelInstaller(layout, resolver, TransferEngine(transport, attemptsPerSource, retryDelayMs))
+
+    /** Reads a resolved GGUF's header -- its first bytes only -- to judge it before the download (see [GgufProbe]). */
+    val ggufProbe = GgufProbe(transport)
 
     /** Adopts proven legacy installations (see [LegacyInstallationScanner]); run for the embedding model only so far. */
     val migrator = LegacyMigrator(layout, hub)
