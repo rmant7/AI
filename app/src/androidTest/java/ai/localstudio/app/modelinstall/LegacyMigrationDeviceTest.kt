@@ -6,6 +6,7 @@ import ai.localstudio.model.ModelDefinition
 import ai.localstudio.model.install.InstallHealth
 import ai.localstudio.model.install.IntegrityBasis
 import ai.localstudio.model.install.LegacyRecord
+import ai.localstudio.model.install.AdoptionOutcome
 import ai.localstudio.model.install.MigrationOutcome
 import android.system.Os
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,6 +14,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,8 +24,10 @@ import java.io.File
 /**
  * 3b.2 on a device: a legacy file layout (the four legacy stores) in a
  * scratch directory, the generated catalogue, [LocalHub] answering as
- * Hugging Face — scanned, proven or rejected, adopted by hard link on the
- * device's real filesystem.
+ * Hugging Face — scanned, proven or rejected without touching a file, then
+ * adopted by rename on the device's real filesystem. (Hard links were the
+ * first design; Android refuses them in app storage — AccessDeniedException
+ * on API 30, build #434.)
  */
 @RunWith(AndroidJUnit4::class)
 class LegacyMigrationDeviceTest {
@@ -49,8 +54,8 @@ class LegacyMigrationDeviceTest {
 
     private fun inode(file: File) = Os.stat(file.path).st_ino
 
-    private fun MigrationOutcome.imported(): MigrationOutcome.Imported =
-        this as? MigrationOutcome.Imported ?: throw AssertionError("expected Imported, got $this")
+    private fun AdoptionOutcome.adopted(): AdoptionOutcome.Adopted =
+        this as? AdoptionOutcome.Adopted ?: throw AssertionError("expected Adopted, got $this")
 
     @After
     fun tearDown() {
@@ -59,7 +64,7 @@ class LegacyMigrationDeviceTest {
     }
 
     @Test
-    fun legacy_stores_are_scanned_proven_or_recorded_and_adopted_by_hard_link() {
+    fun legacy_stores_are_scanned_and_proven_without_touching_a_file_then_adopted_by_rename() {
         hub.publish("ggerganov/whisper.cpp", "main", "c".repeat(40), "ggml-base.bin" to whisperBytes)
         hub.publish("cstr/multilingual-e5-small-GGUF", "main", "d".repeat(40), "multilingual-e5-small-iq4_xs.gguf" to e5Bytes)
 
@@ -78,67 +83,64 @@ class LegacyMigrationDeviceTest {
         )
         assertEquals(listOf("not-a-catalogue-model.gguf"), scan.unrecognized.map { it.name })
 
+        // Step 1 — prove. Nothing on disk changes.
         val installation = installation()
-        val outcomes = scan.installations.associate { it.origin to installation.migrator.migrate("local-models-legacy", "legacy-mapping-1", it) }
-
-        val whisperImport = outcomes.getValue("whisper/whisper-base.bin").imported()
-        val adoptedWhisper = installation.installed.pathOf(whisperImport.manifest, whisperImport.manifest.artifacts.single())
-        assertEquals("hard link: same inode, no second copy", inode(whisper), inode(adoptedWhisper))
-        assertEquals("c".repeat(40), whisperImport.manifest.artifacts.single().source.commit)
-        assertEquals(IntegrityBasis.UPSTREAM_SHA256, whisperImport.manifest.artifacts.single().integrity)
-        assertArrayEquals("the legacy path still works for the legacy code", whisperBytes, whisper.readBytes())
-
-        val e5Import = outcomes.getValue("experimental_embeddings/multilingual-e5-small-iq4xs.gguf").imported()
-        assertEquals("multilingual-e5-small-iq4_xs.gguf", e5Import.manifest.artifacts.single().source.path)
-        assertEquals(inode(e5), inode(installation.installed.pathOf(e5Import.manifest, e5Import.manifest.artifacts.single())))
-
-        val gemma = outcomes.getValue("models/gemma-3-4b-it-q4.gguf")
-        assertTrue("got $gemma", gemma is MigrationOutcome.Unproven)
+        val whisperInode = inode(whisper)
+        val outcomes = scan.installations.associate { it.origin to installation.migrator.migrate(it) }
+        val whisperProof = (outcomes.getValue("whisper/whisper-base.bin") as MigrationOutcome.Proven).record.proofs.single()
+        assertEquals("c".repeat(40), whisperProof.source.commit)
+        assertEquals(LocalHub.sha256(whisperBytes), whisperProof.sha256)
+        assertTrue(outcomes.getValue("experimental_embeddings/multilingual-e5-small-iq4xs.gguf") is MigrationOutcome.Proven)
+        assertTrue(outcomes.getValue("models/gemma-3-4b-it-q4.gguf") is MigrationOutcome.Unproven)
         val vosk = outcomes.getValue("vosk-models/vosk-small-ru/") as MigrationOutcome.Unproven
-        assertTrue(vosk.record.reason, "archive is gone" in vosk.record.reason)
+        assertTrue(vosk.record.reason!!, "archive is gone" in vosk.record.reason!!)
+        assertArrayEquals(whisperBytes, whisper.readBytes())
+        assertArrayEquals(e5Bytes, e5.readBytes())
+        assertTrue("proof is not an install", installation.installed.all().isEmpty())
 
-        // A fresh instance sees exactly this from disk: two installed, two legacy/unverified.
+        // A fresh instance sees the same from disk: two proven, two legacy/unverified.
         val fresh = installation()
-        assertEquals(setOf("multilingual-e5-small-iq4xs@legacy", "whisper-base@legacy"), fresh.installed.all().map { it.variantId.id }.toSet())
-        assertTrue(fresh.installed.all().all { fresh.installed.verifyHashes(it) == InstallHealth.Intact })
-        assertEquals(setOf("gemma-3-4b-it-q4@legacy", "vosk-small-ru@legacy"), fresh.migrator.records().map { it.variantId.id }.toSet())
-        assertTrue(fresh.migrator.records().all { it.status == LegacyRecord.STATUS })
+        assertEquals(
+            mapOf(
+                "gemma-3-4b-it-q4@legacy" to LegacyRecord.UNVERIFIED,
+                "multilingual-e5-small-iq4xs@legacy" to LegacyRecord.PROVEN,
+                "vosk-small-ru@legacy" to LegacyRecord.UNVERIFIED,
+                "whisper-base@legacy" to LegacyRecord.PROVEN,
+            ),
+            fresh.migrator.records().associate { it.variantId.id to it.status },
+        )
 
-        // A second pass changes nothing and asks the network nothing for what is already in.
+        // Step 2 — the consumer switches: adopt by rename.
+        val whisperInstall = scan.installations.first { it.origin.startsWith("whisper/") }
+        val manifest = fresh.migrator.adopt("local-models-legacy", "legacy-mapping-1", whisperInstall).adopted().manifest
+        val adopted = fresh.installed.pathOf(manifest, manifest.artifacts.single())
+        assertEquals("a rename: the same inode, no copy", whisperInode, inode(adopted))
+        assertFalse("the legacy path is gone: one owner", whisper.exists())
+        assertEquals(IntegrityBasis.UPSTREAM_SHA256, manifest.artifacts.single().integrity)
+        assertEquals(InstallHealth.Intact, fresh.installed.verifyHashes(manifest))
+        assertNull(fresh.migrator.record(manifest.variantId))
+
         hub.requests.clear()
-        val again = scan.installations.first { it.origin.startsWith("whisper/") }
-        assertTrue(fresh.migrator.migrate("local-models-legacy", "legacy-mapping-1", again) is MigrationOutcome.AlreadyInStore)
+        assertTrue(installation().migrator.adopt("local-models-legacy", "legacy-mapping-1", whisperInstall) is AdoptionOutcome.AlreadyInStore)
         assertTrue(hub.requests.isEmpty())
-    }
-
-    /** The primitive adoption relies on, on its own: may this app hard-link inside its own data directory? */
-    @Test
-    fun a_hard_link_inside_app_storage() {
-        val original = legacy("probe/original.bin", ByteArray(10))
-        val link = File(base, "probe/link.bin")
-        try {
-            java.nio.file.Files.createLink(link.toPath(), original.toPath())
-        } catch (e: Exception) {
-            throw AssertionError("hard link refused on API ${android.os.Build.VERSION.SDK_INT}: ${e.javaClass.name}: ${e.message}", e)
-        }
-        assertEquals(inode(original), inode(link))
+        assertArrayEquals("not adopted yet: e5 still where the legacy code expects it", e5Bytes, e5.readBytes())
     }
 
     @Test
-    fun the_legacy_code_replacing_its_file_does_not_change_the_adopted_copy() {
+    fun a_file_changed_after_its_proof_is_re_proven_and_not_moved() {
         hub.publish("ggerganov/whisper.cpp", "main", "c".repeat(40), "ggml-base.bin" to whisperBytes)
         val whisper = legacy("whisper/whisper-base.bin", whisperBytes)
+        val found = LegacyInstallationScanner(base, models).scan().installations.single()
         val installation = installation()
-        val imported = installation.migrator.migrate(
-            "local-models-legacy", "legacy-mapping-1", LegacyInstallationScanner(base, models).scan().installations.single(),
-        ).imported()
+        assertTrue(installation.migrator.migrate(found) is MigrationOutcome.Proven)
 
-        // Legacy re-download: write a .part, rename over the old path (ModelDownloader's way).
-        val part = File(whisper.path + ".part").apply { writeBytes(ByteArray(100) { 9 }) }
+        // The legacy code re-downloads before the switch: same name, other bytes.
+        val part = File(whisper.path + ".part").apply { writeBytes(ByteArray(whisperBytes.size) { 9 }) }
         assertTrue(part.renameTo(whisper))
 
-        val adopted = installation.installed.pathOf(imported.manifest, imported.manifest.artifacts.single())
-        assertArrayEquals(whisperBytes, adopted.readBytes())
-        assertEquals(InstallHealth.Intact, installation.installed.verifyHashes(imported.manifest))
+        val outcome = installation.migrator.adopt("local-models-legacy", "legacy-mapping-1", found)
+        assertTrue("got $outcome", outcome is AdoptionOutcome.NotProven)
+        assertTrue("nothing moved", whisper.isFile)
+        assertTrue(installation.installed.all().isEmpty())
     }
 }

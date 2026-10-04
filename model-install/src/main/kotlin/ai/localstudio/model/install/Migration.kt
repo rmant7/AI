@@ -12,7 +12,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.IOException
-import java.nio.file.Files
 
 /**
  * A legacy installation as the app's scanner found it: which catalogue
@@ -30,54 +29,92 @@ data class LegacyInstallation(
     val origin: String,
 )
 
-/** How one artifact's bytes were proven to be a specific upstream file. */
-data class Proof(
-    val spec: ArtifactSpec,
-    val file: File,
+/**
+ * What [LegacyMigrator.migrate] concluded about one legacy installation,
+ * kept under `.legacy/`. Never an install manifest: a [PROVEN] record
+ * prepares an adoption, an [UNVERIFIED] one just says the app has bytes it
+ * cannot vouch for.
+ */
+@Serializable
+data class LegacyRecord(
+    val schema: Int = 1,
+    val status: String,
+    val modelId: ModelId,
+    val variantId: VariantId,
+    val origin: String,
+    val files: List<LegacyFile>,
+    /** Why it is not proven; null for [PROVEN]. */
+    val reason: String? = null,
+    /** One per proven artifact; empty unless [PROVEN]. */
+    val proofs: List<ProofRecord> = emptyList(),
+    /** Optional artifacts present on disk but not proven — left behind on adoption. */
+    val skippedOptional: List<SkippedArtifact> = emptyList(),
+    val scannedAtEpochMs: Long,
+) {
+    companion object {
+        /** Identity proven; adoptable as long as the files stay exactly as recorded. */
+        const val PROVEN = "proven"
+
+        /** Not a verified install, not "probably fine": unknown bytes the app happens to have. */
+        const val UNVERIFIED = "legacy_unverified"
+    }
+}
+
+@Serializable
+data class LegacyFile(
+    val role: ArtifactRole,
+    val path: String,
+    val sizeBytes: Long,
+    val isDirectory: Boolean,
+    val lastModifiedMs: Long,
+)
+
+/** The proof for one artifact: these exact bytes (path, size, mtime, sha256) are this upstream file. */
+@Serializable
+data class ProofRecord(
+    val role: ArtifactRole,
+    /** The artifact's file name in the store ([ArtifactSpec.fileName]). */
+    val fileName: String,
+    val legacyPath: String,
+    val sizeBytes: Long,
+    val lastModifiedMs: Long,
     val sha256: String,
     val integrity: IntegrityBasis,
     val source: SourceRecord,
 )
 
-/** A legacy installation that could not be proven — kept as a record, never as an installed variant. */
-@Serializable
-data class LegacyRecord(
-    val schema: Int = 1,
-    val status: String = STATUS,
-    val modelId: ModelId,
-    val variantId: VariantId,
-    val origin: String,
-    val files: List<LegacyFile>,
-    val reason: String,
-    val scannedAtEpochMs: Long,
-) {
-    companion object {
-        /** Not a verified install, not "probably fine": unknown bytes the app happens to have. */
-        const val STATUS = "legacy_unverified"
-    }
-}
-
-@Serializable
-data class LegacyFile(val role: ArtifactRole, val path: String, val sizeBytes: Long, val isDirectory: Boolean)
-
 sealed interface MigrationOutcome {
-    /** Proven and adopted into the store (hard links — the legacy files stay where they are, no extra space). */
-    data class Imported(val manifest: InstallManifest, val proofs: List<Proof>) : MigrationOutcome
+    /** Identity proven and recorded; nothing on disk was moved — see [LegacyMigrator.adopt]. */
+    data class Proven(val record: LegacyRecord) : MigrationOutcome
 
     /** The store already has this variant intact; nothing was examined. */
     data class AlreadyInStore(val manifest: InstallManifest) : MigrationOutcome
 
-    /** Identity not proven: recorded as legacy/unverified, nothing imported. */
+    /** Identity not proven: recorded as legacy/unverified. */
     data class Unproven(val record: LegacyRecord) : MigrationOutcome
 
     /** Couldn't decide now (network, I/O); nothing written — try again later. */
     data class Deferred(val reason: String) : MigrationOutcome
 }
 
+sealed interface AdoptionOutcome {
+    /** Moved into the store; the legacy paths no longer exist. */
+    data class Adopted(val manifest: InstallManifest) : AdoptionOutcome
+
+    data class AlreadyInStore(val manifest: InstallManifest) : AdoptionOutcome
+
+    /** No valid proof (none recorded, or the files changed and no longer prove out): nothing moved. */
+    data class NotProven(val outcome: MigrationOutcome) : AdoptionOutcome
+
+    /** Something failed on the way; every legacy file is back where it was. */
+    data class Deferred(val reason: String) : AdoptionOutcome
+}
+
 /**
- * Adopts legacy installations into the store only when their identity is
- * proven, never on a file name or a size:
+ * Two steps, deliberately apart:
  *
+ * **[migrate] proves, and touches nothing.** A legacy file's name is only a
+ * claim; identity is proven by bytes:
  * 1. Each artifact's catalogue source is asked which upstream files it would
  *    install *now* — for a selection, the file [FileSelection] picks in each
  *    of its repositories at the current commit; for a fixed Hugging Face
@@ -86,34 +123,40 @@ sealed interface MigrationOutcome {
  * 2. Candidates of a different size are dropped without hashing (size is a
  *    filter, not a proof). No candidate with a known sha256 left → unproven,
  *    and the local file is not even hashed.
- * 3. The local file is hashed; its sha256 must equal a candidate's. That
- *    binds the bytes to one upstream file at one commit — the identity.
- *
+ * 3. The local file is hashed; its sha256 must equal a candidate's.
  * A directory (an archive the legacy code unpacked and then deleted) has no
- * bytes left to prove anything with: always unproven.
+ * bytes left to prove anything with: always unproven. The result is a
+ * [LegacyRecord]: [LegacyRecord.PROVEN] with path, size, mtime and sha256 of
+ * every proven file, or [LegacyRecord.UNVERIFIED] with the reason.
  *
- * Every mandatory artifact proven → hard-linked into a migration staging
- * directory, manifest written, moved into place like any install. An
- * optional artifact that isn't proven is left out and recorded as skipped.
- * Any mandatory artifact unproven → a [LegacyRecord] under `.legacy/`,
- * nothing else.
+ * **[adopt] moves, at the moment a consumer switches to the store** — when
+ * the legacy code for it no longer runs, so the bytes have one owner at any
+ * time. It re-checks size and mtime against the proof (re-proving if either
+ * changed), then renames each file into a migration staging directory, writes
+ * the manifest and moves the directory into place like any install. If a
+ * rename isn't possible (another filesystem) the file is copied and the copy's
+ * sha256 checked instead, and the legacy original removed only once the
+ * install is in place. Any failure before that puts every renamed file back.
+ *
+ * Hard links would have avoided the move, but Android denies apps hard links
+ * in their own storage (API 29+: AccessDeniedException, seen on API 30).
  */
 class LegacyMigrator(
     private val layout: InstallLayout,
     private val hf: HuggingFaceMetadata,
     private val clock: () -> Long = System::currentTimeMillis,
     private val sha256: (File) -> String = Sha256::of,
-    private val link: (existing: File, newLink: File) -> Unit = { existing, newLink ->
-        Files.createLink(newLink.toPath(), existing.toPath())
-    },
+    /** Atomic rename; false when it can't (e.g. another filesystem) — then copy + verify. */
+    private val move: (from: File, to: File) -> Boolean = { from, to -> from.renameTo(to) },
+    private val copy: (from: File, to: File) -> Unit = { from, to -> from.copyTo(to, overwrite = true) },
 ) {
     private val installed = InstalledVariants(layout)
 
-    fun migrate(catalogId: String, catalogVersion: String, legacy: LegacyInstallation): MigrationOutcome {
+    fun migrate(legacy: LegacyInstallation): MigrationOutcome {
         installed.manifest(legacy.variant.id)?.let { manifest ->
             if (installed.health(manifest) == InstallHealth.Intact) return MigrationOutcome.AlreadyInStore(manifest)
         }
-        val proofs = mutableListOf<Proof>()
+        val proofs = mutableListOf<ProofRecord>()
         val skipped = mutableListOf<SkippedArtifact>()
         for (spec in legacy.variant.artifacts.sortedBy { it.optional }) {
             val file = legacy.files[spec.role]
@@ -131,26 +174,50 @@ class LegacyMigrator(
                     if (spec.optional) {
                         if (file != null) skipped += SkippedArtifact(spec.role, spec.fileName, "legacy file not proven: ${verdict.reason}")
                     } else {
-                        return MigrationOutcome.Unproven(record(legacy, "${spec.fileName}: ${verdict.reason}"))
+                        return MigrationOutcome.Unproven(write(record(legacy, LegacyRecord.UNVERIFIED, "${spec.fileName}: ${verdict.reason}")))
                     }
             }
         }
+        return MigrationOutcome.Proven(write(record(legacy, LegacyRecord.PROVEN, null, proofs, skipped)))
+    }
+
+    fun adopt(catalogId: String, catalogVersion: String, legacy: LegacyInstallation): AdoptionOutcome {
+        installed.manifest(legacy.variant.id)?.let { manifest ->
+            if (installed.health(manifest) == InstallHealth.Intact) return AdoptionOutcome.AlreadyInStore(manifest)
+        }
+        var record = record(legacy.variant.id)
+        if (record == null || record.status != LegacyRecord.PROVEN || record.proofs.any { changed(it) }) {
+            when (val outcome = migrate(legacy)) {
+                is MigrationOutcome.Proven -> record = outcome.record
+                is MigrationOutcome.AlreadyInStore -> return AdoptionOutcome.AlreadyInStore(outcome.manifest)
+                else -> return AdoptionOutcome.NotProven(outcome)
+            }
+        }
         return try {
-            MigrationOutcome.Imported(adopt(catalogId, catalogVersion, legacy, proofs, skipped), proofs)
+            AdoptionOutcome.Adopted(moveIntoStore(catalogId, catalogVersion, legacy, record))
         } catch (e: IOException) {
-            MigrationOutcome.Deferred("import failed: ${e.message}")
+            AdoptionOutcome.Deferred("adoption failed, legacy files restored: ${e.message}")
         }
     }
 
-    /** Legacy installations recorded as unproven. */
+    /** Every legacy record — proven and unverified. */
     fun records(): List<LegacyRecord> =
         layout.legacyDir().listFiles().orEmpty()
             .filter { it.isFile && it.name.endsWith(".json") }
             .mapNotNull { runCatching { json.decodeFromString(LegacyRecord.serializer(), it.readText()) }.getOrNull() }
             .sortedBy { it.variantId.id }
 
+    fun record(variant: VariantId): LegacyRecord? =
+        recordFile(variant).takeIf { it.isFile }
+            ?.let { runCatching { json.decodeFromString(LegacyRecord.serializer(), it.readText()) }.getOrNull() }
+
+    private fun changed(proof: ProofRecord): Boolean {
+        val file = File(proof.legacyPath)
+        return !file.isFile || file.length() != proof.sizeBytes || file.lastModified() != proof.lastModifiedMs
+    }
+
     private sealed interface Verdict {
-        data class Yes(val proof: Proof) : Verdict
+        data class Yes(val proof: ProofRecord) : Verdict
 
         data class No(val reason: String) : Verdict
     }
@@ -161,6 +228,7 @@ class LegacyMigrator(
         if (file.isDirectory) return Verdict.No("unpacked contents only, the downloaded archive is gone: no bytes left to prove")
         if (!file.isFile) return Verdict.No("missing")
         val size = file.length()
+        val modified = file.lastModified()
         val all = candidates(spec, status)
         val sameSize = all.filter { it.sizeBytes == null || it.sizeBytes == size }
         if (sameSize.isEmpty()) {
@@ -172,7 +240,7 @@ class LegacyMigrator(
         val actual = sha256(file)
         val match = sameSize.firstOrNull { it.sha256 == actual }
             ?: return Verdict.No("sha256 $actual matches none of ${sameSize.map { "${it.source.repo ?: it.source.url}/${it.source.path}@${it.source.commit}" }}")
-        return Verdict.Yes(Proof(spec, file, actual, match.integrity, match.source))
+        return Verdict.Yes(ProofRecord(spec.role, spec.fileName, file.path, size, modified, actual, match.integrity, match.source))
     }
 
     /** What the catalogue would install for [spec] right now, with a hash to compare against. */
@@ -224,60 +292,87 @@ class LegacyMigrator(
 
     private fun basis(spec: ArtifactSpec) = if (spec.sha256 != null) IntegrityBasis.CATALOG_SHA256 else IntegrityBasis.UPSTREAM_SHA256
 
-    private fun adopt(
-        catalogId: String,
-        catalogVersion: String,
-        legacy: LegacyInstallation,
-        proofs: List<Proof>,
-        skipped: List<SkippedArtifact>,
-    ): InstallManifest {
+    private fun moveIntoStore(catalogId: String, catalogVersion: String, legacy: LegacyInstallation, record: LegacyRecord): InstallManifest {
         val staging = layout.migrationStagingDir(legacy.variant.id)
         staging.deleteRecursively()
         staging.mkdirs()
-        val artifacts = proofs.map { proof ->
-            val target = File(staging, proof.spec.fileName)
-            target.parentFile?.mkdirs()
-            link(proof.file, target)
-            // The link is the same inode; a length check guards against a link
-            // that silently produced something else (a copy cut short, say).
-            if (target.length() != proof.file.length()) throw IOException("linked ${target.name} has the wrong size")
-            InstalledArtifact(
-                role = proof.spec.role,
-                fileName = proof.spec.fileName,
-                sizeBytes = target.length(),
-                sha256 = proof.sha256,
-                integrity = proof.integrity,
-                source = proof.source,
-                migratedFrom = proof.file.path,
+        val renamed = mutableListOf<Pair<File, File>>() // legacy original -> its place in staging
+        val copied = mutableListOf<File>() // legacy originals to delete once the install is in place
+        try {
+            val artifacts = record.proofs.map { proof ->
+                val original = File(proof.legacyPath)
+                val target = File(staging, proof.fileName).apply { parentFile?.mkdirs() }
+                if (move(original, target)) {
+                    renamed += original to target
+                    if (target.length() != proof.sizeBytes) throw IOException("${target.name}: size changed in the move")
+                } else {
+                    copy(original, target)
+                    if (sha256(target) != proof.sha256) throw IOException("${target.name}: copy does not match the proven sha256")
+                    copied += original
+                }
+                InstalledArtifact(
+                    role = proof.role,
+                    fileName = proof.fileName,
+                    sizeBytes = proof.sizeBytes,
+                    sha256 = proof.sha256,
+                    integrity = proof.integrity,
+                    source = proof.source,
+                    migratedFrom = proof.legacyPath,
+                )
+            }
+            val manifest = InstallManifest(
+                catalogId = catalogId,
+                catalogVersion = catalogVersion,
+                modelId = legacy.model.id,
+                variantId = legacy.variant.id,
+                installedAtEpochMs = clock(),
+                artifacts = artifacts,
+                skippedOptional = record.skippedOptional,
             )
+            File(staging, InstallManifest.FILE_NAME).writeText(ManifestCodec.encode(manifest))
+            layout.promote(staging, layout.variantDir(legacy.variant.id), clock())
+            // In place: only now may the legacy side lose anything.
+            copied.forEach { it.delete() }
+            recordFile(legacy.variant.id).delete()
+            return manifest
+        } catch (e: IOException) {
+            for ((original, target) in renamed.asReversed()) {
+                original.parentFile?.mkdirs()
+                if (!target.renameTo(original)) target.copyTo(original, overwrite = true)
+            }
+            staging.deleteRecursively()
+            throw e
         }
-        val manifest = InstallManifest(
-            catalogId = catalogId,
-            catalogVersion = catalogVersion,
-            modelId = legacy.model.id,
-            variantId = legacy.variant.id,
-            installedAtEpochMs = clock(),
-            artifacts = artifacts,
-            skippedOptional = skipped,
-        )
-        File(staging, InstallManifest.FILE_NAME).writeText(ManifestCodec.encode(manifest))
-        layout.promote(staging, layout.variantDir(legacy.variant.id), clock())
-        recordFile(legacy.variant.id).delete()
-        return manifest
     }
 
-    private fun record(legacy: LegacyInstallation, reason: String): LegacyRecord {
-        val record = LegacyRecord(
-            modelId = legacy.model.id,
-            variantId = legacy.variant.id,
-            origin = legacy.origin,
-            files = legacy.files.map { (role, file) ->
-                LegacyFile(role, file.path, if (file.isDirectory) file.walkTopDown().filter { it.isFile }.sumOf { it.length() } else file.length(), file.isDirectory)
-            },
-            reason = reason,
-            scannedAtEpochMs = clock(),
-        )
-        val out = recordFile(legacy.variant.id)
+    private fun record(
+        legacy: LegacyInstallation,
+        status: String,
+        reason: String?,
+        proofs: List<ProofRecord> = emptyList(),
+        skipped: List<SkippedArtifact> = emptyList(),
+    ) = LegacyRecord(
+        status = status,
+        modelId = legacy.model.id,
+        variantId = legacy.variant.id,
+        origin = legacy.origin,
+        files = legacy.files.map { (role, file) ->
+            LegacyFile(
+                role,
+                file.path,
+                if (file.isDirectory) file.walkTopDown().filter { it.isFile }.sumOf { it.length() } else file.length(),
+                file.isDirectory,
+                file.lastModified(),
+            )
+        },
+        reason = reason,
+        proofs = proofs,
+        skippedOptional = skipped,
+        scannedAtEpochMs = clock(),
+    )
+
+    private fun write(record: LegacyRecord): LegacyRecord {
+        val out = recordFile(record.variantId)
         out.parentFile.mkdirs()
         out.writeText(json.encodeToString(LegacyRecord.serializer(), record))
         return record
