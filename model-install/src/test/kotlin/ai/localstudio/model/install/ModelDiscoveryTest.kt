@@ -77,7 +77,19 @@ class ModelDiscoveryTest {
         publish("acme/a-GGUF", COMMIT_A, 2, "a-Q4_K_M.gguf" to gguf("llama"))
         publish("acme/b-GGUF", COMMIT_B, 1, "b-Q4_K_M.gguf" to gguf("llama"))
         var checks = 0
-        val report = discovery.discover(ModelSearchQuery(), quants, maxModelBytes = 100_000) { ++checks > 1 }
+        // Named, not the trailing-lambda shorthand: that now binds to
+        // onOutcome (the last parameter), not isCancelled.
+        val report = discovery.discover(ModelSearchQuery(), quants, maxModelBytes = 100_000, isCancelled = { ++checks > 1 })
         assertEquals(1, report.outcomes.size)
+    }
+
+    @Test
+    fun onOutcome_fires_as_each_repository_is_examined_not_after_the_batch() {
+        publish("acme/a-GGUF", COMMIT_A, 2, "a-Q4_K_M.gguf" to gguf("llama"))
+        publish("acme/b-GGUF", COMMIT_B, 1, "b-Q4_K_M.gguf" to gguf("llama"))
+        val seenBeforeReturn = mutableListOf<String>()
+        val report = discovery.discover(ModelSearchQuery(), quants, maxModelBytes = 100_000, onOutcome = { seenBeforeReturn += it.repo.id })
+        assertEquals(report.outcomes.map { it.repo.id }.toSet(), seenBeforeReturn.toSet())
+        assertEquals(2, seenBeforeReturn.size)
     }
 }

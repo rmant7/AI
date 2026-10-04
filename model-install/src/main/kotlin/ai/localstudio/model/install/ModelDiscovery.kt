@@ -67,6 +67,16 @@ class ModelDiscovery(
      * from the device's RAM). [skip]: repositories already known (the bundled
      * catalogue, installed models). [isCancelled] is checked between
      * repositories.
+     *
+     * [onOutcome] fires the instant each repository is examined -- before
+     * this call returns, not after. Examining one repository is up to three
+     * sequential HTTP round trips (resolveCommit, listFiles, the header
+     * probe), all blocking, with no concurrency: for [ModelSearchQuery.limit]
+     * repositories that is a genuinely slow, synchronous call, easily a
+     * minute or more on a real connection. A caller that only reads the
+     * final [Report] has nothing to show for that whole time and no way to
+     * tell "still working" from "stuck" -- this is the seam for live
+     * progress (a log line, a counter) instead.
      */
     fun discover(
         query: ModelSearchQuery,
@@ -74,12 +84,15 @@ class ModelDiscovery(
         maxModelBytes: Long,
         skip: Set<String> = emptySet(),
         isCancelled: () -> Boolean = { false },
+        onOutcome: (Outcome) -> Unit = {},
     ): Report {
         val repos = search.searchModels(query)
         val outcomes = mutableListOf<Outcome>()
         for (repo in repos) {
             if (isCancelled()) break
-            outcomes += examine(repo, quantPriority, maxModelBytes, skip)
+            val outcome = examine(repo, quantPriority, maxModelBytes, skip)
+            outcomes += outcome
+            onOutcome(outcome)
         }
         return Report(query, outcomes.sortedWith(compareBy<Outcome> { it !is Outcome.Candidate }.thenByDescending { it.repo.downloads }))
     }

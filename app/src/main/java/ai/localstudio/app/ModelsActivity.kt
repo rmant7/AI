@@ -207,26 +207,38 @@ class ModelsActivity : AppCompatActivity() {
             "translation" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "translation", limit = 15),
         )
         val log = { message: String -> container.appLog.record("DISCOVERY", message) }
+        // Examining one repository is up to three sequential HTTP round
+        // trips, blocking, with no concurrency -- the whole sweep can run
+        // well past a minute. A device report (build #456) showed the tap
+        // itself logged and then total silence, indistinguishable from
+        // stuck or crashed, because every line below was previously only
+        // logged AFTER discovery.discover() returned for a query -- i.e.
+        // after every one of its repositories was already examined. Each
+        // outcome is now logged as ModelDiscovery finds it (onOutcome),
+        // live, so a long run still shows progress instead of nothing.
+        fun outcomeLine(label: String, outcome: ModelDiscovery.Outcome): String = when (outcome) {
+            is ModelDiscovery.Outcome.Candidate ->
+                "$label CANDIDATE ${outcome.repo.id}: ${outcome.file.name} (${outcome.file.sizeBytes / 1_000_000} MB, " +
+                    "${outcome.architecture}, context ${outcome.contextLength ?: "?"}${outcome.notes.joinToString("") { "; $it" }}) " +
+                    "@${outcome.commit.take(8)}, ${outcome.repo.downloads} downloads"
+            is ModelDiscovery.Outcome.Dropped -> "$label dropped ${outcome.repo.id}: ${outcome.reason}"
+        }
         lifecycleScope.launch {
             val lines = withContext(Dispatchers.IO) {
                 queries.flatMap { (label, query) ->
+                    log("$label: searching Hugging Face…")
                     val report = runCatching {
-                        discovery.discover(query, ai.localstudio.core.registry.ArtifactResolver.DEFAULT_QUANT_PRIORITY, maxModelBytes, known)
+                        discovery.discover(
+                            query,
+                            ai.localstudio.core.registry.ArtifactResolver.DEFAULT_QUANT_PRIORITY,
+                            maxModelBytes,
+                            known,
+                            onOutcome = { outcome -> log(outcomeLine(label, outcome)) },
+                        )
                     }
                     (container.modelInstallation.hub as? ai.localstudio.app.modelinstall.HuggingFaceApiClient)?.lastSearchShape?.let { log("$label search: $it") }
                     report.fold(
                         onSuccess = { r ->
-                            r.outcomes.forEach { outcome ->
-                                log(
-                                    when (outcome) {
-                                        is ModelDiscovery.Outcome.Candidate ->
-                                            "$label CANDIDATE ${outcome.repo.id}: ${outcome.file.name} (${outcome.file.sizeBytes / 1_000_000} MB, " +
-                                                "${outcome.architecture}, context ${outcome.contextLength ?: "?"}${outcome.notes.joinToString("") { "; $it" }}) " +
-                                                "@${outcome.commit.take(8)}, ${outcome.repo.downloads} downloads"
-                                        is ModelDiscovery.Outcome.Dropped -> "$label dropped ${outcome.repo.id}: ${outcome.reason}"
-                                    },
-                                )
-                            }
                             listOf(getString(R.string.discover_section, label, r.candidates.size, r.outcomes.size)) +
                                 r.candidates.map { "• ${it.repo.id} — ${it.file.sizeBytes / 1_000_000} MB, ${it.architecture}" }
                         },
