@@ -13,7 +13,8 @@ package ai.localstudio.model
  *   pinned; sha256 optional.
  * - UNVERIFIED / DEPRECATED / WITHDRAWN: structure only.
  *
- * A dynamic source ([ArtifactSource.HuggingFaceSelection]) is accepted only
+ * A dynamic source ([ArtifactSource.HuggingFaceSelection],
+ * [ArtifactSource.Alternatives]) is accepted only
  * in an UNVERIFIED entry, only as the primary source (a mirror must be the
  * same bytes, and a selection doesn't name any), and never with a sha256.
  *
@@ -140,6 +141,12 @@ object CatalogValidator {
     }
 
     private fun sourceProblem(source: ArtifactSource, allowedHosts: Set<String>): String? {
+        if (source is ArtifactSource.Alternatives) {
+            if (source.sources.size < 2) return "alternatives need at least two sources"
+            if (source.sources.any { it.isDynamic }) return "alternatives must be fixed sources, not dynamic ones"
+            if (source.sources.toSet().size != source.sources.size) return "alternative sources must be unique"
+            return source.sources.firstNotNullOfOrNull { sourceProblem(it, allowedHosts) }
+        }
         if (source.scheme != "https") return "source must be https, got ${source.scheme ?: "no scheme"}"
         val host = source.host ?: return "source has no host"
         if (host !in allowedHosts) return "host $host is not in the allowlist"
@@ -158,7 +165,7 @@ object CatalogValidator {
                         if (file.fileName.isBlank() || '/' in file.fileName) return "exact selection needs a bare file name"
                 }
             }
-            is ArtifactSource.DirectUrl -> Unit
+            is ArtifactSource.DirectUrl, is ArtifactSource.Alternatives -> Unit
         }
         return null
     }

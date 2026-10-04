@@ -254,7 +254,10 @@ class LegacyCatalogGoldenTest {
             val variant = model.onlyVariant()
             val archive: ArtifactSpec = variant.artifacts.single()
             assertEquals(ArtifactRoles.ARCHIVE, archive.role, seed.id)
-            assertEquals(seed.downloadUrls, (listOf(archive.source) + archive.mirrors).map(::urlOf), "${seed.id}: URLs in order")
+            assertTrue(archive.mirrors.isEmpty(), "${seed.id}: legacy URLs are fallbacks, not proven-identical mirrors")
+            val sources = (archive.source as? ArtifactSource.Alternatives)?.sources ?: listOf(archive.source)
+            assertEquals(seed.downloadUrls, sources.map(::urlOf), "${seed.id}: URLs in order")
+            assertEquals(seed.downloadUrls.size > 1, archive.source is ArtifactSource.Alternatives, seed.id)
             assertEquals(UnpackSpec("zip"), archive.unpack, seed.id)
             assertEquals(seed.approxSizeBytes, archive.sizeBytes, seed.id)
             assertEquals(Runtimes.VOSK, variant.bindings.single().runtime, seed.id)
@@ -291,6 +294,13 @@ class LegacyCatalogGoldenTest {
     }
 
     @Test
+    fun `no legacy entry claims byte-identical mirrors`() {
+        for (model in document.models) for (variant in model.variants) for (artifact in variant.artifacts) {
+            assertTrue(artifact.mirrors.isEmpty(), "${model.id}/${artifact.fileName}: legacy has no hash to prove a mirror with")
+        }
+    }
+
+    @Test
     fun `nothing in the legacy catalogue claims a capability facet it has no data for`() {
         for (model in document.models) {
             for ((capability, facet) in model.capabilities) {
@@ -308,5 +318,6 @@ class LegacyCatalogGoldenTest {
         is ArtifactSource.HuggingFace -> "https://huggingface.co/${source.repo}/resolve/${source.revision}/${source.path}"
         is ArtifactSource.DirectUrl -> source.url
         is ArtifactSource.HuggingFaceSelection -> error("a fixed-URL legacy entry must not become a selection: $source")
+        is ArtifactSource.Alternatives -> error("nested alternatives: $source")
     }
 }

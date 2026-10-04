@@ -44,8 +44,10 @@ import ai.localstudio.model.VariantId
  * Consequently every entry is UNVERIFIED: nothing is pinned to a commit and
  * nothing carries a hash. GGUF entries keep their install-time selection
  * ([ArtifactSource.HuggingFaceSelection] over the seed's repositories, in
- * order, on "main"); fixed-URL entries (Whisper, Vosk, a vision projector's
- * exact file name) are described as the URLs they are, still unpinned.
+ * order, on "main"); fixed-URL entries (Whisper, Vosk) are described as the
+ * URLs they are, still unpinned, and several URLs for one file as an ordered
+ * [ArtifactSource.Alternatives] — never as mirrors, which would claim the
+ * bytes are identical. No legacy entry has a mirror.
  *
  * Deliberately left in `:app`, not carried into the domain:
  * - presentation: `noteRes`/`note` (string resources), `paramsLabel`,
@@ -267,9 +269,9 @@ object LegacyCatalogMapper {
                             role = ArtifactRoles.ARCHIVE,
                             fileName = "model.zip",
                             sizeBytes = seed.approxSizeBytes,
-                            source = sources.first(),
-                            // The same release archive re-hosted — asserted by its name, not verified (no hash exists).
-                            mirrors = sources.drop(1),
+                            // Several URLs are an ordered fallback, not mirrors: the same archive
+                            // name on another host proves nothing about the bytes (no hash exists).
+                            source = sources.singleOrNull() ?: ArtifactSource.Alternatives(sources),
                             unpack = UnpackSpec("zip"),
                         ),
                     ),

@@ -75,8 +75,36 @@ class DynamicSourceTest {
         }
     }
 
+    private val alternatives = ArtifactSource.Alternatives(
+        listOf(ArtifactSource.DirectUrl("https://huggingface.co/x/y/resolve/main/m.zip"), hf("m.zip", revision = "main")),
+    )
+
     @Test
-    fun `only the dynamic source reports isDynamic`() {
+    fun `alternatives are dynamic - unverified only, never a mirror, never with a sha256`() {
+        assertEquals(emptyList(), violations(dynamicModel(source = alternatives)))
+        assertTrue(violations(dynamicModel(status = CatalogStatus.EXPERIMENTAL, source = alternatives)).any { "only in unverified" in it })
+        assertTrue(violations(dynamicModel(source = hf(revision = "main"), mirrors = listOf(alternatives))).any { "cannot be a mirror" in it })
+        assertTrue(violations(dynamicModel(source = alternatives, sha256 = Fixtures.SHA_A)).any { "cannot carry a sha256" in it })
+    }
+
+    @Test
+    fun `every alternative is checked like a source of its own`() {
+        val bad = listOf(
+            ArtifactSource.Alternatives(listOf(hf())) to "at least two sources",
+            ArtifactSource.Alternatives(listOf(hf(), hf())) to "must be unique",
+            ArtifactSource.Alternatives(listOf(hf(), selection())) to "fixed sources",
+            ArtifactSource.Alternatives(listOf(hf(), ArtifactSource.DirectUrl("http://huggingface.co/a"))) to "must be https",
+            ArtifactSource.Alternatives(listOf(hf(), ArtifactSource.DirectUrl("https://evil.example/a"))) to "not in the allowlist",
+        )
+        for ((source, expected) in bad) {
+            val messages = violations(dynamicModel(source = source))
+            assertTrue(messages.any { expected in it }, "$source: expected \"$expected\", got $messages")
+        }
+    }
+
+    @Test
+    fun `only the dynamic sources report isDynamic`() {
+        assertTrue(alternatives.isDynamic)
         assertTrue(selection().isDynamic)
         assertTrue(!hf().isDynamic)
         assertTrue(!ArtifactSource.DirectUrl("https://example.org/x").isDynamic)

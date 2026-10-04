@@ -4462,17 +4462,20 @@
               "fileName": "model.zip",
               "sizeBytes": 40000000,
               "source": {
-                "type": "url",
-                "url": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+                "type": "alternatives",
+                "sources": [
+                  {
+                    "type": "url",
+                    "url": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+                  },
+                  {
+                    "type": "huggingface",
+                    "repo": "grimso/vosk-models",
+                    "revision": "main",
+                    "path": "vosk-model-small-en-us-0.15.zip"
+                  }
+                ]
               },
-              "mirrors": [
-                {
-                  "type": "huggingface",
-                  "repo": "grimso/vosk-models",
-                  "revision": "main",
-                  "path": "vosk-model-small-en-us-0.15.zip"
-                }
-              ],
               "unpack": {
                 "format": "zip"
               }

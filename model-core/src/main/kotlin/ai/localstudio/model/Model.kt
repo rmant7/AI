@@ -187,6 +187,25 @@ sealed interface ArtifactSource {
         override val isDynamic: Boolean get() = true
     }
 
+    /**
+     * Legacy fallback list of fixed sources: tried in order, the first one
+     * that answers is downloaded. Unlike [ArtifactSpec.mirrors] the sources
+     * are NOT asserted to hold the same bytes — the same archive name on two
+     * hosts is not evidence of identical content — so which bytes an install
+     * gets depends on which source answered: dynamic, like
+     * [HuggingFaceSelection], with the same validator restrictions (UNVERIFIED
+     * only, never a mirror, never with a sha256). Proven-identical sources
+     * belong in [ArtifactSpec.mirrors] instead.
+     */
+    @Serializable
+    @SerialName("alternatives")
+    data class Alternatives(val sources: List<ArtifactSource>) : ArtifactSource {
+        /** Several hosts; the validator checks each of [sources] instead. */
+        override val host: String? get() = null
+        override val scheme: String? get() = null
+        override val isDynamic: Boolean get() = true
+    }
+
     @Serializable
     @SerialName("url")
     data class DirectUrl(val url: String) : ArtifactSource {
