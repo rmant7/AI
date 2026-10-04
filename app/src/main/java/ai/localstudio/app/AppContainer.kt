@@ -867,19 +867,15 @@ class AppContainer private constructor(private val context: Context) {
     }
 
     /**
-     * Guards the whole body of [releaseMemoryUnderPressure] against itself:
-     * [onTrimMemory]/[onLowMemory] each launch it in their own unguarded
-     * coroutine, and real devices fire trim callbacks in bursts as free RAM
-     * keeps dropping — two overlapping calls each read an engine's resident
-     * handle, call `release()` on it, and free the same native pointer
-     * twice. A double free corrupts the native heap rather than crashing on
-     * the spot; a real device log showed a SIGSEGV ~22s after one such
-     * release line, in unrelated native code (MediaCodec/Codec2) — exactly
-     * the delayed, unrelated-looking crash a corrupted heap produces. None
-     * of the individual `release()` methods below are reentrant-safe on
-     * their own (each is a short, lock-free sequence against a plain var);
-     * serializing every caller here, in one place, is cheaper and more
-     * certain than auditing and fixing each one individually.
+     * Serializes [releaseMemoryUnderPressure] against itself: onTrimMemory
+     * and onLowMemory each launch it in their own coroutine, and devices fire
+     * trim callbacks in bursts. None of the engines' release() methods is
+     * reentrant on its own (each reads a plain var, closes what it read,
+     * then nulls it), so two overlapping calls could both close the same
+     * native handle. Hardening, not a confirmed crash fix: the native crash
+     * that prompted it (build #445, ~22s after one "file-transcriber engine
+     * unloaded" line) logged that line once, so two overlapping releases
+     * did not happen there.
      */
     private val memoryReleaseMutex = Mutex()
 
@@ -887,13 +883,21 @@ class AppContainer private constructor(private val context: Context) {
         reason: String,
         level: Int = Int.MAX_VALUE,
         includeLocalModels: Boolean = true,
-    ) = memoryReleaseMutex.withLock {
-        if (semanticMemoryEmbedder.isReady) {
-            semanticMemoryEmbedder.unload()
-            appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
+    ) {
+        memoryReleaseMutex.withLock {
+            if (semanticMemoryEmbedder.isReady) {
+                semanticMemoryEmbedder.unload()
+                appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
+            }
+            releaseWhisperEngines(reason, level)
         }
+        // Outside memoryReleaseMutex, never inside it: evictIdle takes
+        // sharedRuntimeManager's own lock, and a local load calls this very
+        // function (freeAuxiliaryModelsForLocalLoad, from beforeAdmission)
+        // while *holding* that lock. Nesting the two here, in the opposite
+        // order, would deadlock a trim callback against a model load.
+        // evictIdle is already serialized by that lock on its own.
         if (includeLocalModels) releaseLocalModels()
-        releaseWhisperEngines(reason, level)
     }
 
     /**

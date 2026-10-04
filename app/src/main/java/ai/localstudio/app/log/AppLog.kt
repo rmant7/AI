@@ -80,8 +80,7 @@ class AppLog(private val context: Context) {
         // Modern Android tombstones are Protobuf, not plain text — a real
         // device capture confirmed this (readable fragments like the device
         // fingerprint and signal name sat inside otherwise binary noise).
-        // Decoding the schema properly would need a protobuf dependency this
-        // app has no other use for; [extractPrintableStrings] is the same
+        // [extractPrintableStrings], the fallback below, is the same
         // trick the `strings` command uses instead — every symbol name,
         // library path, thread name, and (crucially) any assertion message a
         // library compiled in as a literal C string survives as a clean
@@ -96,10 +95,18 @@ class AppLog(private val context: Context) {
         // [relevantTraceLines] keeps the signal header plus a window around
         // any line that looks like it belongs to this app's own code path,
         // instead of a blind head-truncation of a dump this large.
+        //
+        // Decoded properly first (TombstoneDecoder: the crashing thread, by
+        // the tid the tombstone names); the strings scan stays as the
+        // fallback for anything that isn't a tombstone it understands (an
+        // ANR's plain-text trace, a format change).
         runCatching {
             last.traceInputStream?.use { it.readBytes() }
                 ?.takeIf { it.isNotEmpty() }
-                ?.let { bytes -> record("PROCESS_EXIT_TRACE", relevantTraceLines(extractPrintableStrings(bytes))) }
+                ?.let { bytes ->
+                    val decoded = TombstoneDecoder.decode(bytes)?.takeIf { it.frames.isNotEmpty() }
+                    record("PROCESS_EXIT_TRACE", decoded?.let(TombstoneDecoder::format) ?: relevantTraceLines(extractPrintableStrings(bytes)))
+                }
         }
     }
 
