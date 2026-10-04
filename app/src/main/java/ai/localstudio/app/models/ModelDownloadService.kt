@@ -41,6 +41,13 @@ import kotlinx.coroutines.flow.onEach
  * this — and exists purely to hold the process open and show progress. It
  * starts itself when a download begins and stops itself the moment none
  * are left running, in either category.
+ *
+ * [AppContainer.discoveryRunning] joins the same watch for the same reason:
+ * a discovery sweep is up to two minutes of sequential network calls with
+ * nothing to show for it on screen until it's done (see
+ * [ai.localstudio.app.AppContainer.startDiscovery]'s own doc comment) — the
+ * one real download-sized case this service didn't already cover, even
+ * though it moves no bytes.
  */
 class ModelDownloadService : Service() {
 
@@ -52,16 +59,16 @@ class ModelDownloadService : Service() {
         startForegroundCompat(buildNotification(getString(R.string.download_notification_preparing)))
 
         val container = AppContainer.get(this)
-        combine(container.downloads.state, container.whisperDownloads.state) { ggufStates, whisperStates ->
-            ggufStates to whisperStates
+        combine(container.downloads.state, container.whisperDownloads.state, container.discoveryRunning) { ggufStates, whisperStates, discovering ->
+            Triple(ggufStates, whisperStates, discovering)
         }
-            .onEach { (ggufStates, whisperStates) ->
+            .onEach { (ggufStates, whisperStates, discovering) ->
                 val ggufRunning = ggufStates.values.filterIsInstance<DownloadState.Running>()
                 val ggufResolving = ggufStates.values.any { it is DownloadState.Resolving }
                 val whisperRunning = whisperStates.values.filterIsInstance<WhisperDownloadState.Running>()
                 val activeCount = ggufRunning.size + whisperRunning.size
 
-                if (activeCount == 0 && !ggufResolving) {
+                if (activeCount == 0 && !ggufResolving && !discovering) {
                     ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return@onEach
@@ -72,9 +79,14 @@ class ModelDownloadService : Service() {
                     whisperRunning.forEach {
                         add(getString(R.string.download_notification_whisper_progress, (it.progress.fraction * 100).toInt()))
                     }
+                    if (discovering) add(getString(R.string.download_notification_discovery))
                     if (isEmpty() && ggufResolving) add(getString(R.string.download_notification_searching))
                 }
-                notificationManager.notify(NOTIFICATION_ID, buildNotification(parts.joinToString(" · "), activeCount))
+                // Discovery alone (activeCount 0) must not say "Downloading
+                // model" -- nothing is downloading, and that title would
+                // just be wrong for however long the sweep runs on its own.
+                val title = if (activeCount == 0 && discovering) getString(R.string.download_notification_title_discovery) else null
+                notificationManager.notify(NOTIFICATION_ID, buildNotification(parts.joinToString(" · "), activeCount, title))
             }
             .launchIn(scope)
     }
@@ -101,8 +113,8 @@ class ModelDownloadService : Service() {
         }
     }
 
-    private fun buildNotification(text: String, activeCount: Int = 0): Notification {
-        val title = if (activeCount > 1) {
+    private fun buildNotification(text: String, activeCount: Int = 0, overrideTitle: String? = null): Notification {
+        val title = overrideTitle ?: if (activeCount > 1) {
             getString(R.string.download_notification_title_many, activeCount)
         } else {
             getString(R.string.download_notification_title_one)

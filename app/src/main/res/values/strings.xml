@@ -368,6 +368,8 @@
     <string name="download_notification_channel">Model downloads</string>
     <string name="download_notification_preparing">Preparing download…</string>
     <string name="download_notification_searching">Looking for the file…</string>
+    <string name="download_notification_discovery">Searching for new models…</string>
+    <string name="download_notification_title_discovery">Searching Hugging Face</string>
     <string name="download_notification_title_one">Downloading model</string>
     <string name="download_notification_title_many">Downloading models (%1$d)</string>
 
@@ -475,7 +477,8 @@
     <string name="phrasebook_load_failed">Couldn\'t load the phrasebook. See Error log for details.</string>
     <string name="discover_unavailable">Nothing to search with: the app has no way to list Hugging Face models right now</string>
     <string name="discover_menu">Find new models (beta)</string>
-    <string name="discover_running">Searching Hugging Face… this takes a minute</string>
+    <string name="discover_already_running">Already searching — results will show here once it finishes</string>
+    <string name="discover_running">Searching Hugging Face… can take a couple of minutes; it keeps running if you leave this screen or close the app, and the result will be shown here next time you open Models</string>
     <string name="discover_title">New model candidates</string>
     <string name="discover_section">%1$s: %2$d loadable of %3$d checked</string>
     <string name="discover_failed">%1$s: search failed — %2$s</string>

@@ -40,11 +40,8 @@ import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.ModelFit
 import ai.localstudio.core.speech.AsrEngineType
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import ai.localstudio.model.install.ModelDiscovery
-import ai.localstudio.model.install.ModelSearchQuery
+import ai.localstudio.app.models.ModelDownloadService
 
 /**
  * Every model the app can run, grouped by what it is *for* — chat models,
@@ -155,6 +152,7 @@ class ModelsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         render()
+        showDiscoveryResultsIfUnseen()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -179,11 +177,20 @@ class ModelsActivity : AppCompatActivity() {
     /**
      * Discovery, first device test: searches the Hub for GGUF chat and
      * translation models, keeps those whose file fits this device and whose
-     * header the bundled llama.cpp can load, and shows them -- nothing is
-     * downloaded or enabled. Every outcome and the raw shape of each search
-     * response go to the app log (DISCOVERY): the search request was written
-     * without a live Hub to check it against, so the log is how it gets
-     * checked.
+     * header the bundled llama.cpp can load. Nothing is downloaded or
+     * enabled -- the result is a list of candidates and why the others were
+     * dropped, for a person to look at.
+     *
+     * The actual sweep runs in [AppContainer.startDiscovery], in an
+     * application-scoped coroutine, not this Activity's own lifecycleScope:
+     * examining 15 repositories is up to three sequential, blocking HTTP
+     * round trips each, so a sweep over both labels can run close to two
+     * minutes -- a real device report showed the tap logged and then
+     * nothing, because the dialog that used to show the result was tied to
+     * this screen, and by the time the sweep finished the screen (or the
+     * app) was already gone, silently along with it. [showDiscoveryResultsIfUnseen],
+     * called from [onResume], is what picks the result back up whenever this
+     * screen (re)opens, whether that's seconds or days later.
      */
     private fun runDiscovery() {
         // Logged before anything else, synchronously (AppLog.record writes
@@ -192,70 +199,40 @@ class ModelsActivity : AppCompatActivity() {
         // with no crash either. Either this method was never reached, or it
         // returned right here with discovery == null; this line tells the
         // two apart on the next attempt regardless of which it was.
-        val discovery = container.modelInstallation.discovery
-        container.appLog.record("DISCOVERY", "menu item tapped; discovery ${if (discovery != null) "available" else "unavailable (hub cannot search)"}")
-        if (discovery == null) {
+        val discoveryAvailable = container.modelInstallation.discovery != null
+        container.appLog.record("DISCOVERY", "menu item tapped; discovery ${if (discoveryAvailable) "available" else "unavailable (hub cannot search)"}")
+        if (!discoveryAvailable) {
             Toast.makeText(this, R.string.discover_unavailable, Toast.LENGTH_LONG).show()
             return
         }
+        if (container.discoveryRunning.value) {
+            Toast.makeText(this, R.string.discover_already_running, Toast.LENGTH_SHORT).show()
+            return
+        }
         Toast.makeText(this, R.string.discover_running, Toast.LENGTH_SHORT).show()
-        val known = (LocalModels.SEEDS + TranslationModels.SEEDS + container.allCustomSeeds()).flatMap { it.repoIds }.toSet()
-        // The same 1.3x file-size-to-RAM estimate DeviceProfile.fitsBudget uses.
-        val maxModelBytes = container.device.usableRamBytes * 10 / 13
-        val queries = listOf(
-            "chat" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "text-generation", limit = 15),
-            "translation" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "translation", limit = 15),
-        )
-        val log = { message: String -> container.appLog.record("DISCOVERY", message) }
-        // Examining one repository is up to three sequential HTTP round
-        // trips, blocking, with no concurrency -- the whole sweep can run
-        // well past a minute. A device report (build #456) showed the tap
-        // itself logged and then total silence, indistinguishable from
-        // stuck or crashed, because every line below was previously only
-        // logged AFTER discovery.discover() returned for a query -- i.e.
-        // after every one of its repositories was already examined. Each
-        // outcome is now logged as ModelDiscovery finds it (onOutcome),
-        // live, so a long run still shows progress instead of nothing.
-        fun outcomeLine(label: String, outcome: ModelDiscovery.Outcome): String = when (outcome) {
-            is ModelDiscovery.Outcome.Candidate ->
-                "$label CANDIDATE ${outcome.repo.id}: ${outcome.file.name} (${outcome.file.sizeBytes / 1_000_000} MB, " +
-                    "${outcome.architecture}, context ${outcome.contextLength ?: "?"}${outcome.notes.joinToString("") { "; $it" }}) " +
-                    "@${outcome.commit.take(8)}, ${outcome.repo.downloads} downloads"
-            is ModelDiscovery.Outcome.Dropped -> "$label dropped ${outcome.repo.id}: ${outcome.reason}"
-        }
-        lifecycleScope.launch {
-            val lines = withContext(Dispatchers.IO) {
-                queries.flatMap { (label, query) ->
-                    log("$label: searching Hugging Face…")
-                    val report = runCatching {
-                        discovery.discover(
-                            query,
-                            ai.localstudio.core.registry.ArtifactResolver.DEFAULT_QUANT_PRIORITY,
-                            maxModelBytes,
-                            known,
-                            onOutcome = { outcome -> log(outcomeLine(label, outcome)) },
-                        )
-                    }
-                    (container.modelInstallation.hub as? ai.localstudio.app.modelinstall.HuggingFaceApiClient)?.lastSearchShape?.let { log("$label search: $it") }
-                    report.fold(
-                        onSuccess = { r ->
-                            listOf(getString(R.string.discover_section, label, r.candidates.size, r.outcomes.size)) +
-                                r.candidates.map { "• ${it.repo.id} — ${it.file.sizeBytes / 1_000_000} MB, ${it.architecture}" }
-                        },
-                        onFailure = { e ->
-                            log("$label search FAILED: ${e.javaClass.simpleName}: ${e.message}")
-                            listOf(getString(R.string.discover_failed, label, e.message ?: e.javaClass.simpleName))
-                        },
-                    )
-                }
+        ModelDownloadService.ensureStarted(this)
+        container.startDiscovery()
+    }
+
+    /** Pops the dialog open once for whatever [AppContainer.startDiscovery] most recently finished, however long ago -- see [runDiscovery]'s own doc comment. */
+    private fun showDiscoveryResultsIfUnseen() {
+        if (!container.discoveryStore.hasUnseen()) return
+        val runs = container.discoveryStore.runs()
+        if (runs.isEmpty()) return
+        val lines = runs.flatMap { run ->
+            val section = if (run.failure != null) {
+                getString(R.string.discover_failed, run.label, run.failure)
+            } else {
+                getString(R.string.discover_section, run.label, run.candidates.size, run.checked)
             }
-            if (isFinishing) return@launch
-            AlertDialog.Builder(this@ModelsActivity)
-                .setTitle(R.string.discover_title)
-                .setMessage(lines.joinToString("\n") + "\n\n" + getString(R.string.discover_footer))
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
+            listOf(section) + run.candidates.map { "• ${it.repoId} — ${it.sizeBytes / 1_000_000} MB, ${it.architecture}" }
         }
+        container.discoveryStore.markSeen()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.discover_title)
+            .setMessage(lines.joinToString("\n") + "\n\n" + getString(R.string.discover_footer))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     // ── Text models ────────────────────────────────────────────────────────

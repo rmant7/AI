@@ -70,6 +70,12 @@ import ai.localstudio.app.llama.MeasuredRamStore
 import ai.localstudio.app.llama.RamMeasuringRuntime
 import ai.localstudio.app.llama.readMemAvailableBytes
 import ai.localstudio.app.modelinstall.ModelInstallation
+import ai.localstudio.app.modelinstall.DiscoveryRun
+import ai.localstudio.app.modelinstall.DiscoveryStore
+import HuggingFaceApiClient
+import ai.localstudio.core.registry.ArtifactResolver
+import ai.localstudio.model.install.ModelDiscovery
+import ai.localstudio.model.install.ModelSearchQuery
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
@@ -115,6 +121,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -516,6 +523,101 @@ class AppContainer private constructor(private val context: Context) {
     val modelInstallation = ModelInstallation(context, token = { settings.huggingFaceToken.ifBlank { null } })
         // VoskModelStore is an object reached with only a Context; it learns the chain here, first thing.
         .also { ai.localstudio.app.vosk.VoskModelStore.installation = it }
+
+    /** The last discovery sweep's results, surviving the screen or the app closing before it finishes — see [startDiscovery]. */
+    val discoveryStore = DiscoveryStore(context)
+
+    /** Whether [startDiscovery] has a sweep running right now — [ModelDownloadService] watches this to stay alive for it. */
+    val discoveryRunning = MutableStateFlow(false)
+
+    private val discoveryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var discoveryJob: Job? = null
+
+    /**
+     * Searches Hugging Face for GGUF chat and translation candidates this
+     * device could load (see [ai.localstudio.model.install.ModelDiscovery])
+     * -- in [discoveryScope], an application-scoped coroutine, not whatever
+     * screen's `lifecycleScope` happened to start it. Examining one
+     * repository is up to three sequential, blocking HTTP round trips with
+     * no concurrency, so a sweep over both labels can run close to two
+     * minutes -- real enough that the person starting it is not guaranteed
+     * to still be on the Models screen, or to still have the app open at
+     * all, by the time it finishes. [discoveryStore.record] persists each
+     * label's run the moment it finishes, independent of the other label and
+     * of whatever UI is or isn't still around to show it.
+     *
+     * A no-op while a sweep is already running (checked via [discoveryJob],
+     * not [discoveryRunning] — the latter is for outside observers).
+     */
+    fun startDiscovery() {
+        if (discoveryJob?.isActive == true) return
+        val discovery = modelInstallation.discovery ?: return
+        discoveryJob = discoveryScope.launch {
+            discoveryRunning.value = true
+            try {
+                val known = (LocalModels.SEEDS + TranslationModels.SEEDS + allCustomSeeds())
+                    .flatMap { it.repoIds }.toSet()
+                // The same 1.3x file-size-to-RAM estimate DeviceProfile.fitsBudget uses.
+                val maxModelBytes = device.usableRamBytes * 10 / 13
+                val queries = listOf(
+                    "chat" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "text-generation", limit = 15),
+                    "translation" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "translation", limit = 15),
+                )
+                for ((label, query) in queries) {
+                    appLog.record("DISCOVERY", "$label: searching Hugging Face…")
+                    val outcomes = mutableListOf<ModelDiscovery.Outcome>()
+                    val result = runCatching {
+                        discovery.discover(
+                            query,
+                            ArtifactResolver.DEFAULT_QUANT_PRIORITY,
+                            maxModelBytes,
+                            known,
+                            onOutcome = { outcome ->
+                                outcomes += outcome
+                                appLog.record(
+                                    "DISCOVERY",
+                                    when (outcome) {
+                                        is ModelDiscovery.Outcome.Candidate ->
+                                            "$label CANDIDATE ${outcome.repo.id}: ${outcome.file.name} (${outcome.file.sizeBytes / 1_000_000} MB, " +
+                                                "${outcome.architecture}, context ${outcome.contextLength ?: "?"}${outcome.notes.joinToString("") { "; $it" }}) " +
+                                                "@${outcome.commit.take(8)}, ${outcome.repo.downloads} downloads"
+                                        is ModelDiscovery.Outcome.Dropped -> "$label dropped ${outcome.repo.id}: ${outcome.reason}"
+                                    },
+                                )
+                            },
+                        )
+                    }
+                    (modelInstallation.hub as? HuggingFaceApiClient)?.lastSearchShape
+                        ?.let { appLog.record("DISCOVERY", "$label search: $it") }
+                    val run = result.fold(
+                        onSuccess = { r ->
+                            DiscoveryRun(
+                                label = label,
+                                finishedAtEpochMs = System.currentTimeMillis(),
+                                checked = r.outcomes.size,
+                                candidates = r.candidates.map(DiscoveryStore::candidateOf),
+                            )
+                        },
+                        onFailure = { e ->
+                            appLog.record("DISCOVERY", "$label search FAILED: ${e.javaClass.simpleName}: ${e.message}")
+                            DiscoveryRun(
+                                label = label,
+                                finishedAtEpochMs = System.currentTimeMillis(),
+                                checked = outcomes.size,
+                                candidates = outcomes.filterIsInstance<ModelDiscovery.Outcome.Candidate>()
+                                    .map(DiscoveryStore::candidateOf),
+                                failure = "${e.javaClass.simpleName}: ${e.message}",
+                            )
+                        },
+                    )
+                    discoveryStore.record(run)
+                }
+                appLog.record("DISCOVERY", "sweep finished")
+            } finally {
+                discoveryRunning.value = false
+            }
+        }
+    }
 
     /**
      * Where semantic memory's embedding model ([ExperimentalEmbeddingModels.E5_BASE])
