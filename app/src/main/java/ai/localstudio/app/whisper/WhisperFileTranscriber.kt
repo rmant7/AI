@@ -93,6 +93,15 @@ class WhisperFileTranscriber(
      * every native call goes through). [requestCancel] first so that wait is
      * short instead of running the in-flight window to completion — not a
      * requirement for correctness anymore, just for promptness.
+     *
+     * Deliberately not behind [loadMutex]: this runs from the memory-pressure
+     * handler and must free memory now, not wait out whatever multi-second
+     * [ensureLoaded]/[transcribe] call might be in flight. Safe anyway —
+     * [WhisperCppSpeechModel.close] itself waits for any in-flight native
+     * call on the *same* handle before freeing it, and [loadMutex] only ever
+     * serializes [ensureLoaded] against itself, so the handle it hands back
+     * is always the one actually resident, never one [release] already
+     * closed out from under it.
      */
     fun release() {
         loaded?.requestCancel()

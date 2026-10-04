@@ -866,11 +866,28 @@ class AppContainer private constructor(private val context: Context) {
         releaseMemoryUnderPressure("chat model load", includeLocalModels = false)
     }
 
+    /**
+     * Guards the whole body of [releaseMemoryUnderPressure] against itself:
+     * [onTrimMemory]/[onLowMemory] each launch it in their own unguarded
+     * coroutine, and real devices fire trim callbacks in bursts as free RAM
+     * keeps dropping — two overlapping calls each read an engine's resident
+     * handle, call `release()` on it, and free the same native pointer
+     * twice. A double free corrupts the native heap rather than crashing on
+     * the spot; a real device log showed a SIGSEGV ~22s after one such
+     * release line, in unrelated native code (MediaCodec/Codec2) — exactly
+     * the delayed, unrelated-looking crash a corrupted heap produces. None
+     * of the individual `release()` methods below are reentrant-safe on
+     * their own (each is a short, lock-free sequence against a plain var);
+     * serializing every caller here, in one place, is cheaper and more
+     * certain than auditing and fixing each one individually.
+     */
+    private val memoryReleaseMutex = Mutex()
+
     private suspend fun releaseMemoryUnderPressure(
         reason: String,
         level: Int = Int.MAX_VALUE,
         includeLocalModels: Boolean = true,
-    ) {
+    ) = memoryReleaseMutex.withLock {
         if (semanticMemoryEmbedder.isReady) {
             semanticMemoryEmbedder.unload()
             appLog.record("SEMANTIC_MEMORY", "unloaded under memory pressure ($reason); will reload once pressure passes")
