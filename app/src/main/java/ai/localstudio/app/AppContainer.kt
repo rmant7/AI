@@ -1120,10 +1120,11 @@ class AppContainer private constructor(private val context: Context) {
     // auto-stop entirely. Nothing reachable from the UI calls transcribe()
     // while the mic is hidden, so fetching a model in the background would
     // just be wasted disk space until this comes back properly.
-    val whisperStore = WhisperStore(context)
+    val whisperStore = WhisperStore(context, modelInstallation)
     val whisperDownloads = WhisperDownloads(
         whisperStore,
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+        log = { appLog.record("WHISPER_DOWNLOAD", it) },
     )
 
     /**

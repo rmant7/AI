@@ -61,7 +61,8 @@ class WhisperBenchmarkTest {
         assumeTrue("whisper_jni did not load for this ABI", WhisperBridge.isAvailable)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val whisperStore = WhisperStore(context)
+        // With the model store: the model may have been installed there (3c.2).
+        val whisperStore = WhisperStore(context, ai.localstudio.app.modelinstall.ModelInstallation(context))
         val benchmarkDir = File(context.getExternalFilesDir(null), "asr-benchmark")
         val files = benchmarkDir.listFiles { f -> f.isFile && MediaFileUtils.isMediaFile(f.name) }
             ?.sortedBy { it.name }
