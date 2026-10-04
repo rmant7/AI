@@ -65,6 +65,11 @@ class LocalHub : Closeable {
 
     fun fileRequests(): List<Request> = requests.filter { it.path.startsWith("/cdn/") }
 
+    /** The body `GET /api/models?...` answers with (a JSON array); every query string it was asked with lands in [searchQueries]. */
+    @Volatile
+    var searchResponse: String = "[]"
+    val searchQueries = ConcurrentLinkedQueue<String>()
+
     private fun handle(socket: Socket) {
         val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.ISO_8859_1))
         val requestLine = reader.readLine() ?: return
@@ -77,6 +82,7 @@ class LocalHub : Closeable {
         val (method, target) = requestLine.split(' ').let { it[0] to it[1] }
         val path = target.substringBefore('?')
         requests += Request(method, path, headers["range"], headers["authorization"])
+        if (path == "/api/models") searchQueries += target.substringAfter('?', "")
         val out = socket.getOutputStream()
         synchronized(this) { route(path, headers, out) }
     }
@@ -87,6 +93,7 @@ class LocalHub : Closeable {
         val resolve = Regex("^/hf/([^/]+/[^/]+)/resolve/([0-9a-f]{40})/(.+)$").matchEntire(path)
         val cdn = Regex("^/cdn/([0-9a-f]{40})/([^/]+/[^/]+)/(.+)$").matchEntire(path)
         when {
+            path == "/api/models" -> respond(out, 200, searchResponse)
             revision != null -> {
                 val (repo, rev) = revision.destructured
                 val commit = branches["$repo@$rev"] ?: return respond(out, 404, """{"error":"not found"}""")

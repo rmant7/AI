@@ -473,4 +473,10 @@
     <string name="phrasebook_badge_verified">checked</string>
     <string name="phrasebook_badge_unverified">unverified</string>
     <string name="phrasebook_load_failed">Couldn\'t load the phrasebook. See Error log for details.</string>
+    <string name="discover_menu">Find new models (beta)</string>
+    <string name="discover_running">Searching Hugging Face… this takes a minute</string>
+    <string name="discover_title">New model candidates</string>
+    <string name="discover_section">%1$s: %2$d loadable of %3$d checked</string>
+    <string name="discover_failed">%1$s: search failed — %2$s</string>
+    <string name="discover_footer">Nothing was downloaded. Every result and the reason for each dropped model are in the Log (DISCOVERY).</string>
 </resources>

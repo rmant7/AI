@@ -2,6 +2,8 @@ package ai.localstudio.app.modelinstall
 
 import ai.localstudio.model.install.ArtifactResolver
 import ai.localstudio.model.install.GgufProbe
+import ai.localstudio.model.install.HuggingFaceSearch
+import ai.localstudio.model.install.ModelDiscovery
 import ai.localstudio.model.install.InstallLayout
 import ai.localstudio.model.install.InstalledVariants
 import ai.localstudio.model.install.LegacyMigrator
@@ -25,7 +27,7 @@ class ModelInstallation(
     context: Context,
     val root: File = File(context.filesDir, ROOT_DIR),
     token: () -> String? = { null },
-    hub: ai.localstudio.model.install.HuggingFaceMetadata = HuggingFaceApiClient(token = token),
+    val hub: ai.localstudio.model.install.HuggingFaceMetadata = HuggingFaceApiClient(token = token),
     transport: ai.localstudio.model.install.HttpTransport = HttpRangeTransport(token),
     attemptsPerSource: Int = 3,
     retryDelayMs: Long = 2_000,
@@ -38,6 +40,9 @@ class ModelInstallation(
 
     /** Reads a resolved GGUF's header -- its first bytes only -- to judge it before the download (see [GgufProbe]). */
     val ggufProbe = GgufProbe(transport)
+
+    /** Searching the Hub for GGUF candidates (see [ModelDiscovery]); null when [hub] cannot search. */
+    val discovery: ModelDiscovery? = (hub as? HuggingFaceSearch)?.let { ModelDiscovery(it, hub, ggufProbe) }
 
     /** Adopts proven legacy installations (see [LegacyInstallationScanner]); run for the embedding model only so far. */
     val migrator = LegacyMigrator(layout, hub)

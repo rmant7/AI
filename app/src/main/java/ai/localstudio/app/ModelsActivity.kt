@@ -40,7 +40,11 @@ import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.ModelFit
 import ai.localstudio.core.speech.AsrEngineType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import ai.localstudio.model.install.ModelDiscovery
+import ai.localstudio.model.install.ModelSearchQuery
 
 /**
  * Every model the app can run, grouped by what it is *for* — chat models,
@@ -160,11 +164,76 @@ class ModelsActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         UtilityMenu.inflate(this, menu)
+        menu.add(Menu.NONE, MENU_DISCOVER, Menu.NONE, R.string.discover_menu)
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean =
-        UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == MENU_DISCOVER) {
+            runDiscovery()
+            return true
+        }
+        return UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
+    }
+
+    /**
+     * Discovery, first device test: searches the Hub for GGUF chat and
+     * translation models, keeps those whose file fits this device and whose
+     * header the bundled llama.cpp can load, and shows them -- nothing is
+     * downloaded or enabled. Every outcome and the raw shape of each search
+     * response go to the app log (DISCOVERY): the search request was written
+     * without a live Hub to check it against, so the log is how it gets
+     * checked.
+     */
+    private fun runDiscovery() {
+        val discovery = container.modelInstallation.discovery ?: return
+        Toast.makeText(this, R.string.discover_running, Toast.LENGTH_SHORT).show()
+        val known = (LocalModels.SEEDS + TranslationModels.SEEDS + container.allCustomSeeds()).flatMap { it.repoIds }.toSet()
+        // The same 1.3x file-size-to-RAM estimate DeviceProfile.fitsBudget uses.
+        val maxModelBytes = container.device.usableRamBytes * 10 / 13
+        val queries = listOf(
+            "chat" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "text-generation", limit = 15),
+            "translation" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "translation", limit = 15),
+        )
+        val log = { message: String -> container.appLog.record("DISCOVERY", message) }
+        lifecycleScope.launch {
+            val lines = withContext(Dispatchers.IO) {
+                queries.flatMap { (label, query) ->
+                    val report = runCatching {
+                        discovery.discover(query, ai.localstudio.core.registry.ArtifactResolver.DEFAULT_QUANT_PRIORITY, maxModelBytes, known)
+                    }
+                    (container.modelInstallation.hub as? ai.localstudio.app.modelinstall.HuggingFaceApiClient)?.lastSearchShape?.let { log("$label search: $it") }
+                    report.fold(
+                        onSuccess = { r ->
+                            r.outcomes.forEach { outcome ->
+                                log(
+                                    when (outcome) {
+                                        is ModelDiscovery.Outcome.Candidate ->
+                                            "$label CANDIDATE ${outcome.repo.id}: ${outcome.file.name} (${outcome.file.sizeBytes / 1_000_000} MB, " +
+                                                "${outcome.architecture}, context ${outcome.contextLength ?: "?"}${outcome.notes.joinToString("") { "; $it" }}) " +
+                                                "@${outcome.commit.take(8)}, ${outcome.repo.downloads} downloads"
+                                        is ModelDiscovery.Outcome.Dropped -> "$label dropped ${outcome.repo.id}: ${outcome.reason}"
+                                    },
+                                )
+                            }
+                            listOf(getString(R.string.discover_section, label, r.candidates.size, r.outcomes.size)) +
+                                r.candidates.map { "• ${it.repo.id} — ${it.file.sizeBytes / 1_000_000} MB, ${it.architecture}" }
+                        },
+                        onFailure = { e ->
+                            log("$label search FAILED: ${e.javaClass.simpleName}: ${e.message}")
+                            listOf(getString(R.string.discover_failed, label, e.message ?: e.javaClass.simpleName))
+                        },
+                    )
+                }
+            }
+            if (isFinishing) return@launch
+            AlertDialog.Builder(this@ModelsActivity)
+                .setTitle(R.string.discover_title)
+                .setMessage(lines.joinToString("\n") + "\n\n" + getString(R.string.discover_footer))
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
+    }
 
     // ── Text models ────────────────────────────────────────────────────────
 
@@ -1303,6 +1372,9 @@ class ModelsActivity : AppCompatActivity() {
     companion object {
         private const val TYPE_HEADER = 0
         private const val TYPE_MODEL = 1
+
+        /** Outside UtilityMenu's 9000-range ids. */
+        private const val MENU_DISCOVER = 9100
 
         /** [Category.name], read by [onCreate] to open on a specific tab — see [intent]. */
         const val EXTRA_CATEGORY = "category"

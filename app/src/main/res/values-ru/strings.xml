@@ -469,4 +469,10 @@
     <string name="phrasebook_badge_verified">проверено</string>
     <string name="phrasebook_badge_unverified">не проверено</string>
     <string name="phrasebook_load_failed">Не удалось загрузить разговорник. Подробности — в журнале ошибок.</string>
+    <string name="discover_menu">Найти новые модели (бета)</string>
+    <string name="discover_running">Поиск на Hugging Face… займёт около минуты</string>
+    <string name="discover_title">Кандидаты в новые модели</string>
+    <string name="discover_section">%1$s: загружаемых %2$d из %3$d проверенных</string>
+    <string name="discover_failed">%1$s: поиск не удался — %2$s</string>
+    <string name="discover_footer">Ничего не скачано. Все результаты и причина отсева каждой модели — в журнале (DISCOVERY).</string>
 </resources>
