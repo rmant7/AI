@@ -163,6 +163,9 @@ android {
     // migration artifact generated from those seeds, deliberately not packaged
     // and not read at runtime (see model-catalog/README.md).
     sourceSets["main"].assets.srcDir(rootProject.file("registry"))
+    // The generated :model-core catalogue, for on-device install tests only:
+    // packaged into the test APK, never into the app.
+    sourceSets["androidTest"].assets.srcDir(rootProject.file("model-catalog"))
 
     buildTypes {
         debug {
@@ -190,6 +193,9 @@ dependencies {
     // The unified local-model domain. Phase 2: only LegacyCatalogMapper uses
     // it, and nothing at runtime calls that yet.
     implementation(project(":model-core"))
+    // Phase 3b: ModelInstallation (ai.localstudio.app.modelinstall) wires it
+    // to Android; no consumer uses it yet.
+    implementation(project(":model-install"))
     // NodeExecutors — :core itself no longer depends on :commercial-memory/
     // Mobile_mem0 (see MOBILE_MEM0_DEPENDENCY.md), so this app, which
     // actually wants memory-aware chat, needs both explicitly now instead of

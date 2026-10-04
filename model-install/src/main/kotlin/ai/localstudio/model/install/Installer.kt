@@ -90,6 +90,9 @@ data class InstallProgress(val artifact: ArtifactRole, val fileName: String, val
 sealed interface InstallResult {
     data class Installed(val manifest: InstallManifest, val log: List<SourceFailure>) : InstallResult
 
+    /** Already installed and intact: nothing was resolved or downloaded. Pass `force` to reinstall anyway. */
+    data class AlreadyInstalled(val manifest: InstallManifest) : InstallResult
+
     /** Not attempted: the catalog says this model must not be newly installed. */
     data class Refused(val status: CatalogStatus) : InstallResult
 
@@ -123,9 +126,18 @@ class ModelInstaller(
         variant: ModelVariant,
         freeBytes: () -> Long,
         cancel: CancellationSignal = CancellationSignal.NONE,
+        force: Boolean = false,
         progress: (InstallProgress) -> Unit = {},
     ): InstallResult {
         require(variant in model.variants) { "${variant.id} is not a variant of ${model.id}" }
+        // Decided from disk alone — the manifest and the files — never from memory,
+        // so a run after a crash or a restart sees exactly what is there.
+        if (!force) {
+            val existing = InstalledVariants(layout)
+            existing.manifest(variant.id)?.let { manifest ->
+                if (existing.health(manifest) == InstallHealth.Intact) return InstallResult.AlreadyInstalled(manifest)
+            }
+        }
         if (model.status == CatalogStatus.DEPRECATED || model.status == CatalogStatus.WITHDRAWN) {
             return InstallResult.Refused(model.status)
         }

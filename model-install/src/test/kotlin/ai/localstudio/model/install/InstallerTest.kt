@@ -140,12 +140,26 @@ class InstallerTest {
     }
 
     @Test
+    fun `a second run after a successful install downloads nothing, a damaged install is redone`() {
+        val model = gemmaLike()
+        assertIs<InstallResult.Installed>(install(model))
+        transport.opens.clear()
+        hf.calls.clear()
+        assertIs<InstallResult.AlreadyInstalled>(install(model))
+        assertTrue(transport.opens.isEmpty() && hf.calls.isEmpty())
+
+        File(layout.variantDir(VariantId("m@legacy")), "model.gguf").writeBytes(byteArrayOf(1))
+        assertIs<InstallResult.Installed>(install(model))
+        assertContentEquals(weightsBytes, File(layout.variantDir(VariantId("m@legacy")), "model.gguf").readBytes())
+    }
+
+    @Test
     fun `reinstalling replaces the old directory, uninstalling removes it`() {
         val model = gemmaLike()
         install(model)
         val dir = layout.variantDir(VariantId("m@legacy"))
         File(dir, "stale.tmp").writeText("old")
-        assertIs<InstallResult.Installed>(install(model))
+        assertIs<InstallResult.Installed>(installer.install("test", "1", model, model.variants.single(), plenty, force = true))
         assertFalse(File(dir, "stale.tmp").exists())
         assertEquals(1, installed.all().size)
 
