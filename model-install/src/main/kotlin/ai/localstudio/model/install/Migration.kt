@@ -131,12 +131,14 @@ sealed interface AdoptionOutcome {
  *
  * **[adopt] moves, at the moment a consumer switches to the store** — when
  * the legacy code for it no longer runs, so the bytes have one owner at any
- * time. It re-checks size and mtime against the proof (re-proving if either
- * changed), then renames each file into a migration staging directory, writes
- * the manifest and moves the directory into place like any install. If a
- * rename isn't possible (another filesystem) the file is copied and the copy's
- * sha256 checked instead, and the legacy original removed only once the
- * install is in place. Any failure before that puts every renamed file back.
+ * time. Size and mtime against the proof are only a fast pre-check (either
+ * changed → prove again first); the decision is the sha256 of each file after
+ * it was moved into the migration staging directory — a mismatch puts every
+ * file back and proves again. Then the manifest is written and the directory
+ * moved into place like any install. If a rename isn't possible (another
+ * filesystem) the file is copied instead, and the legacy original removed only
+ * once the install is in place. Any failure before that puts every renamed
+ * file back.
  *
  * Hard links would have avoided the move, but Android denies apps hard links
  * in their own storage (API 29+: AccessDeniedException, seen on API 30).
@@ -195,10 +197,25 @@ class LegacyMigrator(
         }
         return try {
             AdoptionOutcome.Adopted(moveIntoStore(catalogId, catalogVersion, legacy, record))
+        } catch (e: BytesChanged) {
+            // Same size and mtime, other bytes: everything is back in place —
+            // the recorded proof is stale, so prove again from scratch.
+            when (val outcome = migrate(legacy)) {
+                is MigrationOutcome.Proven -> try {
+                    AdoptionOutcome.Adopted(moveIntoStore(catalogId, catalogVersion, legacy, outcome.record))
+                } catch (e: IOException) {
+                    AdoptionOutcome.Deferred("adoption failed, legacy files restored: ${e.message}")
+                }
+                is MigrationOutcome.AlreadyInStore -> AdoptionOutcome.AlreadyInStore(outcome.manifest)
+                else -> AdoptionOutcome.NotProven(outcome)
+            }
         } catch (e: IOException) {
             AdoptionOutcome.Deferred("adoption failed, legacy files restored: ${e.message}")
         }
     }
+
+    /** The moved bytes are not the proven ones (the file changed without its size or mtime showing it). */
+    private class BytesChanged(message: String) : IOException(message)
 
     /** Every legacy record — proven and unverified. */
     fun records(): List<LegacyRecord> =
@@ -304,12 +321,16 @@ class LegacyMigrator(
                 val target = File(staging, proof.fileName).apply { parentFile?.mkdirs() }
                 if (move(original, target)) {
                     renamed += original to target
-                    if (target.length() != proof.sizeBytes) throw IOException("${target.name}: size changed in the move")
                 } else {
                     copy(original, target)
-                    if (sha256(target) != proof.sha256) throw IOException("${target.name}: copy does not match the proven sha256")
                     copied += original
                 }
+                // Always re-hashed, here, after the move: the bytes the
+                // manifest vouches for are exactly the ones now in staging.
+                // Size + mtime can't promise that — mtime is whole seconds on
+                // some Android filesystems, so a same-size rewrite within the
+                // same second looks unchanged (seen on the API 30 emulator).
+                if (sha256(target) != proof.sha256) throw BytesChanged("${target.name}: bytes differ from the proof")
                 InstalledArtifact(
                     role = proof.role,
                     fileName = proof.fileName,

@@ -219,7 +219,7 @@ class MigrationTest {
         val adopted = File(layout.variantDir(variantId), "model.gguf")
         assertEquals(inode, Files.getAttribute(adopted.toPath(), "unix:ino"), "a rename: the same inode, no second copy")
         assertFalse(weights.exists() || projector.exists(), "the legacy paths are gone: the bytes have one owner")
-        assertEquals(0, hashed, "unchanged since the proof: no re-hash")
+        assertEquals(2, hashed, "each moved file re-hashed once, after the move")
         assertEquals(weights.path, manifest.artifacts.first().migratedFrom)
         assertEquals(COMMIT_B, manifest.artifacts.first().source.commit)
         assertEquals(InstallHealth.Intact, InstalledVariants(layout).verifyHashes(manifest))
@@ -247,7 +247,26 @@ class MigrationTest {
         weights.setLastModified(weights.lastModified() + 10_000)
         hashed = 0
         assertIs<AdoptionOutcome.Adopted>(adopt(installation))
-        assertEquals(1, hashed, "re-proved once")
+        assertEquals(2, hashed, "re-proved once, verified once after the move")
+    }
+
+    @Test
+    fun `other bytes behind an unchanged size and mtime are caught after the move`() {
+        publish()
+        val weights = legacyFile("m.gguf", q4)
+        val installation = legacy(weights = weights)
+        assertIs<MigrationOutcome.Proven>(migrator.migrate(installation))
+        val mtime = weights.lastModified()
+
+        // The legacy code rewrites it within the same (whole-second) mtime tick.
+        weights.writeBytes(bytesOf(q4.size, seed = 99))
+        weights.setLastModified(mtime)
+
+        val outcome = assertIs<AdoptionOutcome.NotProven>(adopt(installation))
+        assertIs<MigrationOutcome.Unproven>(outcome.outcome)
+        assertContentEquals(bytesOf(q4.size, seed = 99), weights.readBytes(), "moved back to the legacy path untouched")
+        assertEquals(emptyList(), InstalledVariants(layout).all())
+        assertFalse(layout.migrationStagingDir(variantId).exists())
     }
 
     @Test
@@ -324,7 +343,7 @@ class MigrationTest {
             copy = { _, to -> to.writeBytes(bytesOf(q4.size, seed = 13)) },
         )
         val outcome = assertIs<AdoptionOutcome.Deferred>(corrupting.adopt("legacy", "1", installation))
-        assertTrue("sha256" in outcome.reason, outcome.reason)
+        assertTrue("differ from the proof" in outcome.reason, outcome.reason)
         assertContentEquals(q4, weights.readBytes())
         assertEquals(emptyList(), InstalledVariants(layout).all())
     }
