@@ -21,7 +21,7 @@ class EmbeddingSpaceTest {
     fun `the id is stable and well-formed`() {
         val id = EmbeddingSpace.idFor(e5, iq4)!!
         assertEquals(id, EmbeddingSpace.idFor(e5, iq4))
-        assertTrue(Regex("^es1-[0-9a-f]{16}$").matches(id), id)
+        assertTrue(Regex("^es1-[0-9a-f]{32}$").matches(id), id)
     }
 
     @Test

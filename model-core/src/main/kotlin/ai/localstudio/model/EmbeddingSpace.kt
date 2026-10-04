@@ -14,6 +14,16 @@ import java.security.MessageDigest
  * model now selected means "reindex required" — keyed on the space, not on
  * the model id, so swapping to an identical re-upload doesn't force a
  * reindex and a silent upstream change does.
+ *
+ * Known limitation, deliberate for now: every non-optional artifact of the
+ * variant counts as an input, so a change to a file that doesn't actually
+ * affect the vectors (a config the embedding path never reads) still yields
+ * a new id — a false "reindex required", never a missed one. Narrowing this
+ * to the artifacts and runtime config the embedding path really consumes is
+ * a decision for when installation/runtime integration exists (Phase 3+).
+ *
+ * 128 bits of the SHA-256: ids are long-lived and decide whether an index is
+ * still valid, so collision room is not worth saving a few characters on.
  */
 object EmbeddingSpace {
 
@@ -43,7 +53,7 @@ object EmbeddingSpace {
             facet.similarity,
         ).joinToString("\u0000")
         val digest = MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
-        return VERSION + "-" + digest.take(8).joinToString("") { "%02x".format(it) }
+        return VERSION + "-" + digest.take(16).joinToString("") { "%02x".format(it) }
     }
 
     private fun sourceIdentity(source: ArtifactSource): String = when (source) {

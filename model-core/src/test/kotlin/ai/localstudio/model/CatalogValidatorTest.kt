@@ -123,6 +123,13 @@ class CatalogValidatorTest {
     }
 
     @Test
+    fun `a binding cannot declare the same role both required and optional`() =
+        rejects(
+            model(variants = listOf(variant(bindings = listOf(binding(required = setOf(ArtifactRoles.WEIGHTS), optional = setOf(ArtifactRoles.WEIGHTS)))))),
+            "both required and optional",
+        )
+
+    @Test
     fun `a capability requiring a role no variant provides is rejected`() =
         rejects(
             model(capabilities = mapOf(Capabilities.VISION to GenericFacet(setOf(ArtifactRoles.PROJECTOR)))),

@@ -89,6 +89,8 @@ object CatalogValidator {
             if (binding.requiredRoles.isEmpty()) problems += "$label: requires no artifact roles"
             val notShipped = binding.requiredRoles - variant.mandatoryRoles
             if (notShipped.isNotEmpty()) problems += "$label: required roles $notShipped are missing or optional"
+            val overlap = binding.requiredRoles intersect binding.optionalRoles
+            if (overlap.isNotEmpty()) problems += "$label: roles $overlap are both required and optional"
             val unknownOptional = binding.optionalRoles - variant.roles
             if (unknownOptional.isNotEmpty()) problems += "$label: optional roles $unknownOptional are not in this variant"
             if (binding.minAndroidApi < 0) problems += "$label: negative minAndroidApi"
