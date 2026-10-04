@@ -79,9 +79,10 @@ class ModelInstallEndToEndTest {
         assertEquals(Admission.Admit, memory)
 
         val path = fresh.installed.pathOf(manifest, manifest.artifacts.single { it.role == ArtifactRoles.WEIGHTS })
+        val bridge = LlamaBridge()
         val embedder = runBlocking {
             LlamaCppMemoryEmbedder.load(
-                bridge = LlamaBridge(),
+                bridge = bridge,
                 modelPath = path.absolutePath,
                 modelId = model.id.id,
                 pooling = EmbeddingPooling.valueOf(facet.pooling.uppercase()),
@@ -89,7 +90,11 @@ class ModelInstallEndToEndTest {
                 passagePrefix = facet.documentPrefix,
             )
         }
-        requireNotNull(embedder) { "llama.cpp could not load ${path.absolutePath}" }
+        requireNotNull(embedder) {
+            val magic = path.inputStream().use { input -> ByteArray(4).also { input.read(it) } }.toString(Charsets.ISO_8859_1)
+            "llama.cpp could not load ${path.absolutePath}: '${bridge.nativeLastLoadError()}' — " +
+                "file ${weights.source.repo}/${weights.source.path}@${weights.source.commit}, ${path.length()} bytes, magic '$magic', ${weights.integrity}"
+        }
         try {
             assertEquals("the catalogue's dimensions match the model's", facet.dimensions, embedder.dimension)
             val query = runBlocking { embedder.embedForQuery("рецепты низкокалорийных десертов") }

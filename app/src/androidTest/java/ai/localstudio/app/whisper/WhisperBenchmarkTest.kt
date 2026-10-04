@@ -57,7 +57,7 @@ import java.io.File
 class WhisperBenchmarkTest {
 
     @Test
-    fun benchmark() = runBlocking {
+    fun benchmark(): Unit = runBlocking {
         assumeTrue("whisper_jni did not load for this ABI", WhisperBridge.isAvailable)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
