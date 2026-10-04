@@ -119,6 +119,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 /**
@@ -312,6 +313,18 @@ class AppContainer private constructor(private val context: Context) {
         reloadTrigger = { onComplete ->
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                 try {
+                    // The call that fires this is usually a chat message whose
+                    // own reply is about to be generated -- which blocks the
+                    // load (embedderBlockedBy). Loading straight away was
+                    // therefore always deferred, with no retry until the next
+                    // backfill that had missing vectors: semantic recall stayed
+                    // off after every background unload (device log, build
+                    // #438). Waiting the generation out here, still within this
+                    // one trigger (reloadInFlight), loads E5 right after it.
+                    constructionComplete.await()
+                    withTimeoutOrNull(RELOAD_WAIT_MAX_MS) {
+                        while (embedderBlockedBy() != null) delay(RELOAD_WAIT_POLL_MS)
+                    }
                     ensureEmbedderLoaded(ExperimentalEmbeddingModels.E5_BASE)
                 } finally {
                     onComplete()
@@ -937,7 +950,7 @@ class AppContainer private constructor(private val context: Context) {
      * says null does the free-RAM threshold even matter.
      */
     private fun embedderBlockedBy(): String? = when {
-        heavyOperations.isActive -> "a generation or transcription is running"
+        heavyOperations.isActive -> "a chat/translation reply or a voice transcription is running"
         deviceMemoryGate.isLocked -> "a local or AICore generation holds the device-memory gate"
         sharedRuntimeManager.hasModelInUse -> "a local model is in use"
         LlamaCppRuntime.hasPendingNativeWork() -> "an abandoned native model load is still finishing"
@@ -2603,6 +2616,13 @@ class AppContainer private constructor(private val context: Context) {
         // session, infrequent enough that it costs nothing noticeable while
         // (the common case) there is nothing new to embed.
         private const val SEMANTIC_BACKFILL_INTERVAL_MS = 5 * 60 * 1000L
+
+        // How long a memory-pressure reload waits for a running generation
+        // (or anything else embedderBlockedBy names) before trying anyway --
+        // ensureEmbedderLoaded then defers once more and the backfill loop
+        // takes over, as before.
+        private const val RELOAD_WAIT_POLL_MS = 2_000L
+        private const val RELOAD_WAIT_MAX_MS = 10 * 60 * 1000L
 
         // Real device report: reloading E5 below this much free RAM
         // measurably slowed down or broke whatever else happened to be
