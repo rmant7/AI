@@ -45,8 +45,8 @@ jobs:
       # *compile* as a dependency, never to run its own tests. :core-chat
       # (NodeExecutors/LlmMemoryExtractor, split out of :core — see
       # MOBILE_MEM0_DEPENDENCY.md) is the same risk if left off this list.
-      - name: Test core, core-chat, commercial-memory and openai
-        run: ./gradlew --no-daemon :core:test :core-chat:test :commercial-memory:test :openai:test 2>&1 | tee -a build.log
+      - name: Test core, model-core, core-chat, commercial-memory and openai
+        run: ./gradlew --no-daemon :core:test :model-core:test :core-chat:test :commercial-memory:test :openai:test 2>&1 | tee -a build.log
 
       # --max-workers=1: with two native-build modules now (:app's llama_jni
       # and :whisper's whisper_jni), Gradle configures both CMake projects in

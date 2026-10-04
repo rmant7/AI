@@ -1,0 +1,217 @@
+{
+  "_note": "Test fixture. Every sha256 and commit below is a placeholder pattern, not a real hash of any real file.",
+  "schema": 1,
+  "catalogId": "local-models-test",
+  "catalogVersion": "2026.10.04-test",
+  "allowedHosts": ["huggingface.co", "alphacephei.com", "github.com"],
+  "models": [
+    {
+      "id": "translategemma-4b-it",
+      "family": "translategemma",
+      "displayName": "TranslateGemma 4B",
+      "license": {"id": "gemma", "gated": false},
+      "status": "verified",
+      "capabilities": {
+        "text.generation": {},
+        "text.translation": {
+          "sourceLanguages": "*",
+          "targetLanguages": ["en", "ru", "he", "de", "pt"],
+          "promptFormat": "chat"
+        }
+      },
+      "variants": [
+        {
+          "id": "translategemma-4b-it@q4_k_m",
+          "quantization": "Q4_K_M",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 2500000000,
+              "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+              "source": {"type": "huggingface", "repo": "example/translategemma-4b-it-GGUF", "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "path": "translategemma-4b-it-Q4_K_M.gguf"}
+            }
+          ],
+          "bindings": [
+            {"runtime": "llama_cpp", "requiredRoles": ["weights"], "minAndroidApi": 26}
+          ],
+          "metrics": {"translation.he": 0.82, "translation.ru": 0.88}
+        }
+      ]
+    },
+    {
+      "id": "gemma-4-e4b-it",
+      "family": "gemma-4",
+      "displayName": "Gemma 4 E4B Instruct",
+      "status": "verified",
+      "capabilities": {
+        "text.generation": {},
+        "vision.understanding": {"requiresRoles": ["projector"]},
+        "text.translation": {"sourceLanguages": "*", "targetLanguages": "*", "promptFormat": "chat"}
+      },
+      "variants": [
+        {
+          "id": "gemma-4-e4b-it@q4_k_m",
+          "quantization": "Q4_K_M",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 4980000000,
+              "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+              "source": {"type": "huggingface", "repo": "example/gemma-4-E4B-it-GGUF", "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "path": "gemma-4-E4B-it-Q4_K_M.gguf"}
+            },
+            {
+              "role": "projector",
+              "fileName": "projector.gguf",
+              "sizeBytes": 990000000,
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+              "optional": true,
+              "source": {"type": "huggingface", "repo": "example/gemma-4-E4B-it-GGUF", "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "path": "mmproj-F16.gguf"}
+            }
+          ],
+          "bindings": [
+            {"runtime": "llama_cpp", "requiredRoles": ["weights"], "optionalRoles": ["projector"]}
+          ],
+          "metrics": {"translation.he": 0.71}
+        },
+        {
+          "id": "gemma-4-e4b-it@q8_0-text",
+          "quantization": "Q8_0",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 8100000000,
+              "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+              "source": {"type": "huggingface", "repo": "example/gemma-4-E4B-it-GGUF", "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "path": "gemma-4-E4B-it-Q8_0.gguf"}
+            }
+          ],
+          "bindings": [
+            {"runtime": "llama_cpp", "requiredRoles": ["weights"]}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whisper-base",
+      "family": "whisper",
+      "displayName": "Whisper Base",
+      "status": "verified",
+      "capabilities": {
+        "audio.stt": {"languages": "*", "streaming": true, "timestamps": true}
+      },
+      "variants": [
+        {
+          "id": "whisper-base@ggml",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "ggml-base.bin",
+              "sizeBytes": 142000000,
+              "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+              "source": {"type": "huggingface", "repo": "example/whisper.cpp", "revision": "cccccccccccccccccccccccccccccccccccccccc", "path": "ggml-base.bin"}
+            }
+          ],
+          "bindings": [
+            {"runtime": "whisper_cpp", "requiredRoles": ["weights"]}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "piper-en-us-amy-low",
+      "family": "piper",
+      "displayName": "Piper — Amy (en-US)",
+      "status": "experimental",
+      "capabilities": {
+        "audio.tts": {"locales": ["en-US"], "sampleRateHz": 16000, "speakers": [{"id": "0", "name": "amy"}]}
+      },
+      "variants": [
+        {
+          "id": "piper-en-us-amy-low@sherpa",
+          "artifacts": [
+            {
+              "role": "archive",
+              "fileName": "vits-piper-en_US-amy-low.tar.bz2",
+              "sizeBytes": 64000000,
+              "source": {"type": "url", "url": "https://github.com/example/tts-models/releases/download/v1/vits-piper-en_US-amy-low.tar.bz2"},
+              "unpack": {"format": "tar.bz2", "unpackedSizeBytes": 70000000}
+            }
+          ],
+          "bindings": [
+            {"runtime": "sherpa_onnx", "requiredRoles": ["archive"]}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multilingual-e5-small",
+      "family": "e5",
+      "displayName": "Multilingual E5 Small",
+      "status": "verified",
+      "capabilities": {
+        "embedding.text": {
+          "dimensions": 384, "pooling": "mean", "normalized": true,
+          "queryPrefix": "query: ", "documentPrefix": "passage: ", "similarity": "cosine"
+        }
+      },
+      "variants": [
+        {
+          "id": "multilingual-e5-small@iq4_xs",
+          "quantization": "IQ4_XS",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 90000000,
+              "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+              "source": {"type": "huggingface", "repo": "example/multilingual-e5-small-GGUF", "revision": "dddddddddddddddddddddddddddddddddddddddd", "path": "multilingual-e5-small-IQ4_XS.gguf"}
+            }
+          ],
+          "bindings": [
+            {"runtime": "llama_cpp", "requiredRoles": ["weights"], "config": {"mode": "embedding"}}
+          ]
+        },
+        {
+          "id": "multilingual-e5-small@q8_0",
+          "quantization": "Q8_0",
+          "artifacts": [
+            {
+              "role": "weights",
+              "fileName": "model.gguf",
+              "sizeBytes": 130000000,
+              "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+              "source": {"type": "huggingface", "repo": "example/multilingual-e5-small-GGUF", "revision": "dddddddddddddddddddddddddddddddddddddddd", "path": "multilingual-e5-small-Q8_0.gguf"}
+            }
+          ],
+          "bindings": [
+            {"runtime": "llama_cpp", "requiredRoles": ["weights"], "config": {"mode": "embedding"}}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "future-video-gen",
+      "family": "future",
+      "displayName": "A capability this build has never heard of",
+      "status": "unverified",
+      "capabilities": {
+        "video.generation": {"maxSeconds": 8, "resolutions": ["480p", "720p"], "requiresRoles": ["vae"]}
+      },
+      "variants": [
+        {
+          "id": "future-video-gen@fp16",
+          "artifacts": [
+            {"role": "weights", "fileName": "unet.onnx", "sizeBytes": 0, "source": {"type": "huggingface", "repo": "example/future-video", "revision": "main", "path": "unet.onnx"}},
+            {"role": "onnx_data", "fileName": "unet.onnx.data", "source": {"type": "huggingface", "repo": "example/future-video", "revision": "main", "path": "unet.onnx.data"}},
+            {"role": "vae", "fileName": "vae.onnx", "source": {"type": "huggingface", "repo": "example/future-video", "revision": "main", "path": "vae.onnx"}}
+          ],
+          "bindings": [
+            {"runtime": "some_future_runtime", "requiredRoles": ["weights", "onnx_data", "vae"]}
+          ]
+        }
+      ]
+    }
+  ]
+}
