@@ -55,8 +55,8 @@ void raiseThreadPriority() {
 // every existing load path (nativeLoad, nativeLoadEmbeddingModel) already
 // logged this same text via LOGE, but only to logcat, unreachable from a
 // phone with no adb. nativeLastLoadError() below is what lets
-// ExperimentalEmbeddingsActivity show *why* a candidate GGUF failed to load
-// instead of a generic "check it is a valid embedding GGUF".
+// the app log show *why* a GGUF failed to load instead of a generic
+// "check it is a valid GGUF".
 std::mutex g_lastErrorMutex;
 std::string g_lastError;
 
@@ -72,7 +72,7 @@ void setLastError(const std::string &text) {
 // down. Overwriting on every ERROR-level line — what setLastError() does —
 // keeps only that last, useless wrapper text once a load actually fails.
 // Appending instead keeps the whole sequence, in order, so the specific
-// cause is still there for ExperimentalEmbeddingsActivity to show, not just
+// cause is still there for the app log to show, not just
 // the outermost "something failed" line.
 void appendLastError(const std::string &text) {
     std::lock_guard<std::mutex> lock(g_lastErrorMutex);

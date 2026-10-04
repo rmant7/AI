@@ -41,12 +41,6 @@
             android:parentActivityName=".ChatActivity" />
 
         <activity
-            android:name=".ExperimentalEmbeddingsActivity"
-            android:exported="false"
-            android:label="@string/embed_screen_title"
-            android:parentActivityName=".SettingsActivity" />
-
-        <activity
             android:name=".AiCoreTestActivity"
             android:exported="false"
             android:label="@string/aicore_screen_title"

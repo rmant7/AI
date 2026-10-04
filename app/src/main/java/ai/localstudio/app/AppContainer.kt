@@ -175,11 +175,12 @@ class AppContainer private constructor(private val context: Context) {
         // A cancelled load keeps running on its detached native worker (see
         // LlamaCppRuntime.load) — the next model's budget must not be read
         // while that one still physically holds memory.
-        beforeAdmission = {
+        beforeAdmission = { requiredBytes ->
             if (LlamaCppRuntime.hasPendingNativeWork()) {
                 appLog.record("RAM_MANAGER", "waiting for an abandoned native load/free to finish before admitting the next model")
                 LlamaCppRuntime.awaitPendingNativeWork()
             }
+            freeAuxiliaryModelsForLocalLoad(requiredBytes)
         },
         // Admission against what this model actually cost on this device
         // (variant = the context size it's loaded with), once measured;
@@ -489,12 +490,10 @@ class AppContainer private constructor(private val context: Context) {
     private val documentMemoryIds = mutableMapOf<String, List<String>>()
 
     /**
-     * Backs [ExperimentalEmbeddingsActivity] — a phone-only (no adb) way to
-     * download and sanity-check a candidate [ai.localstudio.memory.MemoryEmbedder]
-     * model. Entirely separate from [downloads]/[modelStore]: nothing here
-     * ever feeds [LocalModels] or the chat-model registry, see
-     * ExperimentalEmbeddingModels' own doc comment for why that stays true
-     * until a candidate is actually verified.
+     * Where semantic memory's embedding model ([ExperimentalEmbeddingModels.E5_BASE])
+     * lives: the model store first, the legacy directory as fallback (see
+     * [ExperimentalEmbeddingStore]). Entirely separate from [downloads]/[modelStore]:
+     * nothing here ever feeds [LocalModels] or the chat-model registry.
      *
      * Declared here, before [init] rather than in its more natural spot
      * further down near [modelStore] — [init]'s own background task reads
@@ -813,6 +812,32 @@ class AppContainer private constructor(private val context: Context) {
      * load independently and are each just as capable of sitting resident
      * and uncounted through a real OOM as the LLM was.
      */
+    /**
+     * Frees the embedder and whisper engines for a local model about to load
+     * (real device report: the embedder staying resident starved a new chat
+     * load) -- at the load itself, not when the orchestrator is built.
+     * Freeing it at build time ran before the request's memory recall, so
+     * every message with a local model in its route was recalled without
+     * semantic search (device log, build #439: E5 unloaded for "chat model
+     * load" in the same second as each COMMERCIAL_MEMORY selection).
+     *
+     * Kept resident when freeing cannot make the load fit: a 9.8 GB model
+     * against 4.7 GB available is refused either way, and unloading E5 for it
+     * only cost a reload afterwards.
+     */
+    private suspend fun freeAuxiliaryModelsForLocalLoad(requiredBytes: Long) {
+        val available = device.liveRamBytes
+        if (requiredBytes > available + AUXILIARY_MODELS_MAX_BYTES) {
+            appLog.record(
+                "RAM_MANAGER",
+                "not freeing semantic memory/whisper for a ${requiredBytes / MB} MB load: " +
+                    "${available / MB} MB available, it cannot fit either way",
+            )
+            return
+        }
+        releaseMemoryUnderPressure("chat model load", includeLocalModels = false)
+    }
+
     private suspend fun releaseMemoryUnderPressure(
         reason: String,
         level: Int = Int.MAX_VALUE,
@@ -1633,15 +1658,13 @@ class AppContainer private constructor(private val context: Context) {
         isLocalOnly: Boolean,
         registryCandidates: List<FallbackCandidate>,
     ): Orchestrator {
-        // The semantic-memory embedder and whisper engines are freed before a
-        // local load (real device report: the embedder staying resident
-        // starved a new chat load). The previous LLM is not: that is
+        // The semantic-memory embedder and whisper engines are freed right
+        // before a local model actually loads -- sharedRuntimeManager's
+        // beforeAdmission, see [freeAuxiliaryModelsForLocalLoad] -- not here.
+        // The previous LLM is not freed here either: that is
         // sharedRuntimeManager's job at the moment the new one actually
         // loads, so a rebuild for an unrelated setting (temperature, say)
         // no longer throws away a warm multi-GB model for nothing.
-        if (registryCandidates.any { it.binding.runtime == RuntimeKind.LLAMA_CPP }) {
-            kotlinx.coroutines.runBlocking { releaseMemoryUnderPressure("chat model load", includeLocalModels = false) }
-        }
         // Its own manager, holding only this orchestrator's handles — the
         // weights of a local model inside them live in sharedRuntimeManager
         // (see SharedRuntime). One manager shared by whole orchestrators
@@ -2622,6 +2645,12 @@ class AppContainer private constructor(private val context: Context) {
         // ensureEmbedderLoaded then defers once more and the backfill loop
         // takes over, as before.
         private const val RELOAD_WAIT_POLL_MS = 2_000L
+
+        // Upper bound on what freeing the embedder and whisper engines can
+        // give back: E5 Base (~0.3 GB) plus whisper large-v3 (~1.1 GB) with
+        // headroom. Above available + this, a local load is refused anyway.
+        private const val AUXILIARY_MODELS_MAX_BYTES = 2L * 1024 * 1024 * 1024
+        private const val MB = 1024L * 1024
         private const val RELOAD_WAIT_MAX_MS = 10 * 60 * 1000L
 
         // Real device report: reloading E5 below this much free RAM

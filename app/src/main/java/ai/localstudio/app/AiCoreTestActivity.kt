@@ -26,8 +26,7 @@ import kotlinx.coroutines.launch
  * Nano's own answer to a Russian prompt is any good, since Russian is one
  * of this app's two primary languages.
  *
- * Same "download → Test" shape as [ExperimentalEmbeddingsActivity], and the
- * same placement: reachable only from Settings → Advanced, never from
+ * A "download → Test" screen, reachable only from Settings → Advanced, never from
  * anywhere a normal user would land on by accident — nothing here changes
  * which model the app actually uses for anything.
  */

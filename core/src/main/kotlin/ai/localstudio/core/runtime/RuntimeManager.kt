@@ -46,7 +46,9 @@ data class ResidentModel(
  * runtime whose own loads can outlive a cancelled caller (a blocking native
  * load on a detached worker), so a model still physically loading or being
  * freed in the background is never mistaken for free memory by the next
- * admission check.
+ * admission check. It gets the load's required bytes, so a caller freeing
+ * memory of its own (models outside this manager) can tell whether that
+ * would let the load fit at all.
  *
  * [requiredBytesFor] is what a load is admitted against, asked fresh on every
  * acquisition — by default the binding's own estimate, but a caller with
@@ -62,7 +64,7 @@ class RuntimeManager(
     private val strictBudget: Boolean = true,
     private val exclusive: Boolean = false,
     private val log: (String) -> Unit = {},
-    private val beforeAdmission: suspend () -> Unit = {},
+    private val beforeAdmission: suspend (requiredBytes: Long) -> Unit = {},
     private val requiredBytesFor: (binding: RuntimeBinding, variant: Any?) -> Long = { binding, _ -> binding.effectiveRequiredRamBytes },
 ) {
     constructor(
@@ -150,8 +152,8 @@ class RuntimeManager(
         if (!chosen.canRun(model, binding)) {
             throw ModelLoadException("Runtime ${binding.runtime.id} cannot run ${model.id}")
         }
-        beforeAdmission()
         val requiredBytes = requiredBytesFor(binding, variant)
+        beforeAdmission(requiredBytes)
         val budget = budgetBytes()
         if (exclusive) evictAllIdle()
         if (requiredBytes > budget) {

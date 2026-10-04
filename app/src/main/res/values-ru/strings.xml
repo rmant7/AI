@@ -240,14 +240,7 @@
     <string name="models_hidden_title">Скрытые модели</string>
     <string name="models_hidden_subtitle">Скрыто из списка: %1$d.</string>
     <string name="models_hidden_restore">Показать все</string>
-    <string name="embed_screen_title">Экспериментальные модели эмбеддингов</string>
     <string name="embed_screen_explainer">Скачивание и проверка кандидата в модели эмбеддингов для семантического поиска по памяти. Эти модели никогда не используются в чате и не попадают в каталог моделей автоматически — скачайте модель, нажмите «Тест» и проверьте цифры ниже, прежде чем решать, годится ли она.</string>
-    <string name="embed_test">Тест</string>
-    <string name="embed_testing">Тестируем…</string>
-    <string name="embed_result">Размерность: %1$d\nL2-норма вектора запроса: %2$.3f (должна быть близка к 1.0)\ncosine(запрос, похожий фрагмент): %3$.3f\ncosine(запрос, непохожий фрагмент): %4$.3f\n%5$s</string>
-    <string name="embed_result_ok">✓ похожий фрагмент оценён выше непохожего — выглядит разумно</string>
-    <string name="embed_result_suspicious">⚠ непохожий фрагмент оценён так же высоко или выше — проверьте pooling и query/passage-префиксы</string>
-    <string name="embed_result_error">Ошибка: %1$s</string>
     <string name="aicore_screen_title">Тест Gemini Nano (AICore)</string>
     <string name="aicore_screen_explainer">Проверяет, доступен ли Gemini Nano на этом устройстве через AICore, скачивает его при необходимости и позволяет отправить один тестовый запрос. Ничего здесь не подключено к чату или извлечению памяти — см. docs/04-runtime.md, зачем этот экран нужен и на какой вопрос должен ответить.</string>
     <string name="aicore_check_status">Проверить статус</string>

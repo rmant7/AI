@@ -15,15 +15,13 @@ package ai.localstudio.app.llama
  * "download it yourself first" and into [ai.localstudio.app.AppContainer]'s
  * own automatic download-and-load path.
  *
- * A future candidate still belongs here first, unwired, exactly the way
- * [E5_BASE] itself started: verified manually via
- * [ai.localstudio.app.ExperimentalEmbeddingsActivity] (dimension, cosine
- * sanity check) before anything in [ai.localstudio.app.AppContainer] is
- * changed to load it automatically.
+ * No other candidates: embedding discovery is off the roadmap. The manual
+ * test screen that verified [E5_BASE] (ExperimentalEmbeddingsActivity) was
+ * removed with E5 Small -- it was no longer reachable from any screen.
  */
 data class EmbeddingModelSpec(
     val id: String,
-    /** Display name for [ExperimentalEmbeddingsActivity] — never shown anywhere in the production model catalog. */
+    /** Display name, for logs and the Models/Memory screens. */
     val title: String,
     val repoId: String,
     val quantLabel: String,
@@ -38,8 +36,7 @@ object ExperimentalEmbeddingModels {
     /**
      * The app's production semantic-memory embedding model — the only one
      * [ai.localstudio.app.AppContainer] downloads and loads automatically.
-     * Verified twice: on-device via
-     * [ai.localstudio.app.ExperimentalEmbeddingsActivity] (dimension 768,
+     * Verified twice: on-device via the former manual test screen (dimension 768,
      * cosine(similar)=0.897 > cosine(dissimilar)=0.754), and again by the
      * standalone Mobile_mem0 retrieval benchmark
      * (`benchmark/e5_base_benchmark.ipynb`), which found it beat lexical
@@ -57,6 +54,6 @@ object ExperimentalEmbeddingModels {
         passagePrefix = "passage: ",
     )
 
-    /** Every candidate, for [ExperimentalEmbeddingsActivity] to list. */
+    /** Every embedding model the app knows; anything else on disk is deleted (see [ExperimentalEmbeddingStore.deleteRemovedModels]). */
     val ALL = listOf(E5_BASE)
 }

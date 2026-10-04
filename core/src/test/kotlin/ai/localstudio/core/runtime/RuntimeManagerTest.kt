@@ -244,14 +244,14 @@ class RuntimeManagerTest {
             budgetBytes = { events += "budget"; 6 * GB },
             runtimes = mapOf(RuntimeKind.LLAMA_CPP to recordingRuntime),
             clock = { ++now },
-            beforeAdmission = { events += "beforeAdmission" },
+            beforeAdmission = { requiredBytes -> events += "beforeAdmission:${requiredBytes / GB}" },
         )
         val llm = model("llm", bindings = listOf(binding(ramBytes = 2 * GB)))
 
         manager.withModel(llm, llm.bindings.first()) { }
         manager.withModel(llm, llm.bindings.first()) { }
 
-        assertEquals(listOf("beforeAdmission", "budget", "load"), events)
+        assertEquals(listOf("beforeAdmission:2", "budget", "load"), events)
     }
 
     @Test
