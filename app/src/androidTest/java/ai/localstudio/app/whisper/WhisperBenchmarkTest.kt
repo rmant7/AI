@@ -24,7 +24,7 @@ import java.io.File
  * **Not** covered here, and needs to be gathered separately on the same
  * run: RAM/CPU (Android Studio Profiler, or `adb shell dumpsys meminfo` /
  * `top` while this runs), battery/thermal (`adb shell dumpsys
- * batterystats` / `adb shell cat /sys/class/thermal/thermal_zone*/temp`
+ * batterystats` / `adb shell cat /sys/class/thermal/thermal_zone<N>/temp`
  * before and after), and accuracy (WER against a reference transcript —
  * this harness has no ground truth to score against; compare
  * `asr-benchmark-results.csv`'s transcript output to one by hand, or wire
