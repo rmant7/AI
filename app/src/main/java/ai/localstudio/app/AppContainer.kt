@@ -497,6 +497,8 @@ class AppContainer private constructor(private val context: Context) {
      * reason as [experimentalEmbeddingStore] below.
      */
     val modelInstallation = ModelInstallation(context, token = { settings.huggingFaceToken.ifBlank { null } })
+        // VoskModelStore is an object reached with only a Context; it learns the chain here, first thing.
+        .also { ai.localstudio.app.vosk.VoskModelStore.installation = it }
 
     /**
      * Where semantic memory's embedding model ([ExperimentalEmbeddingModels.E5_BASE])
@@ -1295,6 +1297,7 @@ class AppContainer private constructor(private val context: Context) {
     val voskDownloads = VoskDownloads(
         context,
         onDownloadStarted = { ModelDownloadService.ensureStarted(context) },
+        log = { appLog.record("VOSK_DOWNLOAD", it) },
     )
 
     /**
