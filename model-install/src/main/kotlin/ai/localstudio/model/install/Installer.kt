@@ -271,6 +271,13 @@ sealed interface InstallHealth {
     data object Intact : InstallHealth
 
     data class Damaged(val problems: List<String>) : InstallHealth
+
+    /**
+     * Only from [InstalledVariants.verifyHashes]: every kept file re-hashed
+     * fine and the structure is intact, but [unpackedDirs] hold unpacked
+     * archive contents that have no hashes to check against.
+     */
+    data class UnverifiableContents(val unpackedDirs: List<String>) : InstallHealth
 }
 
 /** Reads what [layout] holds: installed variants, their health, uninstalling. */
@@ -289,22 +296,50 @@ class InstalledVariants(private val layout: InstallLayout) {
     fun pathOf(manifest: InstallManifest, artifact: InstalledArtifact): File =
         File(layout.variantDir(manifest.variantId), artifact.unpackedDir ?: artifact.fileName)
 
+    /**
+     * Cheap check — presence and sizes, no hashing:
+     * - a kept file must exist with exactly the size it was downloaded at;
+     * - an unpacked archive's directory must exist and hold exactly the bytes
+     *   unpacking wrote ([InstalledArtifact.unpackedBytes]) — a deleted or
+     *   truncated file inside it shows up, a same-size edit does not.
+     */
     fun health(manifest: InstallManifest): InstallHealth {
         val problems = buildList {
             for (artifact in manifest.artifacts) {
                 val path = pathOf(manifest, artifact)
-                when {
-                    artifact.unpackedDir != null -> if (!path.isDirectory) add("${artifact.unpackedDir}: missing")
-                    !path.isFile -> add("${artifact.fileName}: missing")
-                    path.length() != artifact.sizeBytes -> add("${artifact.fileName}: ${path.length()} bytes, expected ${artifact.sizeBytes}")
+                if (artifact.unpackedDir != null) {
+                    if (!path.isDirectory) {
+                        add("${artifact.unpackedDir}: missing")
+                    } else {
+                        val bytes = path.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                        if (artifact.unpackedBytes != null && bytes != artifact.unpackedBytes) {
+                            add("${artifact.unpackedDir}: $bytes bytes, unpacked ${artifact.unpackedBytes}")
+                        }
+                    }
+                } else {
+                    when {
+                        !path.isFile -> add("${artifact.fileName}: missing")
+                        path.length() != artifact.sizeBytes -> add("${artifact.fileName}: ${path.length()} bytes, expected ${artifact.sizeBytes}")
+                    }
                 }
             }
         }
         return if (problems.isEmpty()) InstallHealth.Intact else InstallHealth.Damaged(problems)
     }
 
-    /** Full re-hash of every kept file — slow, for an explicit "verify" action. */
+    /**
+     * Full re-hash of every kept file against the sha256 recorded at
+     * download — slow, for an explicit "verify" action.
+     *
+     * An unpacked archive is not re-hashed: its recorded sha256 is that of
+     * the archive as downloaded (verified then, deleted after unpacking), and
+     * no per-file hashes of the unpacked contents exist. For those this
+     * proves nothing beyond [health]; it reports them as unverifiable rather
+     * than silently as intact.
+     */
     fun verifyHashes(manifest: InstallManifest): InstallHealth {
+        val structural = health(manifest)
+        if (structural is InstallHealth.Damaged) return structural
         val problems = manifest.artifacts.filter { it.unpackedDir == null }.mapNotNull { artifact ->
             val file = pathOf(manifest, artifact)
             when {
@@ -313,7 +348,9 @@ class InstalledVariants(private val layout: InstallLayout) {
                 else -> null
             }
         }
-        return if (problems.isEmpty()) InstallHealth.Intact else InstallHealth.Damaged(problems)
+        if (problems.isNotEmpty()) return InstallHealth.Damaged(problems)
+        val unverifiable = manifest.artifacts.mapNotNull { it.unpackedDir }
+        return if (unverifiable.isEmpty()) InstallHealth.Intact else InstallHealth.UnverifiableContents(unverifiable)
     }
 
     fun uninstall(variant: VariantId): Boolean {

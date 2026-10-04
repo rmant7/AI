@@ -213,5 +213,23 @@ class InstallerTest {
         assertFalse(File(layout.variantDir(vosk.variants.single().id), "model.zip").exists(), "the archive is not kept")
         assertTrue(result.log.any { it.source.contains("alphacephei") })
         assertEquals(InstallHealth.Intact, installed.health(result.manifest))
+        assertEquals(2L, archive.unpackedBytes)
+
+        // A second run finds it on disk: health is what AlreadyInstalled rests on.
+        transport.opens.clear()
+        assertIs<InstallResult.AlreadyInstalled>(installer.install("local-models-legacy", "legacy-mapping-1", vosk, vosk.variants.single(), plenty))
+        assertTrue(transport.opens.isEmpty())
+
+        // The archive is gone, its contents have no hashes: verifyHashes says so instead of "intact".
+        assertEquals(InstallHealth.UnverifiableContents(listOf("model")), installed.verifyHashes(result.manifest))
+
+        val unpacked = installed.pathOf(result.manifest, archive)
+        File(unpacked, "am/final.mdl").writeText("A")
+        assertIs<InstallHealth.Damaged>(installed.health(result.manifest), "a truncated file inside the unpacked directory")
+        File(unpacked, "am/final.mdl").delete()
+        assertIs<InstallHealth.Damaged>(installed.health(result.manifest), "a deleted file inside the unpacked directory")
+        unpacked.deleteRecursively()
+        assertIs<InstallHealth.Damaged>(installed.health(result.manifest), "the unpacked directory itself deleted")
+        assertIs<InstallHealth.Damaged>(installed.verifyHashes(result.manifest))
     }
 }
