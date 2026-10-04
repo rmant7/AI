@@ -85,12 +85,21 @@ class WhisperCppRuntime(
         // the whole load — if this still doesn't explain a slow load, that
         // is the point at which continuous sampling earns its keep, not
         // before.
-        log("WHISPER_LOAD", "${file.name}: starting (free RAM: ${freeRamMb()} MB)")
+        // The model's id, not the file name: a model-store install's file is
+        // always model.bin (device log, build #445), which says nothing.
+        val label = model.id
+        log("WHISPER_LOAD", "$label: starting (free RAM: ${freeRamMb()} MB)")
 
         var producedHandle = 0L
+        var waitedMs = 0L
         val result = CompletableDeferred<Unit>()
         val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val waitStart = System.currentTimeMillis()
             WhisperBridge.nativeOpMutex.withLock {
+                // Time queued behind another whisper operation (a transcription
+                // holding the shared native mutex) is not load time: a 23.7 s
+                // "load" of Tiny in build #445's log was almost certainly this.
+                waitedMs = System.currentTimeMillis() - waitStart
                 producedHandle = runCatching { bridge.nativeLoad(file.absolutePath) }.getOrDefault(0L)
             }
             result.complete(Unit)
@@ -99,7 +108,7 @@ class WhisperCppRuntime(
             result.await()
             producedHandle
         } catch (e: CancellationException) {
-            log("WHISPER_LOAD", "${file.name}: abandoned after ${System.currentTimeMillis() - loadStart}ms, still loading in the background")
+            log("WHISPER_LOAD", "$label: abandoned after ${System.currentTimeMillis() - loadStart}ms, still loading in the background")
             worker.invokeOnCompletion {
                 if (producedHandle != 0L) bridge.nativeFree(producedHandle)
             }
@@ -107,10 +116,11 @@ class WhisperCppRuntime(
         }
         val loadMs = System.currentTimeMillis() - loadStart
         if (handle == 0L) {
-            log("WHISPER_LOAD", "${file.name}: FAILED after ${loadMs}ms")
-            throw ModelLoadException("whisper.cpp could not load ${file.name}")
+            log("WHISPER_LOAD", "$label: FAILED after ${loadMs}ms (${file.absolutePath})")
+            throw ModelLoadException("whisper.cpp could not load $label")
         }
-        log("WHISPER_LOAD", "${file.name}: ready in ${loadMs}ms (free RAM: ${freeRamMb()} MB)")
+        val queued = if (waitedMs >= 100) ", ${waitedMs}ms of it queued behind another whisper operation" else ""
+        log("WHISPER_LOAD", "$label: ready in ${loadMs}ms$queued (free RAM: ${freeRamMb()} MB)")
 
         return WhisperCppSpeechModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, threads, context, log)
     }
