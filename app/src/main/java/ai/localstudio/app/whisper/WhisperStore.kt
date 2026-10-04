@@ -128,6 +128,10 @@ class WhisperDownloads(
                 val outcome = try {
                     installViaStore(installation, seed, cancel)
                 } catch (e: TransferCancelledException) {
+                    // A progress callback can land after cancel() published
+                    // Idle (device report, build #445: Whisper Tiny's button
+                    // kept saying Pause) -- published once more.
+                    publish(seed, WhisperDownloadState.Idle)
                     downloaders.remove(seed.id)
                     return@launch
                 } catch (e: Exception) {
@@ -184,7 +188,9 @@ class WhisperDownloads(
             installation::freeBytes,
             cancel = { cancel.get() },
         ) { progress ->
-            publish(seed, WhisperDownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: seed.approxSizeBytes), "model"))
+            if (!cancel.get()) {
+                publish(seed, WhisperDownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: seed.approxSizeBytes), "model"))
+            }
         }
         return when (result) {
             is InstallResult.Installed -> {

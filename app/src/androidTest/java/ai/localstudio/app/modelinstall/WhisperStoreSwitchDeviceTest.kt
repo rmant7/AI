@@ -4,6 +4,8 @@ import ai.localstudio.app.whisper.WhisperDownloadState
 import ai.localstudio.app.whisper.WhisperDownloads
 import ai.localstudio.app.whisper.WhisperModelSeed
 import ai.localstudio.app.whisper.WhisperStore
+import ai.localstudio.model.install.HttpBody
+import ai.localstudio.model.install.HttpTransport
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +23,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.FilterInputStream
+import java.io.InputStream
 import java.io.RandomAccessFile
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * 3c.2 on a device: Whisper models installed through the new chain by
@@ -88,6 +94,53 @@ class WhisperStoreSwitchDeviceTest {
         downloads.delete(seed)
         assertFalse(store.isInstalled(seed))
         assertTrue(store.installation!!.installed.all().isEmpty())
+    }
+
+    /**
+     * Build #445: pausing Whisper Tiny left the button on "Pause" -- a
+     * progress callback from the transfer landed after cancel() had
+     * published Idle. Here the first read of the body blocks until the test
+     * has cancelled, so that late callback happens every time.
+     */
+    @Test
+    fun a_pause_stays_paused_even_when_progress_arrives_after_it() {
+        hub.publish("ggerganov/whisper.cpp", "main", "e".repeat(40), "ggml-test.bin" to bytes)
+        val firstRead = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val real = HttpRangeTransport(rewrite = hub.rewrite)
+        val gated = object : HttpTransport {
+            override fun open(url: String, offset: Long): HttpBody {
+                val body = real.open(url, offset)
+                val stream: InputStream = object : FilterInputStream(body.stream) {
+                    override fun read(b: ByteArray, off: Int, len: Int): Int {
+                        firstRead.countDown()
+                        release.await(10, TimeUnit.SECONDS)
+                        return super.read(b, off, len)
+                    }
+                }
+                return HttpBody(body.offset, body.totalBytes, stream)
+            }
+        }
+        val installation = ModelInstallation(
+            context,
+            root = storeRoot,
+            hub = HuggingFaceApiClient(apiBase = hub.base),
+            transport = gated,
+            attemptsPerSource = 1,
+            retryDelayMs = 0,
+        )
+        val store = store(installation)
+        val downloads = WhisperDownloads(store, scope = scope)
+
+        downloads.start(seed)
+        assertTrue("the transfer never started", firstRead.await(30, TimeUnit.SECONDS))
+        downloads.cancel(seed)
+        release.countDown()
+
+        // Long enough for the late callback and the cancellation to land.
+        Thread.sleep(1_000)
+        assertEquals(WhisperDownloadState.Idle, downloads.state.value[seed.id])
+        assertFalse(store.isInstalled(seed))
     }
 
     @Test

@@ -78,7 +78,14 @@ class ExperimentalEmbeddingDownloads(
             publish(spec, ExperimentalDownloadState.Resolving)
             store.installation?.let { installation ->
                 val outcome = runCatching { installViaStore(installation, spec, cancel) }
-                    .getOrElse { e -> if (e is TransferCancelledException) return@launch else NewChainOutcome.Failed(e.message ?: e.toString()) }
+                    .getOrElse { e ->
+                        if (e is TransferCancelledException) {
+                            // A progress callback can land after cancel() published Idle.
+                            publish(spec, ExperimentalDownloadState.Idle)
+                            return@launch
+                        }
+                        NewChainOutcome.Failed(e.message ?: e.toString())
+                    }
                 when (outcome) {
                     NewChainOutcome.Installed -> {
                         store.partFor(spec).delete()
@@ -148,7 +155,7 @@ class ExperimentalEmbeddingDownloads(
             installation::freeBytes,
             cancel = { cancel.get() },
         ) { progress ->
-            publish(spec, ExperimentalDownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: 0)))
+            if (!cancel.get()) publish(spec, ExperimentalDownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: 0)))
         }
         return when (result) {
             is InstallResult.Installed -> {

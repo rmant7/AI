@@ -74,6 +74,8 @@ class VoskDownloads(
                 val outcome = try {
                     installViaStore(installation, seed, cancel)
                 } catch (e: TransferCancelledException) {
+                    // A progress callback can land after cancel() published Idle.
+                    publish(seed, VoskDownloadState.Idle)
                     return@launch
                 } catch (e: Exception) {
                     StoreOutcome.Failed("${e.javaClass.simpleName}: ${e.message}")
@@ -148,7 +150,9 @@ class VoskDownloads(
             installation::freeBytes,
             cancel = { cancel.get() },
         ) { progress ->
-            publish(seed, VoskDownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: seed.approxSizeBytes), "model"))
+            if (!cancel.get()) {
+                publish(seed, VoskDownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: seed.approxSizeBytes), "model"))
+            }
         }
         return when (result) {
             is InstallResult.Installed -> {

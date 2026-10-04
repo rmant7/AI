@@ -136,6 +136,10 @@ class ModelDownloads(
                 val outcome = try {
                     installViaStore(installation, seed, cancel)
                 } catch (e: TransferCancelledException) {
+                    // cancel() published Paused already, but a progress
+                    // callback can land after it (device report, build #445:
+                    // the button kept saying Pause) -- published once more.
+                    publishStopped(seed)
                     downloaders.remove(seed.id)
                     return@launch
                 } catch (e: Exception) {
@@ -233,7 +237,7 @@ class ModelDownloads(
             installation::freeBytes,
             cancel = { cancel.get() },
         ) { progress ->
-            publish(seed, DownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: 0), source))
+            if (!cancel.get()) publish(seed, DownloadState.Running(DownloadProgress(progress.transfer.bytesDone, progress.transfer.bytesTotal ?: 0), source))
         }
         return when (result) {
             is InstallResult.Installed -> {
@@ -296,6 +300,10 @@ class ModelDownloads(
         // it — published as DownloadState.Paused, not a blanket Idle, so the
         // Models screen can say so immediately rather than only after a
         // restart (see stateOf's own fallback for the same file).
+        publishStopped(seed)
+    }
+
+    private fun publishStopped(seed: LocalModelSeed) {
         val partial = store.partialSize(seed)
         publish(seed, if (partial > 0) DownloadState.Paused(partial) else DownloadState.Idle)
     }
