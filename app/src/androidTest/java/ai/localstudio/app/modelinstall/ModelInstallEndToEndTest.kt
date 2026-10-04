@@ -28,7 +28,7 @@ import kotlin.math.sqrt
 
 /**
  * catalog → resolve → download → verify → install → discover → runtime →
- * inference, for real: the generated catalogue's multilingual-e5-small
+ * inference, for real: the generated catalogue's multilingual-e5-base
  * entry, fetched from huggingface.co over the device's network, installed
  * by the new chain into a scratch root, found again by a fresh instance from
  * disk, run through llama.cpp's embedding path.
@@ -50,11 +50,17 @@ class ModelInstallEndToEndTest {
     }
 
     @Test
-    fun the_legacy_e5_entry_installs_from_huggingface_and_embeds() {
+    fun the_legacy_e5_base_entry_installs_from_huggingface_and_embeds() {
         val catalogText = testAssets.open("local-models.json").bufferedReader().use { it.readText() }
         val catalog = CatalogLoader.load(catalogText, CatalogTrust.Bundled)
         assertEquals(emptyList<Any>(), catalog.violations)
-        val model = catalog.models.single { it.id.id == "multilingual-e5-small-iq4xs" }
+        // e5-base, not e5-small: the e5-small file the legacy entry selects
+        // (cstr/multilingual-e5-small-GGUF, multilingual-e5-small-iq4_xs.gguf)
+        // downloads and verifies fine but this app's llama.cpp refuses it —
+        // "bert model needs to define token type count" (an older conversion
+        // without bert.token_type_count). That is a model-file problem the
+        // legacy Experimental-embeddings screen has too, not an install one.
+        val model = catalog.models.single { it.id.id == "multilingual-e5-base-q4km" }
         val variant = model.variants.single()
         val facet = model.facet(Capabilities.TEXT_EMBEDDING) as EmbeddingFacet
 
