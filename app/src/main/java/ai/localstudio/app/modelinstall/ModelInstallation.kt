@@ -3,6 +3,7 @@ package ai.localstudio.app.modelinstall
 import ai.localstudio.model.install.ArtifactResolver
 import ai.localstudio.model.install.InstallLayout
 import ai.localstudio.model.install.InstalledVariants
+import ai.localstudio.model.install.LegacyMigrator
 import ai.localstudio.model.install.ModelInstaller
 import ai.localstudio.model.install.TransferEngine
 import android.content.Context
@@ -31,6 +32,9 @@ class ModelInstallation(
     val layout = InstallLayout(root)
     val installed = InstalledVariants(layout)
     val installer = ModelInstaller(layout, ArtifactResolver(hub), TransferEngine(transport, attemptsPerSource, retryDelayMs))
+
+    /** Adopts proven legacy installations (see [LegacyInstallationScanner]); not run by the app yet. */
+    val migrator = LegacyMigrator(layout, hub)
 
     /** Free space for an install under [root], for [ModelInstaller.install]'s `freeBytes`. */
     fun freeBytes(): Long = probe.freeBytes(root)

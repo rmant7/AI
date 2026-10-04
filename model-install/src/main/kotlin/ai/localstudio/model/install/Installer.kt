@@ -48,6 +48,8 @@ data class InstalledArtifact(
     /** For an archive: the directory it was unpacked into (the archive itself is not kept) and the bytes unpacked. */
     val unpackedDir: String? = null,
     val unpackedBytes: Long? = null,
+    /** Set when this file was adopted from a legacy installation instead of downloaded: the legacy path it was linked from. */
+    val migratedFrom: String? = null,
 )
 
 /** An optional artifact (a vision projector, say) that couldn't be installed; the variant works without it. */
@@ -60,6 +62,7 @@ data class SkippedArtifact(val role: ArtifactRole, val fileName: String, val rea
  *     <root>/<variant id>/            an installed variant: its files + install.json
  *     <root>/.staging/<variant id>/   an install in progress — kept across restarts so it resumes
  *     <root>/.trash/                  a replaced variant on its way out
+ *     <root>/.legacy/                 legacy installations found but not proven (records only)
  *
  * A variant directory only ever appears complete: it is renamed into place
  * from staging after everything in it was verified.
@@ -72,6 +75,34 @@ class InstallLayout(val root: File) {
 
     fun trashDir(): File = File(root, TRASH)
 
+    /**
+     * Moves a finished [staging] directory into place as [destination]. An
+     * existing destination is renamed aside first and restored if the move
+     * fails, so a variant directory is always either the old one or the new
+     * one, never half of each.
+     */
+    fun promote(staging: File, destination: File, nowMs: Long) {
+        if (destination.exists()) {
+            val trash = File(trashDir(), destination.name + "-" + nowMs)
+            trash.parentFile.mkdirs()
+            if (!destination.renameTo(trash)) throw IOException("cannot move the old ${destination.name} aside")
+            if (!staging.renameTo(destination)) {
+                trash.renameTo(destination)
+                throw IOException("cannot move ${staging.name} into place")
+            }
+            trash.deleteRecursively()
+        } else {
+            destination.parentFile?.mkdirs()
+            if (!staging.renameTo(destination)) throw IOException("cannot move ${staging.name} into place")
+        }
+    }
+
+    /** Where migration assembles a variant — apart from [stagingDir], whose download parts it must never touch. */
+    fun migrationStagingDir(variant: VariantId): File = File(File(root, STAGING), segment(variant.id) + ".migrate")
+
+    /** Records of legacy installations that could not be proven (see [LegacyMigrator]). */
+    fun legacyDir(): File = File(root, LEGACY)
+
     private fun segment(id: String): String {
         require(id.isNotBlank() && '/' in id == false && '\\' in id == false && id != "." && id != ".." && !id.startsWith(".")) {
             "variant id '$id' is not a safe directory name"
@@ -82,6 +113,7 @@ class InstallLayout(val root: File) {
     companion object {
         const val STAGING = ".staging"
         const val TRASH = ".trash"
+        const val LEGACY = ".legacy"
     }
 }
 
@@ -211,7 +243,7 @@ class ModelInstaller(
             skippedOptional = skipped,
         )
         File(staging, InstallManifest.FILE_NAME).writeText(ManifestCodec.encode(manifest))
-        promote(staging, layout.variantDir(variant.id))
+        layout.promote(staging, layout.variantDir(variant.id), clock())
         return InstallResult.Installed(manifest, log)
     }
 
@@ -235,21 +267,6 @@ class ModelInstaller(
         return total
     }
 
-    private fun promote(staging: File, destination: File) {
-        if (destination.exists()) {
-            val trash = File(layout.trashDir(), destination.name + "-" + clock())
-            trash.parentFile.mkdirs()
-            if (!destination.renameTo(trash)) throw IOException("cannot move the old ${destination.name} aside")
-            if (!staging.renameTo(destination)) {
-                trash.renameTo(destination)
-                throw IOException("cannot move ${staging.name} into place")
-            }
-            trash.deleteRecursively()
-        } else {
-            destination.parentFile?.mkdirs()
-            if (!staging.renameTo(destination)) throw IOException("cannot move ${staging.name} into place")
-        }
-    }
 }
 
 object ManifestCodec {
