@@ -258,7 +258,7 @@ class LegacyCatalogGoldenTest {
             val sources = (archive.source as? ArtifactSource.Alternatives)?.sources ?: listOf(archive.source)
             assertEquals(seed.downloadUrls, sources.map(::urlOf), "${seed.id}: URLs in order")
             assertEquals(seed.downloadUrls.size > 1, archive.source is ArtifactSource.Alternatives, seed.id)
-            assertEquals(UnpackSpec("zip"), archive.unpack, seed.id)
+            assertEquals(UnpackSpec("zip", stripComponents = 1), archive.unpack, "${seed.id}: zip, top-level folder stripped like VoskModelStore.extract")
             assertEquals(seed.approxSizeBytes, archive.sizeBytes, seed.id)
             assertEquals(Runtimes.VOSK, variant.bindings.single().runtime, seed.id)
         }

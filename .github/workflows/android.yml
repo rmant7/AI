@@ -45,8 +45,8 @@ jobs:
       # *compile* as a dependency, never to run its own tests. :core-chat
       # (NodeExecutors/LlmMemoryExtractor, split out of :core — see
       # MOBILE_MEM0_DEPENDENCY.md) is the same risk if left off this list.
-      - name: Test core, model-core, core-chat, commercial-memory and openai
-        run: ./gradlew --no-daemon :core:test :model-core:test :core-chat:test :commercial-memory:test :openai:test 2>&1 | tee -a build.log
+      - name: Test core, model-core, model-install, core-chat, commercial-memory and openai
+        run: ./gradlew --no-daemon :core:test :model-core:test :model-install:test :core-chat:test :commercial-memory:test :openai:test 2>&1 | tee -a build.log
 
       # --max-workers=1: with two native-build modules now (:app's llama_jni
       # and :whisper's whisper_jni), Gradle configures both CMake projects in
@@ -113,6 +113,24 @@ jobs:
             echo "job status: ${{ job.status }}"
             echo "---"
             grep -E "^e: |error:|FAILURE:|BUILD (SUCCESSFUL|FAILED)|Execution failed|Caused by:|ninja: build stopped|C/C\+\+:.*error|^\s+> " build.log 2>/dev/null | tail -60 || echo "no build log"
+            echo "--- unit tests per module (from JUnit XML; a module with 0 ran nothing) ---"
+            python3 - <<'PY' || echo "test summary unavailable"
+          import collections, glob, re
+          totals = collections.defaultdict(lambda: [0, 0, 0, 0])
+          for path in glob.glob("**/build/test-results/**/TEST-*.xml", recursive=True):
+              head = open(path, encoding="utf-8").read(4000)
+              suite = re.search(r"<testsuite [^>]*>", head)
+              if not suite:
+                  continue
+              attrs = dict(re.findall(r'(\w+)="([^"]*)"', suite.group(0)))
+              module = path.split("/build/")[0] or "."
+              for i, key in enumerate(("tests", "failures", "errors", "skipped")):
+                  totals[module][i] += int(attrs.get(key, 0))
+          for module, (tests, failures, errors, skipped) in sorted(totals.items()):
+              print(f"{module}: {tests} tests, {failures} failures, {errors} errors, {skipped} skipped")
+          if not totals:
+              print("no JUnit XML found")
+          PY
             echo "--- script/config errors (build.gradle.kts syntax, unresolved DSL, etc.) ---"
             # A broken Gradle *script* (as opposed to app source) fails before
             # any of the above patterns appear — this is what surfaced nothing

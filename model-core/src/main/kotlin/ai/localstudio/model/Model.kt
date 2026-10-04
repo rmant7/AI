@@ -228,7 +228,7 @@ sealed interface FileSelector {
     @SerialName("quantization")
     data class ByQuantization(val quantPriority: List<String>, val extension: String) : FileSelector
 
-    /** A file whose base name is exactly [fileName], wherever it sits in the repository. */
+    /** The file named exactly [fileName] among the files at the repository root (the legacy listing is not recursive). */
     @Serializable
     @SerialName("exact")
     data class ExactName(val fileName: String) : FileSelector
@@ -243,6 +243,13 @@ sealed interface FileSelector {
 data class UnpackSpec(
     val format: String,
     val unpackedSizeBytes: Long = 0,
+    /**
+     * Leading path segments dropped from every entry on unpacking, like
+     * `tar --strip-components` — e.g. 1 for archives that wrap everything in
+     * one top-level folder (every official Vosk model) when the runtime
+     * expects the contents directly.
+     */
+    val stripComponents: Int = 0,
 ) {
     companion object {
         val KNOWN_FORMATS = setOf("zip", "tar", "tar.gz", "tar.bz2", "tar.xz")

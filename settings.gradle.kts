@@ -17,6 +17,10 @@ include(":core")
 // bindings, catalog format, requirement matching). Pure Kotlin, no
 // dependencies on any other module here — see model-core/build.gradle.kts.
 include(":model-core")
+// Installing a :model-core variant: resolution, transfer, verification,
+// unpacking, install layout, binding selection, admission. Pure Kotlin too;
+// network and storage come in through ports the app implements.
+include(":model-install")
 // NodeExecutors (memory/knowledge-aware pipeline wiring) and the
 // LlmMemoryExtractor it uses — the only pieces of the old :core that
 // touched :commercial-memory/Mobile_mem0. Split out so :core itself stays

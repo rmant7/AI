@@ -4425,7 +4425,8 @@
                 "url": "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
               },
               "unpack": {
-                "format": "zip"
+                "format": "zip",
+                "stripComponents": 1
               }
             }
           ],
@@ -4477,7 +4478,8 @@
                 ]
               },
               "unpack": {
-                "format": "zip"
+                "format": "zip",
+                "stripComponents": 1
               }
             }
           ],
@@ -4518,7 +4520,8 @@
                 "url": "https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip"
               },
               "unpack": {
-                "format": "zip"
+                "format": "zip",
+                "stripComponents": 1
               }
             }
           ],

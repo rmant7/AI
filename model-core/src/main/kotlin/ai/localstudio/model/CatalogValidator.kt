@@ -84,6 +84,7 @@ object CatalogValidator {
             artifact.unpack?.let { unpack ->
                 if (unpack.format !in UnpackSpec.KNOWN_FORMATS) problems += "$label: unknown archive format ${unpack.format}"
                 if (unpack.unpackedSizeBytes < 0) problems += "$label: negative unpackedSizeBytes"
+                if (unpack.stripComponents < 0) problems += "$label: negative stripComponents"
             }
             for (source in listOf(artifact.source) + artifact.mirrors) {
                 sourceProblem(source, allowedHosts)?.let { problems += "$label: $it" }

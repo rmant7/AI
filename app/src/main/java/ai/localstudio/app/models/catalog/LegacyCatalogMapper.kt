@@ -54,8 +54,7 @@ import ai.localstudio.model.VariantId
  *   `isCustom`, [ai.localstudio.app.models.ModelPurpose] — the title is the
  *   only text that becomes domain data ([ModelDefinition.displayName]);
  * - install layout: legacy on-disk paths (`models/<id>.gguf`,
- *   `vosk-models/<id>/`, ...) and Vosk's top-level-folder stripping on
- *   unzip — the domain's [ArtifactSpec.fileName] is the name inside a
+ *   `vosk-models/<id>/`, ...) — the domain's [ArtifactSpec.fileName] is the name inside a
  *   variant's own install directory, and moving files is a later phase;
  * - speech registration flags (file transcription, language auto-detect) —
  *   runtime registration, not catalogue data;
@@ -272,7 +271,8 @@ object LegacyCatalogMapper {
                             // Several URLs are an ordered fallback, not mirrors: the same archive
                             // name on another host proves nothing about the bytes (no hash exists).
                             source = sources.singleOrNull() ?: ArtifactSource.Alternatives(sources),
-                            unpack = UnpackSpec("zip"),
+                            // VoskModelStore.extract drops each entry's first path segment.
+                            unpack = UnpackSpec("zip", stripComponents = 1),
                         ),
                     ),
                     bindings = listOf(RuntimeBinding(Runtimes.VOSK, requiredRoles = setOf(ArtifactRoles.ARCHIVE))),
