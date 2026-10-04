@@ -167,8 +167,12 @@ class LazyMemoryEmbedder(
      * completion callback (or by the next [set], whichever comes first), so
      * a second call arriving while a reload is already in flight is a
      * cheap no-op rather than a second concurrent load.
+     *
+     * Public for the app's return to the foreground: reloading only when a
+     * call finds the model unloaded meant the first message after every
+     * background unload was recalled without it.
      */
-    private fun requestReload() {
+    fun requestReload() {
         if (reloadInFlight.compareAndSet(false, true)) {
             reloadTrigger { reloadInFlight.set(false) }
         }

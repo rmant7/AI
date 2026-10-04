@@ -253,6 +253,7 @@ class AppContainer private constructor(private val context: Context) {
         app.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: android.app.Activity) {
                 if (System.currentTimeMillis() - aicoreLastCheckAt >= AICORE_RECHECK_INTERVAL_MS) refreshAicoreStatus()
+                reloadSemanticMemoryOnResume()
             }
             override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) = Unit
             override fun onActivityStarted(activity: android.app.Activity) = Unit
@@ -261,6 +262,22 @@ class AppContainer private constructor(private val context: Context) {
             override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) = Unit
             override fun onActivityDestroyed(activity: android.app.Activity) = Unit
         })
+    }
+
+    /**
+     * Back in the foreground after a background unload (trim level 40 on
+     * every backgrounding, device logs #438/#439): E5 starts loading now,
+     * so the next message is recalled with it. Before, only that message
+     * itself triggered the reload, and its own reply then held it off
+     * until after the answer. Through [LazyMemoryEmbedder.requestReload],
+     * so it shares the in-flight guard and the wait for a running
+     * generation with every other reload.
+     */
+    private fun reloadSemanticMemoryOnResume() {
+        if (semanticMemoryEmbedder.isReady || !settings.memoryEnabled || !settings.semanticMemoryEnabled) return
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            if (experimentalEmbeddingStore.isInstalled(ExperimentalEmbeddingModels.E5_BASE)) semanticMemoryEmbedder.requestReload()
+        }
     }
 
     /** Asks AICore once, in the background; errors leave the status unknown rather than guessing. */

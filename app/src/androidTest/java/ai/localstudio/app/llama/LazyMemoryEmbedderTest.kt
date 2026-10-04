@@ -245,6 +245,22 @@ class LazyMemoryEmbedderTest {
     }
 
     @Test
+    fun an_explicit_reload_request_fires_the_trigger_once_until_it_completes() {
+        var fired = 0
+        var complete: () -> Unit = {}
+        val lazy = LazyMemoryEmbedder(reloadTrigger = { onComplete -> fired++; complete = onComplete })
+
+        // The app's return to the foreground: no call has found it unloaded yet.
+        lazy.requestReload()
+        lazy.requestReload()
+        assertEquals("a second request while one is in flight is a no-op", 1, fired)
+
+        complete()
+        lazy.requestReload()
+        assertEquals("after completion the next request fires again", 2, fired)
+    }
+
+    @Test
     fun set_called_again_without_unload_releases_the_previous_delegate_exactly_once() {
         val lazy = LazyMemoryEmbedder()
         var firstReleaseCount = 0
