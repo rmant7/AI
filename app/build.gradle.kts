@@ -154,8 +154,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // The model catalog is a repository asset, not a copy: the Models screen
-    // reads exactly the file the tests validate.
+    // registry/ holds the legacy :core catalog (catalog.example.json, the
+    // registry.ModelCatalog format), packaged as-is so the APK carries exactly
+    // the file :core's RepositoryAssetsTest validates. AppContainer.catalog()
+    // reads it, but nothing calls that today: the running app takes its model
+    // lists from the seed objects (LocalModels, TranslationModels, ...).
+    // Not to be confused with model-catalog/local-models.json — the :model-core
+    // migration artifact generated from those seeds, deliberately not packaged
+    // and not read at runtime (see model-catalog/README.md).
     sourceSets["main"].assets.srcDir(rootProject.file("registry"))
 
     buildTypes {
