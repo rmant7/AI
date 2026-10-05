@@ -22,6 +22,8 @@ data class RunningTrial(
     val loaded: Boolean = false,
     /** The exact files under test ([DiscoveredCandidate.identity]); null in a marker written before it was kept. */
     val identity: String? = null,
+    /** What the test was evidence for; a crash it caused is recorded against the same. Null in an older marker. */
+    val context: ai.localstudio.model.install.VerificationContext? = null,
 )
 
 /** Why the previous process ended, as the system reported it -- only the exits worth attributing. */
@@ -61,7 +63,10 @@ class CandidateTrialMarker(private val file: File) {
                 inferenceOk = false,
                 error = "the app was killed $stage: ${death.reason}" + (death.detail?.let { " -- $it" } ?: ""),
                 verifiedAtEpochMs = death.atEpochMs,
-                checkVersion = DeviceVerification.CURRENT_CHECK,
+                checkVersion = marker.context?.checkVersion ?: DeviceVerification.CURRENT_CHECK,
+                artifact = marker.context?.artifact,
+                device = marker.context?.device,
+                runtimeVersion = marker.context?.runtimeVersion,
             )
         }
     }

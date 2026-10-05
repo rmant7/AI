@@ -84,7 +84,7 @@ class ModelDownloadService : Service() {
                         add(getString(R.string.download_notification_whisper_progress, (it.progress.fraction * 100).toInt()))
                     }
                     if (discovering) add(getString(R.string.download_notification_discovery))
-                    candidates.downloads.forEach { (repo, d) -> add("${repo.substringAfter('/')} ${d.percent ?: 0}%") }
+                    candidates.downloads.forEach { (key, d) -> add("${key.substringBefore('|').substringAfter('/')} ${d.percent ?: 0}%") }
                     candidates.trial?.let { add(it.describe(this@ModelDownloadService)) }
                     if (isEmpty() && ggufResolving) add(getString(R.string.download_notification_searching))
                 }

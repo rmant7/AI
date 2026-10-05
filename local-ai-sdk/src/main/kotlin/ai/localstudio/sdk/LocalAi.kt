@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
  * only proven behaviour filters on the latter.
  */
 interface LocalAi {
-    /** The models installed on this device, each with what it can do and what this device proved. */
+    /** Every model installed on this device, checked or not: each with what it can be asked and what a check here says now. */
     suspend fun models(): List<LocalModel>
 
     /**
@@ -21,7 +21,8 @@ interface LocalAi {
      * user chose for chat when null. Images need a model with
      * [LocalCapability.VISION]: one without it fails with
      * [LocalAiException.ImageNotSeen], never with an answer that pretends it
-     * saw them.
+     * saw them. Ends with [LocalAiException.Timeout] past
+     * [GenerationOptions.timeoutMs].
      */
     fun generate(input: LocalAiInput, options: GenerationOptions = GenerationOptions(), modelId: String? = null): Flow<String>
 
@@ -34,16 +35,20 @@ interface LocalAi {
 
 /**
  * Finding, installing and checking models this app does not ship with.
- * Installing never makes a model available for use by itself: a candidate
- * becomes one of [LocalAi.models] only after a check on this device passed.
+ * Discovery answers where a model's bytes come from; a check answers what
+ * those bytes do on this device. Installing and checking are separate
+ * steps: [install] is the convenience that runs both.
  */
 interface LocalModelDiscovery {
-    /** What the last search found, with what this device already proved about each. */
+    /** What the last search found, with what a check on this device says about each now. */
     suspend fun candidates(): List<ModelCandidate>
 
-    /** Downloads [candidateId] (all of its files) and then checks it on this device; progress until done. */
+    /** Downloads [candidateId] (all of its files) unless already installed, then checks it on this device; progress until done. */
     fun install(candidateId: String): Flow<InstallProgress>
 
-    /** Checks an installed [candidateId] on this device and returns what was observed. */
+    /**
+     * Checks an installed [candidateId] on this device now and returns what
+     * was observed -- also what refreshes a STALE result.
+     */
     suspend fun verify(candidateId: String): Map<LocalCapability, CheckResult>
 }

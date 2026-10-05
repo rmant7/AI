@@ -18,15 +18,31 @@ import ai.localstudio.model.VariantId
 import kotlinx.serialization.Serializable
 
 /**
- * What a real device actually observed trying to use a discovered
- * candidate -- the only thing [CandidateTier] ever upgrades on. Every field
- * is what one load-and-prompt attempt measured, never inferred: a
- * candidate this app has not yet tried to run has no [DeviceVerification]
- * at all, not one with everything false.
+ * What a check is valid for: these exact bytes ([artifact]), on this device
+ * model ([device]), run by this native runtime ([runtimeVersion] -- the
+ * llama.cpp build and this app's own JNI revision), asked this set of
+ * questions ([checkVersion]). A recorded result counts only while all four
+ * are what they were; change any one and it is [CheckStatus.STALE].
+ */
+@Serializable
+data class VerificationContext(
+    val artifact: ArtifactId,
+    val device: String,
+    val runtimeVersion: String,
+    val checkVersion: Int = DeviceVerification.CURRENT_CHECK,
+)
+
+/**
+ * What a real device actually observed trying to use a model -- the only
+ * thing [CandidateTier] ever upgrades on. Every field is what one
+ * load-and-prompt attempt measured, never inferred: a model this app has
+ * not yet tried to run has no [DeviceVerification] at all, not one with
+ * everything false. What it is evidence for is [context]; asked about any
+ * other context it answers [CheckStatus.STALE], never PASS.
  */
 @Serializable
 data class DeviceVerification(
-    /** A normalized profile, not a device id -- "Pixel 10 Pro / API 37 / 16.3 GB / llama.cpp b10448 (i8mm)"; enough to judge fit, not to identify a person. */
+    /** A normalized profile, not a device id -- "Pixel 10 Pro / API 37 / 16.3 GB / llama.cpp b10448 (i8mm)"; for a human reading it. */
     val deviceProfile: String,
     val runtimeId: String,
     val loaded: Boolean,
@@ -38,36 +54,65 @@ data class DeviceVerification(
     val error: String? = null,
     val verifiedAtEpochMs: Long,
     /**
-     * Which version of the answer check produced [inferenceOk]. A record
-     * from before [CURRENT_CHECK] (absent in older files: 1) is not trusted
-     * for FUNCTIONAL -- the first check also credited a word found inside an
+     * Which version of the questions produced [checks] (absent in older
+     * files: 1). The first check also credited a word found inside an
      * unfinished reasoning draft.
      */
     val checkVersion: Int = 1,
     /**
      * What each capability's own check on this device found, by
-     * [VerifiedCapability] name -- absent means NOT_TESTED. From
-     * [CURRENT_CHECK] 3 on this, not [inferenceOk] alone, is what a model
-     * is good for: a translation model failing chat questions is a
-     * translation-only model, not a failed one.
+     * [VerifiedCapability] name -- absent means NOT_TESTED. A translation
+     * model failing chat questions is a translation-only model, not a
+     * failed one.
      */
     val checks: Map<String, CapabilityCheck> = emptyMap(),
+    /** The bytes checked; null in a record from before it was kept. */
+    val artifact: ArtifactId? = null,
+    /** The device model ("Google Pixel 10 Pro"); null in a record from before it was kept. */
+    val device: String? = null,
+    /** The native runtime that ran the check; null in a record from before it was kept. */
+    val runtimeVersion: String? = null,
 ) {
-    fun status(capability: String): CheckStatus = checks[capability]?.status ?: CheckStatus.NOT_TESTED
+    /** What this record is evidence for; null for a record from before that was kept -- valid for nothing now. */
+    val context: VerificationContext?
+        get() = if (artifact != null && device != null && runtimeVersion != null) VerificationContext(artifact, device, runtimeVersion, checkVersion) else null
 
-    /** Passed by the current check -- never by an older version's weaker one. */
-    fun passes(capability: String): Boolean = checkVersion >= CURRENT_CHECK && status(capability) == CheckStatus.PASS
+    fun isValidFor(current: VerificationContext): Boolean = context == current
 
-    /** The capabilities that passed, in [VerifiedCapability.ALL] order. */
-    val passed: List<String> get() = VerifiedCapability.ALL.filter(::passes)
+    /** What was observed when the check ran, whatever has changed since -- for showing history, never for deciding. */
+    fun recorded(capability: String): CheckStatus = checks[capability]?.status ?: CheckStatus.NOT_TESTED
+
+    /** What the check says now, in [current]: the recorded result while still valid, STALE once anything it depended on changed. */
+    fun status(capability: String, current: VerificationContext): CheckStatus {
+        val observed = checks[capability]?.status ?: return CheckStatus.NOT_TESTED
+        return if (isValidFor(current)) observed else CheckStatus.STALE
+    }
+
+    fun passes(capability: String, current: VerificationContext): Boolean = status(capability, current) == CheckStatus.PASS
+
+    /** The capabilities that pass in [current], in [VerifiedCapability.ALL] order. */
+    fun passed(current: VerificationContext): List<String> = VerifiedCapability.ALL.filter { passes(it, current) }
+
+    /** Why this record no longer applies in [current] -- the first thing that changed; null while it is valid. */
+    fun staleReason(current: VerificationContext): String? {
+        val was = context ?: return "checked before this app recorded what a check depends on"
+        return when {
+            was.artifact != current.artifact -> "other files: checked ${was.artifact.key}"
+            was.device != current.device -> "checked on another device: ${was.device}"
+            was.runtimeVersion != current.runtimeVersion -> "runtime changed: ${was.runtimeVersion} -> ${current.runtimeVersion}"
+            was.checkVersion != current.checkVersion -> "the questions changed: version ${was.checkVersion} -> ${current.checkVersion}"
+            else -> null
+        }
+    }
 
     companion object {
         const val CURRENT_CHECK = 3
     }
 }
 
+/** PASS / FAIL / NOT_TESTED are what a check records; STALE is only ever answered, never stored: a recorded result whose context changed. */
 @Serializable
-enum class CheckStatus { PASS, FAIL, NOT_TESTED }
+enum class CheckStatus { PASS, FAIL, NOT_TESTED, STALE }
 
 /** One capability's check: [detail] says why it failed (or what was noted), [sample] what the model actually said. */
 @Serializable
@@ -95,9 +140,9 @@ enum class CandidateTier {
 }
 
 /** The one place a [DeviceVerification] becomes a [CandidateTier] -- see that enum's own doc comment on why this is the only path to anything past UNVERIFIED. */
-fun DeviceVerification?.tier(): CandidateTier = when {
+fun DeviceVerification?.tier(current: VerificationContext): CandidateTier = when {
     this == null -> CandidateTier.UNVERIFIED
-    passed.isNotEmpty() -> CandidateTier.FUNCTIONAL
+    passed(current).isNotEmpty() -> CandidateTier.FUNCTIONAL
     // An older check's "answered" still proves it loaded and produced text.
     inferenceOk || loaded -> CandidateTier.LOADABLE
     else -> CandidateTier.UNVERIFIED

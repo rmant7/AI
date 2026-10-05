@@ -3,8 +3,13 @@ package ai.localstudio.sdk
 /** What a model can be asked to do. */
 enum class LocalCapability { TEXT, TRANSLATION, VISION }
 
-/** What a check on this device observed for one capability. */
-enum class CheckResult { PASS, FAIL, NOT_TESTED }
+/**
+ * What a check on this device says about one capability now. STALE: it
+ * was checked, but something it depended on has changed since (other
+ * files, another device, another runtime build, other questions) -- not a
+ * pass, and not "never checked" either.
+ */
+enum class CheckResult { PASS, FAIL, NOT_TESTED, STALE }
 
 /** An image handed to a model: the encoded file (PNG, JPEG, ...), not a path or a URI. */
 class LocalImage(bytes: ByteArray, val mimeType: String) {
@@ -34,10 +39,21 @@ data class GenerationOptions(
     val maxTokens: Int = 1024,
     /** 0 = deterministic. */
     val temperature: Double = 0.7,
+    /**
+     * How long the model may work on this request -- time spent waiting for
+     * another model's turn does not count. Past it the request fails with
+     * [LocalAiException.Timeout]; a native call that hangs never holds the
+     * caller forever.
+     */
+    val timeoutMs: Long = 5 * 60_000L,
+    /** The hard limit on everything, waiting included. */
+    val deadlineMs: Long = 2 * timeoutMs,
 ) {
     init {
         require(maxTokens > 0) { "maxTokens must be positive" }
         require(temperature >= 0.0) { "temperature must not be negative" }
+        require(timeoutMs > 0) { "timeoutMs must be positive" }
+        require(deadlineMs >= timeoutMs) { "deadlineMs must not be shorter than timeoutMs" }
     }
 }
 
@@ -47,9 +63,25 @@ data class Language(val code: String, val name: String)
 data class TranslationRequest(val text: String, val source: Language, val target: Language)
 
 /**
- * An installed model. [capabilities]: what its installed files allow
- * (VISION only with its projector). [verified]: what a check on this device
- * observed -- absent or NOT_TESTED until one ran.
+ * Which bytes a model is: the same [ArtifactRef] is the same model byte for
+ * byte. A check on a device is about one [ArtifactRef] on that device.
+ */
+data class ArtifactRef(
+    val repository: String,
+    val revision: String,
+    val mainFile: String,
+    val projectorFile: String? = null,
+) {
+    /** Its stable string form -- [ModelCandidate.id] is this. */
+    val key: String get() = listOfNotNull(repository, revision, mainFile, projectorFile).joinToString("|")
+}
+
+/**
+ * An installed model -- every installed model, checked or not.
+ * [capabilities]: what its installed files allow it to be asked (VISION
+ * only with its projector) -- a possibility, not a promise. [verified]:
+ * what a check on this device says now. Use [proven] to decide what to
+ * rely on.
  */
 data class LocalModel(
     val id: String,
@@ -57,13 +89,18 @@ data class LocalModel(
     val capabilities: Set<LocalCapability>,
     val verified: Map<LocalCapability, CheckResult> = emptyMap(),
     val sizeBytes: Long,
+    /** Its bytes, when the install records where they came from; null for a model installed before that was kept. */
+    val artifact: ArtifactRef? = null,
 ) {
+    /** A current PASS on this device -- not STALE, not merely offered. */
     fun proven(capability: LocalCapability): Boolean = verified[capability] == CheckResult.PASS
 }
 
 /** A model discovery found: one model, all of its files ([sizeBytes] counts them all). */
 data class ModelCandidate(
+    /** [artifact]'s key: what install() and verify() take. */
     val id: String,
+    val artifact: ArtifactRef,
     val repository: String,
     val sizeBytes: Long,
     /** What its files allow -- VISION only when it comes with a usable projector. */
@@ -87,5 +124,6 @@ sealed class LocalAiException(message: String, cause: Throwable? = null) : Excep
     class ImageNotSeen(val reason: String) : LocalAiException("the image was not seen: $reason")
     class NotEnoughMemory(val neededBytes: Long, val availableBytes: Long) :
         LocalAiException("not enough memory: needs ~${neededBytes / 1_000_000} MB, ~${availableBytes / 1_000_000} MB available")
+    class Timeout(val limitMs: Long) : LocalAiException("no complete answer within ${limitMs / 1000} s")
     class Failed(reason: String, cause: Throwable? = null) : LocalAiException(reason, cause)
 }

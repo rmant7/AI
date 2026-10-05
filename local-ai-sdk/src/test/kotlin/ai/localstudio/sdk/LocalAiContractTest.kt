@@ -66,4 +66,34 @@ class LocalAiContractTest {
         assertFailsWith<IllegalArgumentException> { GenerationOptions(maxTokens = 0) }
         assertFailsWith<IllegalArgumentException> { GenerationOptions(temperature = -1.0) }
     }
+
+    @Test
+    fun `installed but unverified, stale and failed are all installed and none is proven`() {
+        val states = mapOf(
+            "unverified" to emptyMap(),
+            "not tested" to mapOf(LocalCapability.VISION to CheckResult.NOT_TESTED),
+            "stale" to mapOf(LocalCapability.VISION to CheckResult.STALE),
+            "failed" to mapOf(LocalCapability.VISION to CheckResult.FAIL),
+        )
+        for ((what, verified) in states) {
+            val model = visionModel.copy(verified = verified)
+            assertTrue(LocalCapability.VISION in model.capabilities, what)
+            assertFalse(model.proven(LocalCapability.VISION), what)
+        }
+        assertTrue(visionModel.copy(verified = mapOf(LocalCapability.VISION to CheckResult.PASS)).proven(LocalCapability.VISION))
+    }
+
+    @Test
+    fun `an artifact ref names the main file and its projector`() {
+        val main = ArtifactRef("acme/see-GGUF", "abc", "see-Q4_K_M.gguf")
+        assertEquals("acme/see-GGUF|abc|see-Q4_K_M.gguf", main.key)
+        assertEquals("acme/see-GGUF|abc|see-Q4_K_M.gguf|mmproj-F16.gguf", main.copy(projectorFile = "mmproj-F16.gguf").key)
+    }
+
+    @Test
+    fun `a timeout is required and bounded by the deadline`() {
+        assertEquals(10 * 60_000L, GenerationOptions().deadlineMs)
+        assertFailsWith<IllegalArgumentException> { GenerationOptions(timeoutMs = 0) }
+        assertFailsWith<IllegalArgumentException> { GenerationOptions(timeoutMs = 10_000, deadlineMs = 5_000) }
+    }
 }

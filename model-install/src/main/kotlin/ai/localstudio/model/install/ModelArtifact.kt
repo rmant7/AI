@@ -12,6 +12,27 @@ data class ModelFile(
     val sha256: String? = null,
 )
 
+/**
+ * Which bytes a model is: repository, commit, main file, and its projector
+ * when it has one. Two models with the same [ArtifactId] are the same model
+ * byte for byte; anything a device observed about one applies to the other
+ * on that device, and to nothing else. [key] is its stable string form.
+ *
+ * No projector type: a projector file at a commit has exactly one, read
+ * from its own header, so naming the file already names it -- and an id
+ * rebuilt from an install manifest (which records files, not headers) must
+ * equal the one discovery made.
+ */
+@Serializable
+data class ArtifactId(
+    val repository: String,
+    val revision: String,
+    val mainFile: String,
+    val projectorFile: String? = null,
+) {
+    val key: String get() = listOfNotNull(repository, revision, mainFile, projectorFile).joinToString("|")
+}
+
 /** A vision projector (mmproj): the file, and the `clip.projector_type` its own header declares. */
 @Serializable
 data class ProjectorFile(val file: ModelFile, val type: String)
@@ -35,6 +56,8 @@ data class ModelArtifact(val main: ModelFile, val projector: ProjectorFile? = nu
     }
 
     val totalBytes: Long get() = main.sizeBytes + (projector?.file?.sizeBytes ?: 0L)
+
+    val id: ArtifactId get() = ArtifactId(main.repo, main.revision, main.path, projector?.file?.path)
 
     /** Whether this artifact has the parts [capability] needs -- the precondition for checking it, not a result (see [DeviceVerification]). */
     fun canCheck(capability: String): Boolean = CapabilityRequirements.of(capability).all { part ->

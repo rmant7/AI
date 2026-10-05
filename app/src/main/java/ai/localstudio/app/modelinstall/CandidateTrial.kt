@@ -166,6 +166,8 @@ class CandidateTrial(
         runtimeId: String,
         suites: Map<String, List<FunctionalProbe>>,
         runtime: TrialRuntime,
+        /** What the result is evidence for: these bytes, this device, this runtime, these questions. */
+        context: ai.localstudio.model.install.VerificationContext,
     ): DeviceVerification {
         require(suites.values.any { it.isNotEmpty() }) { "a trial needs at least one probe" }
         val answers = mutableListOf<String>()
@@ -183,8 +185,11 @@ class CandidateTrial(
             tokensPerSecond = if (intervals > 0 && generatingMs > 0) intervals * 1000.0 / generatingMs else null,
             error = error,
             verifiedAtEpochMs = clock(),
-            checkVersion = DeviceVerification.CURRENT_CHECK,
+            checkVersion = context.checkVersion,
             checks = checks,
+            artifact = context.artifact,
+            device = context.device,
+            runtimeVersion = context.runtimeVersion,
         )
 
         for ((capability, probes) in suites) {
@@ -261,7 +266,8 @@ class CandidateTrial(
 
 /** Where the one running test is: loading the weights, then asking question [probe] of [probes]. */
 data class CandidateTrialState(
-    val repoId: String,
+    /** The candidate's [DiscoveredCandidate.identity]. */
+    val key: String,
     val phase: Phase,
     /** 1-based, while [phase] is [Phase.ANSWERING]. */
     val probe: Int = 0,
@@ -275,19 +281,21 @@ data class CandidateDownload(val bytesDone: Long, val bytesTotal: Long) {
 }
 
 /**
- * Everything candidate-related in flight, keyed by repository id: downloads
- * run side by side like any model's; tests run one at a time (each loads a
- * whole model into RAM), the rest wait in [queued].
+ * Everything candidate-related in flight, keyed by the candidate's
+ * [DiscoveredCandidate.identity] (its ArtifactId) -- not its repository: two
+ * files of one repository are two models, downloaded and tested apart.
+ * Downloads run side by side like any model's; tests run one at a time
+ * (each loads a whole model into RAM), the rest wait in [queued].
  */
 data class CandidateWork(
     val downloads: Map<String, CandidateDownload> = emptyMap(),
     val trial: CandidateTrialState? = null,
     val queued: List<String> = emptyList(),
-    /** The last download failure per repository, until it is retried. */
+    /** The last download failure per candidate, until it is retried. */
     val failures: Map<String, String> = emptyMap(),
 ) {
     val isIdle: Boolean get() = downloads.isEmpty() && trial == null && queued.isEmpty()
 
     /** Downloading, waiting for a test or being tested -- not a moment to delete its files or start it again. */
-    fun isBusy(repoId: String): Boolean = repoId in downloads || repoId in queued || trial?.repoId == repoId
+    fun isBusy(key: String): Boolean = key in downloads || key in queued || trial?.key == key
 }

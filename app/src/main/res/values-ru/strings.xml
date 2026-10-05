@@ -502,7 +502,9 @@
     <string name="candidate_check_pass">работает</string>
     <string name="candidate_check_fail">не прошла</string>
     <string name="candidate_check_not_tested">не проверена</string>
-    <string name="candidate_old_check">Проверена старой версией теста — проверьте снова, чтобы получить актуальный результат</string>
+    <string name="candidate_check_stale">было: %1$s, устарело — проверьте снова</string>
+    <string name="candidate_stale_reason">Устарело: %1$s</string>
+    <string name="candidate_check_stale_short">устарело</string>
     <string name="candidate_check_said">ответ: %1$s</string>
     <string name="candidate_use_chat">Использовать в чате</string>
     <string name="candidate_use_translation">Использовать для перевода</string>

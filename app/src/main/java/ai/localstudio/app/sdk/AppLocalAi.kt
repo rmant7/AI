@@ -10,7 +10,9 @@ import ai.localstudio.core.engine.SelectedModel
 import ai.localstudio.core.runtime.GenerationRequest
 import ai.localstudio.core.runtime.ImageNotSeenException
 import ai.localstudio.core.runtime.InsufficientMemoryException
+import ai.localstudio.core.runtime.OperationTimeoutException
 import ai.localstudio.core.runtime.TextModelHandle
+import ai.localstudio.core.runtime.withOperationTimeout
 import ai.localstudio.sdk.CheckResult
 import ai.localstudio.sdk.GenerationOptions
 import ai.localstudio.sdk.InstallProgress
@@ -25,6 +27,7 @@ import ai.localstudio.sdk.TranslationRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -47,12 +50,14 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
             .distinctBy { it.model.id }
             .map { selected ->
                 val id = selected.model.id
+                val artifact = container.installedArtifact(id)
                 LocalModel(
                     id = id,
                     displayName = container.localSeed(id)?.title ?: id,
                     capabilities = capabilitiesOf(selected),
-                    verified = SdkMapping.checks(container.candidateBehind(id)?.verification),
+                    verified = artifact?.let { SdkMapping.checks(container.recordedVerification(it), container.verificationContext(it)) }.orEmpty(),
                     sizeBytes = selected.binding.fileSizeBytes + (selected.binding.mmprojArtifact?.let { File(it).length() } ?: 0L),
+                    artifact = artifact?.let(SdkMapping::artifactRef),
                 )
             }
 
@@ -65,7 +70,7 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
         if (!SdkMapping.canTake(selected.binding, input)) {
             throw LocalAiException.ImageNotSeen("${selected.model.id} has no vision projector installed")
         }
-        emitAll(answer(selected, SdkMapping.request(input, options)))
+        emitAll(answer(selected, SdkMapping.request(input, options), options))
     }
 
     override suspend fun translate(request: TranslationRequest, modelId: String?): String {
@@ -79,14 +84,16 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
         val prompt = TranslationPrompts.forLocalModel(
             format, request.source.name, request.target.name, request.target.code, request.text, IsoScriptCodes::of,
         )
-        val reply = answer(selected, GenerationRequest(prompt = prompt, temperature = 0.0)).toList().joinToString("")
+        val reply = answer(selected, GenerationRequest(prompt = prompt, temperature = 0.0), GenerationOptions(temperature = 0.0)).toList().joinToString("")
         return finalAnswer(reply)?.trim()?.takeIf { it.isNotEmpty() }
             ?: throw LocalAiException.Failed("${selected.model.id} gave no translation" + if (finalAnswer(reply) == null) " (still reasoning when the reply ended)" else "")
     }
 
     override val discovery: LocalModelDiscovery = object : LocalModelDiscovery {
         override suspend fun candidates(): List<ModelCandidate> =
-            container.discoveredCandidates().map { (_, c) -> SdkMapping.candidate(c, installed = container.candidateTestable(c)) }
+            container.discoveredCandidates().map { (_, c) ->
+                SdkMapping.candidate(c, installed = container.candidateTestable(c), now = container.verificationContext(c))
+            }
 
         override fun install(candidateId: String): Flow<InstallProgress> = flow {
             val (label, candidate) = container.discoveredCandidate(candidateId) ?: run {
@@ -97,44 +104,58 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
                 // Downloading straight into the device check is what the app itself does (see AppContainer.downloadCandidate).
                 container.downloadCandidate(label, candidate)
                 container.candidateWork
-                    .map { it.downloads[candidate.repoId] }
+                    .map { it.downloads[candidate.identity] }
                     .takeWhile { it != null }
                     .collect { emit(InstallProgress.Downloading(it!!.bytesDone, it.bytesTotal)) }
                 if (!container.candidateTestable(candidate)) {
-                    emit(InstallProgress.Failed(container.candidateWork.value.failures[candidate.repoId] ?: "not installed (paused or cancelled)"))
+                    emit(InstallProgress.Failed(container.candidateWork.value.failures[candidate.identity] ?: "not installed (paused or cancelled)"))
                     return@flow
                 }
             } else {
                 container.testCandidate(label, candidate)
             }
             emit(InstallProgress.Checking)
-            emit(InstallProgress.Done(awaitCheck(candidateId, candidate.repoId)))
+            emit(InstallProgress.Done(awaitCheck(candidateId)))
         }
 
         override suspend fun verify(candidateId: String): Map<LocalCapability, CheckResult> {
             val (label, candidate) = container.discoveredCandidate(candidateId) ?: throw LocalAiException.UnknownModel(candidateId)
             if (!container.candidateTestable(candidate)) throw LocalAiException.Failed("$candidateId is not installed")
             container.testCandidate(label, candidate)
-            return awaitCheck(candidateId, candidate.repoId)
+            return awaitCheck(candidateId)
         }
     }
 
-    /** Waits for [repoId]'s queued or running check to finish, then reads what it recorded. */
-    private suspend fun awaitCheck(candidateId: String, repoId: String): Map<LocalCapability, CheckResult> {
-        container.candidateWork.first { repoId !in it.queued && it.trial?.repoId != repoId }
-        return SdkMapping.checks(container.discoveredCandidate(candidateId)?.second?.verification)
+    /** Waits for [candidateId]'s queued or running check to finish, then reads what it says now. */
+    private suspend fun awaitCheck(candidateId: String): Map<LocalCapability, CheckResult> {
+        container.candidateWork.first { candidateId !in it.queued && it.trial?.key != candidateId }
+        val candidate = container.discoveredCandidate(candidateId)?.second ?: return emptyMap()
+        return SdkMapping.checks(candidate.verification, container.verificationContext(candidate))
     }
 
     /** A T5 translation model translates and nothing else; every other local model takes text, and images with its projector. */
     private fun capabilitiesOf(selected: SelectedModel): Set<LocalCapability> =
         if (container.localSeed(selected.model.id)?.isT5EncoderDecoder == true) setOf(LocalCapability.TRANSLATION) else SdkMapping.capabilities(selected.binding)
 
-    /** One request through the shared runtime, with its failures in the SDK's terms. */
-    private fun answer(selected: SelectedModel, request: GenerationRequest): Flow<String> = flow {
+    /**
+     * One request through the shared runtime, bounded by [options]' timeout
+     * the way the Chat screen bounds its own (waiting for another model's
+     * turn does not count), with its failures in the SDK's terms. A
+     * channelFlow: the watchdog runs the work in a child coroutine, and a
+     * plain flow may only emit from its own.
+     */
+    private fun answer(selected: SelectedModel, request: GenerationRequest, options: GenerationOptions): Flow<String> = channelFlow {
         val handle = container.localTextRuntime().load(selected.model, selected.binding) as? TextModelHandle
             ?: throw LocalAiException.Failed("${selected.model.id} did not load as a text model")
         try {
-            container.heavyOperations.track { emitAll(handle.generate(request)) }
+            container.heavyOperations.track {
+                withOperationTimeout(options.timeoutMs, options.deadlineMs) {
+                    handle.generate(request).collect { send(it) }
+                }
+            }
+        } catch (e: OperationTimeoutException) {
+            handle.requestCancel()
+            throw LocalAiException.Timeout(e.limitMs)
         } finally {
             handle.close()
         }

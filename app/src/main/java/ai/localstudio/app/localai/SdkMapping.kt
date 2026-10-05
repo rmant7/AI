@@ -4,9 +4,12 @@ import ai.localstudio.app.modelinstall.DiscoveredCandidate
 import ai.localstudio.core.model.ImageRef
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.runtime.GenerationRequest
+import ai.localstudio.model.install.ArtifactId
 import ai.localstudio.model.install.CheckStatus
 import ai.localstudio.model.install.DeviceVerification
+import ai.localstudio.model.install.VerificationContext
 import ai.localstudio.model.install.VerifiedCapability
+import ai.localstudio.sdk.ArtifactRef
 import ai.localstudio.sdk.CheckResult
 import ai.localstudio.sdk.GenerationOptions
 import ai.localstudio.sdk.LocalAiInput
@@ -48,27 +51,42 @@ object SdkMapping {
         else -> null
     }
 
-    /** What a device check observed, as the SDK reports it; nothing from a check older than the current one counts. */
-    fun checks(verification: DeviceVerification?): Map<LocalCapability, CheckResult> {
-        if (verification == null || verification.checkVersion < DeviceVerification.CURRENT_CHECK) return emptyMap()
+    fun artifactRef(id: ArtifactId): ArtifactRef = ArtifactRef(id.repository, id.revision, id.mainFile, id.projectorFile)
+
+    fun result(status: CheckStatus): CheckResult = when (status) {
+        CheckStatus.PASS -> CheckResult.PASS
+        CheckStatus.FAIL -> CheckResult.FAIL
+        CheckStatus.NOT_TESTED -> CheckResult.NOT_TESTED
+        CheckStatus.STALE -> CheckResult.STALE
+    }
+
+    /**
+     * What a device check says now, as the SDK reports it: valid results as
+     * recorded, everything checked under another context STALE, never
+     * dropped. [now] null (a model whose bytes are not known) can confirm
+     * nothing: what was checked is STALE.
+     */
+    fun checks(verification: DeviceVerification?, now: VerificationContext?): Map<LocalCapability, CheckResult> {
+        if (verification == null) return emptyMap()
         return VerifiedCapability.ALL.mapNotNull { cap ->
-            val result = when (verification.status(cap)) {
-                CheckStatus.PASS -> CheckResult.PASS
-                CheckStatus.FAIL -> CheckResult.FAIL
-                CheckStatus.NOT_TESTED -> CheckResult.NOT_TESTED
+            val status = when {
+                now != null -> verification.status(cap, now)
+                cap in verification.checks -> CheckStatus.STALE
+                else -> CheckStatus.NOT_TESTED
             }
-            capability(cap)?.let { it to result }
+            capability(cap)?.let { it to result(status) }
         }.toMap()
     }
 
-    fun candidate(candidate: DiscoveredCandidate, installed: Boolean): ModelCandidate = ModelCandidate(
+    fun candidate(candidate: DiscoveredCandidate, installed: Boolean, now: VerificationContext): ModelCandidate = ModelCandidate(
         id = candidate.identity,
+        artifact = artifactRef(candidate.artifact().id),
         repository = candidate.repoId,
         sizeBytes = candidate.totalBytes,
         capabilities = setOf(LocalCapability.TEXT, LocalCapability.TRANSLATION) +
             if (candidate.artifact().canCheck(VerifiedCapability.VISION)) setOf(LocalCapability.VISION) else emptySet(),
         installed = installed,
-        verified = checks(candidate.verification),
+        verified = checks(candidate.verification, now),
         notes = candidate.notes,
     )
 }

@@ -30,6 +30,23 @@ data class InstallManifest(
 
     val sizesByRole: Map<ArtifactRole, Long> get() = artifacts.associate { it.role to (it.unpackedBytes ?: it.sizeBytes) }
 
+    /**
+     * Which bytes this install is, from where its files came: the weights'
+     * repository, commit and path, and the projector's path when there is
+     * one. Null when that is not recorded (a file adopted from a legacy
+     * install, one not from a pinned repository) -- such an install has no
+     * identity a device check could be tied to.
+     */
+    fun artifactId(): ArtifactId? {
+        val weights = artifacts.firstOrNull { it.role == ai.localstudio.model.ArtifactRoles.WEIGHTS }?.source ?: return null
+        val repo = weights.repo ?: return null
+        val commit = weights.commit ?: return null
+        val path = weights.path ?: return null
+        val projector = artifacts.firstOrNull { it.role == ai.localstudio.model.ArtifactRoles.PROJECTOR }?.source
+        if (projector != null && (projector.repo != repo || projector.commit != commit || projector.path == null)) return null
+        return ArtifactId(repo, commit, path, projector?.path)
+    }
+
     companion object {
         const val SCHEMA = 1
         const val FILE_NAME = "install.json"

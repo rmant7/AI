@@ -140,13 +140,15 @@ class CandidatesActivity : AppCompatActivity() {
     private fun bind(card: ItemLocalModelBinding, label: String, c: DiscoveredCandidate, work: CandidateWork) {
         val facts = CandidateFacts.of(c.tags)
         val name = c.repoId
-        val download = work.downloads[name]
-        val trial = work.trial?.takeIf { it.repoId == name }
-        val queued = name in work.queued
+        val key = c.identity
+        val now = container.verificationContext(c)
+        val download = work.downloads[key]
+        val trial = work.trial?.takeIf { it.key == key }
+        val queued = key in work.queued
         val verification = c.verification
         // What a model is offered for comes from what passed on this phone, not from which search found it.
         val usage = USABLE.associateWith { if (download == null) container.candidateUsage(it, c) else CandidateUsage.NONE }
-        val passed = verification?.passed.orEmpty().filter { it in USABLE }
+        val passed = verification?.passed(now).orEmpty().filter { it in USABLE }
         val actions = USABLE.filter { it in passed || usage.getValue(it) != CandidateUsage.NONE }
         val testable = download == null && container.candidateTestable(c)
         val installedBytes = if (download == null) container.candidateInstalledBytes(c) else null
@@ -169,8 +171,8 @@ class CandidatesActivity : AppCompatActivity() {
                     }
                 }.toTypedArray(),
                 partialBytes?.let { getString(R.string.candidate_paused, mb(it), mb(c.totalBytes)) },
-                checksSummary(verification),
-                work.failures[name]?.let { getString(R.string.candidate_download_failed, it) },
+                checksSummary(verification, now),
+                work.failures[key]?.let { getString(R.string.candidate_download_failed, it) },
             ).joinToString("\n")
         }
 
@@ -243,13 +245,11 @@ class CandidatesActivity : AppCompatActivity() {
     }
 
     /** One line per checked capability ("Chat: works · Translation: did not pass") plus why, speed, or a call to test again. */
-    private fun checksSummary(v: ai.localstudio.model.install.DeviceVerification?): String {
+    private fun checksSummary(v: ai.localstudio.model.install.DeviceVerification?, now: ai.localstudio.model.install.VerificationContext): String {
         if (v == null) return tierLabel(CandidateTier.UNVERIFIED)
-        if (v.checkVersion < ai.localstudio.model.install.DeviceVerification.CURRENT_CHECK) {
-            return getString(if (v.loaded) R.string.candidate_old_check else R.string.candidate_tier_unverified) +
-                (v.error?.let { "\n$it" } ?: "")
-        }
         if (!v.loaded) return tierLabel(CandidateTier.UNVERIFIED) + (v.error?.let { "\n$it" } ?: "")
+        // Still shown, as what was observed then: STALE is a result to refresh, not one to forget.
+        val stale = v.staleReason(now)
         val lines = (USABLE + listOf(VerifiedCapability.VISION).filter { it in v.checks }).map { cap ->
             val what = getString(
                 when (cap) {
@@ -258,23 +258,31 @@ class CandidatesActivity : AppCompatActivity() {
                     else -> R.string.candidate_cap_text
                 },
             )
-            val status = getString(
-                when (v.status(cap)) {
-                    CheckStatus.PASS -> R.string.candidate_check_pass
-                    CheckStatus.FAIL -> R.string.candidate_check_fail
-                    CheckStatus.NOT_TESTED -> R.string.candidate_check_not_tested
-                },
-            )
+            val status = when (v.status(cap, now)) {
+                CheckStatus.PASS -> getString(R.string.candidate_check_pass)
+                CheckStatus.FAIL -> getString(R.string.candidate_check_fail)
+                CheckStatus.NOT_TESTED -> getString(R.string.candidate_check_not_tested)
+                CheckStatus.STALE -> getString(R.string.candidate_check_stale, checkWord(v.recorded(cap)))
+            }
             "$what: $status"
         }
         return buildString {
             append(lines.joinToString(" · "))
+            stale?.let { append("\n").append(getString(R.string.candidate_stale_reason, it)) }
             v.tokensPerSecond?.let { append(String.format(Locale.ROOT, " · %.1f tok/s", it)) }
             v.checks.filterValues { it.status == CheckStatus.FAIL }.forEach { (cap, check) ->
                 append("\n").append(cap).append(": ").append(check.detail?.take(160) ?: "")
             }
         }
     }
+
+    private fun checkWord(status: CheckStatus): String = getString(
+        when (status) {
+            CheckStatus.PASS -> R.string.candidate_check_pass
+            CheckStatus.FAIL -> R.string.candidate_check_fail
+            else -> R.string.candidate_check_not_tested
+        },
+    )
 
     private fun subtitle(c: DiscoveredCandidate, facts: CandidateFacts): String = buildString {
         append(c.repoId.substringBefore('/'))
@@ -335,7 +343,7 @@ class CandidatesActivity : AppCompatActivity() {
                 getString(
                     R.string.candidate_details,
                     c.repoId, c.filePath, (c.sizeBytes / 1_000_000).toInt(), c.architecture,
-                    c.contextLength?.toString() ?: dash, c.commit.take(12), tierLabel(c.verification.tier()),
+                    c.contextLength?.toString() ?: dash, c.commit.take(12), tierLabel(c.verification.tier(container.verificationContext(c))),
                 ),
             )
             c.projector?.let { p -> append("\n").append(getString(R.string.candidate_projector, p.file.path, (p.file.sizeBytes / 1_000_000).toInt(), p.type)) }
@@ -361,7 +369,7 @@ class CandidatesActivity : AppCompatActivity() {
             }
             if (c.tags.isNotEmpty()) append("\n\n").append(getString(R.string.candidate_all_tags, c.tags.joinToString(", ")))
         }
-        val busy = container.candidateWork.value.isBusy(c.repoId)
+        val busy = container.candidateWork.value.isBusy(c.identity)
         val canRetest = container.candidateTestable(c) && !busy
         val installedBytes = container.candidateInstalledBytes(c)
         AlertDialog.Builder(this)

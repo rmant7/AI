@@ -21,7 +21,14 @@ class CandidateTrialMarkerTest {
         dir.deleteRecursively()
     }
 
-    private fun running(loaded: Boolean = false) = RunningTrial("chat", "acme/a-GGUF", "Pixel / API 37", "llama_cpp", startedAtEpochMs = 1_000L, loaded = loaded)
+    private val here = ai.localstudio.model.install.VerificationContext(
+        ai.localstudio.model.install.ArtifactId("acme/a-GGUF", "a".repeat(40), "a-Q4_K_M.gguf"),
+        "Google Pixel 10 Pro",
+        "llama.cpp b10448 / jni 2",
+    )
+
+    private fun running(loaded: Boolean = false) =
+        RunningTrial("chat", "acme/a-GGUF", "Pixel / API 37", "llama_cpp", startedAtEpochMs = 1_000L, loaded = loaded, identity = here.artifact.key, context = here)
 
     private val nativeCrash = ProcessDeath(2_000L, "native crash", "assertion \"!isnan(sumf)\" failed")
 
@@ -36,16 +43,17 @@ class CandidateTrialMarkerTest {
     @Test
     fun a_crash_after_the_load_was_reported_is_loadable_with_the_crash_as_the_reason() {
         val v = CandidateTrialMarker.verdict(running(loaded = true), nativeCrash)!!
-        assertEquals(CandidateTier.LOADABLE, v.tier())
+        assertEquals(CandidateTier.LOADABLE, v.tier(here))
         assertEquals("the app was killed during generation: native crash -- assertion \"!isnan(sumf)\" failed", v.error)
         assertEquals(2_000L, v.verifiedAtEpochMs)
         assertEquals("Pixel / API 37", v.deviceProfile)
+        assertEquals("a crash is evidence about the same bytes, device and runtime as the test", here, v.context)
     }
 
     @Test
     fun a_crash_before_the_load_was_reported_stays_unverified() {
         val v = CandidateTrialMarker.verdict(running(loaded = false), nativeCrash)!!
-        assertEquals(CandidateTier.UNVERIFIED, v.tier())
+        assertEquals(CandidateTier.UNVERIFIED, v.tier(here))
         assertTrue(v.error!!.startsWith("the app was killed while loading"))
     }
 

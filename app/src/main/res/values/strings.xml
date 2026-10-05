@@ -506,7 +506,9 @@
     <string name="candidate_check_pass">works</string>
     <string name="candidate_check_fail">did not pass</string>
     <string name="candidate_check_not_tested">not tested</string>
-    <string name="candidate_old_check">Tested by an older version of the test — test again for a current result</string>
+    <string name="candidate_check_stale">was %1$s, out of date — test again</string>
+    <string name="candidate_stale_reason">Out of date: %1$s</string>
+    <string name="candidate_check_stale_short">out of date</string>
     <string name="candidate_check_said">answered: %1$s</string>
     <string name="candidate_use_chat">Use in chat</string>
     <string name="candidate_use_translation">Use for translation</string>

@@ -95,7 +95,13 @@ object DiscoveryNotice {
                     else -> R.string.candidate_cap_text
                 },
             )
-            val status = activity.getString(if (v.status(cap) == CheckStatus.PASS) R.string.candidate_check_pass else R.string.candidate_check_fail)
+            val status = activity.getString(
+                when (v.status(cap, AppContainer.get(activity).verificationContext(c))) {
+                    CheckStatus.PASS -> R.string.candidate_check_pass
+                    CheckStatus.STALE -> R.string.candidate_check_stale_short
+                    else -> R.string.candidate_check_fail
+                },
+            )
             "$what: $status"
         } + listOfNotNull(v.tokensPerSecond?.let { String.format(Locale.ROOT, "%.1f tok/s", it) })
         return "$name — " + parts.joinToString(" · ")

@@ -32,7 +32,7 @@ data class DiscoveredCandidate(
     val verification: ai.localstudio.model.install.DeviceVerification? = null,
 ) {
     /** The exact bytes a verification is about: repository, commit, file -- and the projector, when there is one. */
-    val identity: String get() = listOfNotNull(repoId, commit, filePath, projector?.file?.path).joinToString("|")
+    val identity: String get() = artifact().id.key
 
     /** What installing it downloads: the main file plus its projector. */
     val totalBytes: Long get() = artifact().totalBytes

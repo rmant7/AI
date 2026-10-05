@@ -171,6 +171,17 @@ class LlamaBridge {
 
     companion object {
         /**
+         * This app's own native inference layer (llama_jni.cpp), versioned
+         * separately from llama.cpp itself: bump it whenever a change there
+         * can change what a model answers -- the KV-cache fallback for
+         * models that cannot trim a prefix, how images reach the model.
+         * Part of [ai.localstudio.model.install.VerificationContext]: a
+         * device check run before such a change is STALE after it.
+         * 1: before tracking. 2: seq_rm fallback, NDEBUG, several images per turn.
+         */
+        const val JNI_REVISION = 2
+
+        /**
          * Whether the native library is present and loadable on this device.
          *
          * False rather than a crash: an ABI this build does not cover, or a CPU

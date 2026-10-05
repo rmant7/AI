@@ -125,6 +125,9 @@ class ModelStore(
 
     fun freeSpaceBytes(): Long = directory().freeSpace
 
+    /** Which bytes [seed]'s install is (see [InstallManifest.artifactId]); null for a legacy install or one with no recorded source. */
+    fun installedArtifact(seed: LocalModelSeed): ai.localstudio.model.install.ArtifactId? = intactManifest(seed)?.artifactId()
+
     private fun intactManifest(seed: LocalModelSeed): InstallManifest? {
         val installed = installation?.installed ?: return null
         return installed.manifest(variantId(seed))?.takeIf { installed.health(it) == InstallHealth.Intact }

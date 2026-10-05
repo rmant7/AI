@@ -12,9 +12,12 @@ import kotlin.test.assertIs
 
 class CandidateVerificationTest {
 
+    private val artifact = ArtifactId("acme/a-GGUF", "a".repeat(40), "a-Q4_K_M.gguf")
+    private val here = VerificationContext(artifact, "Google Pixel 10 Pro", "llama.cpp b10448 / jni 2")
+
     @Test
     fun a_candidate_with_no_verification_is_unverified() {
-        assertEquals(CandidateTier.UNVERIFIED, null.tier())
+        assertEquals(CandidateTier.UNVERIFIED, null.tier(here))
     }
 
     private fun verification(
@@ -22,6 +25,7 @@ class CandidateVerificationTest {
         inferenceOk: Boolean,
         checkVersion: Int = DeviceVerification.CURRENT_CHECK,
         checks: Map<String, CapabilityCheck> = if (inferenceOk) mapOf(VerifiedCapability.TEXT to CapabilityCheck(CheckStatus.PASS)) else emptyMap(),
+        context: VerificationContext? = here,
     ) = DeviceVerification(
         deviceProfile = "Pixel 10 Pro / API 37 / 16.3 GB / llama.cpp b10448 (i8mm)",
         runtimeId = "llama_cpp",
@@ -30,6 +34,9 @@ class CandidateVerificationTest {
         verifiedAtEpochMs = 1_000L,
         checkVersion = checkVersion,
         checks = checks,
+        artifact = context?.artifact,
+        device = context?.device,
+        runtimeVersion = context?.runtimeVersion,
     )
 
     @Test
@@ -41,17 +48,51 @@ class CandidateVerificationTest {
                 VerifiedCapability.TRANSLATION to CapabilityCheck(CheckStatus.PASS),
             ),
         )
-        assertEquals(CandidateTier.FUNCTIONAL, v.tier())
-        assertEquals(listOf(VerifiedCapability.TRANSLATION), v.passed)
-        assertEquals(CheckStatus.NOT_TESTED, v.status(VerifiedCapability.VISION))
+        assertEquals(CandidateTier.FUNCTIONAL, v.tier(here))
+        assertEquals(listOf(VerifiedCapability.TRANSLATION), v.passed(here))
+        assertEquals(CheckStatus.NOT_TESTED, v.status(VerifiedCapability.VISION, here))
+        assertEquals(CheckStatus.FAIL, v.status(VerifiedCapability.TEXT, here))
     }
 
     @Test
-    fun a_pass_recorded_by_the_previous_check_version_is_not_trusted() {
+    fun a_pass_is_valid_only_for_the_same_bytes_device_runtime_and_questions() {
+        val v = verification(loaded = true, inferenceOk = true)
+        assertEquals(CheckStatus.PASS, v.status(VerifiedCapability.TEXT, here))
+        assertEquals(null, v.staleReason(here))
+
+        val changes = mapOf(
+            "other main file" to here.copy(artifact = artifact.copy(mainFile = "a-Q8_0.gguf")),
+            "other commit" to here.copy(artifact = artifact.copy(revision = "b".repeat(40))),
+            "a projector added" to here.copy(artifact = artifact.copy(projectorFile = "mmproj-F16.gguf")),
+            "other device" to here.copy(device = "samsung SM-G781B"),
+            "other llama.cpp" to here.copy(runtimeVersion = "llama.cpp b11000 / jni 2"),
+            "other JNI revision" to here.copy(runtimeVersion = "llama.cpp b10448 / jni 3"),
+            "other questions" to here.copy(checkVersion = DeviceVerification.CURRENT_CHECK + 1),
+        )
+        for ((what, now) in changes) {
+            assertEquals(CheckStatus.STALE, v.status(VerifiedCapability.TEXT, now), what)
+            assertEquals(false, v.passes(VerifiedCapability.TEXT, now), what)
+            assertEquals(CandidateTier.LOADABLE, v.tier(now), "$what: still proves it loaded")
+            assertEquals(true, v.staleReason(now) != null, what)
+            assertEquals(CheckStatus.NOT_TESTED, v.status(VerifiedCapability.VISION, now), "$what: never tested stays never tested, not stale")
+            assertEquals(CheckStatus.PASS, v.recorded(VerifiedCapability.TEXT), "$what: the record itself is kept")
+        }
+    }
+
+    @Test
+    fun a_pass_recorded_by_the_previous_check_version_is_stale() {
         // Version 2 judged translation with a chat-style prompt the Translation screen never sends.
         val v = verification(loaded = true, inferenceOk = true, checkVersion = 2)
-        assertEquals(CandidateTier.LOADABLE, v.tier())
-        assertEquals(emptyList(), v.passed)
+        assertEquals(CandidateTier.LOADABLE, v.tier(here))
+        assertEquals(emptyList(), v.passed(here))
+        assertEquals(CheckStatus.STALE, v.status(VerifiedCapability.TEXT, here))
+    }
+
+    @Test
+    fun a_record_from_before_contexts_were_kept_is_stale_not_absent() {
+        val v = verification(loaded = true, inferenceOk = true, context = null)
+        assertEquals(CheckStatus.STALE, v.status(VerifiedCapability.TEXT, here))
+        assertEquals(true, v.staleReason(here)!!.contains("before"))
     }
 
     @Test
@@ -60,13 +101,13 @@ class CandidateVerificationTest {
             loaded = true, inferenceOk = false,
             checks = mapOf(VerifiedCapability.TEXT to CapabilityCheck(CheckStatus.FAIL), VerifiedCapability.TRANSLATION to CapabilityCheck(CheckStatus.FAIL)),
         )
-        assertEquals(CandidateTier.LOADABLE, v.tier())
+        assertEquals(CandidateTier.LOADABLE, v.tier(here))
     }
 
     @Test
     fun an_answer_judged_by_an_older_check_is_not_trusted_as_functional() {
-        assertEquals(CandidateTier.LOADABLE, verification(loaded = true, inferenceOk = true, checkVersion = 1).tier())
-        assertEquals(CandidateTier.LOADABLE, verification(loaded = false, inferenceOk = true, checkVersion = 1).tier())
+        assertEquals(CandidateTier.LOADABLE, verification(loaded = true, inferenceOk = true, checkVersion = 1).tier(here))
+        assertEquals(CandidateTier.LOADABLE, verification(loaded = false, inferenceOk = true, checkVersion = 1).tier(here))
     }
 
     @Test
@@ -76,29 +117,30 @@ class CandidateVerificationTest {
             """{"deviceProfile":"p","runtimeId":"llama_cpp","loaded":true,"inferenceOk":true,"verifiedAtEpochMs":1}""",
         )
         assertEquals(1, old.checkVersion)
-        assertEquals(CandidateTier.LOADABLE, old.tier())
+        assertEquals(null, old.context)
+        assertEquals(CandidateTier.LOADABLE, old.tier(here))
     }
 
     @Test
     fun a_load_failure_is_unverified_not_loadable() {
-        assertEquals(CandidateTier.UNVERIFIED, verification(loaded = false, inferenceOk = false).tier())
+        assertEquals(CandidateTier.UNVERIFIED, verification(loaded = false, inferenceOk = false).tier(here))
     }
 
     @Test
     fun loaded_but_no_answer_is_loadable_not_functional() {
-        assertEquals(CandidateTier.LOADABLE, verification(loaded = true, inferenceOk = false).tier())
+        assertEquals(CandidateTier.LOADABLE, verification(loaded = true, inferenceOk = false).tier(here))
     }
 
     @Test
     fun a_real_answer_is_functional() {
-        assertEquals(CandidateTier.FUNCTIONAL, verification(loaded = true, inferenceOk = true).tier())
+        assertEquals(CandidateTier.FUNCTIONAL, verification(loaded = true, inferenceOk = true).tier(here))
     }
 
     @Test
     fun inference_ok_implies_functional_even_if_loaded_was_recorded_wrong() {
         // inferenceOk can only be true after a real load, so it alone decides --
         // a caller's own bug in setting `loaded` must never hide a real answer.
-        assertEquals(CandidateTier.FUNCTIONAL, verification(loaded = false, inferenceOk = true).tier())
+        assertEquals(CandidateTier.FUNCTIONAL, verification(loaded = false, inferenceOk = true).tier(here))
     }
 
     @Test
@@ -129,6 +171,40 @@ class CandidateVerificationTest {
         val otherCommit = ProjectorFile(main.copy(revision = "c".repeat(40), path = "mmproj-F16.gguf"), "gemma3")
         kotlin.test.assertFailsWith<IllegalArgumentException> { ModelArtifact(main, elsewhere) }
         kotlin.test.assertFailsWith<IllegalArgumentException> { ModelArtifact(main, otherCommit) }
+    }
+
+    @Test
+    fun an_artifact_id_names_exactly_the_bytes_main_file_and_projector() {
+        val main = ModelFile("acme/see-GGUF", "a".repeat(40), "see-Q4_K_M.gguf", 2_000_000_000)
+        val pair = ModelArtifact(main, ProjectorFile(main.copy(path = "mmproj-F16.gguf", sizeBytes = 800_000_000), "gemma3"))
+        assertEquals(ArtifactId("acme/see-GGUF", "a".repeat(40), "see-Q4_K_M.gguf", "mmproj-F16.gguf"), pair.id)
+        assertEquals("acme/see-GGUF|${"a".repeat(40)}|see-Q4_K_M.gguf|mmproj-F16.gguf", pair.id.key)
+        assertEquals("acme/see-GGUF|${"a".repeat(40)}|see-Q4_K_M.gguf", ModelArtifact(main).id.key)
+        kotlin.test.assertNotEquals(pair.id, ModelArtifact(main).id, "the same main file without its projector is another artifact")
+    }
+
+    @Test
+    fun an_install_names_the_same_artifact_discovery_did_or_none_at_all() {
+        val commit = "a".repeat(40)
+        fun file(role: ai.localstudio.model.ArtifactRole, path: String, repo: String? = "acme/see-GGUF", at: String? = commit) = InstalledArtifact(
+            role = role, fileName = path, sizeBytes = 1, sha256 = "0", integrity = IntegrityBasis.values().first(),
+            source = SourceRecord(url = "https://huggingface.co/$repo/resolve/$at/$path", repo = repo, commit = at, path = path),
+        )
+        fun manifest(vararg files: InstalledArtifact) = InstallManifest(
+            catalogId = "c", catalogVersion = "1", modelId = ai.localstudio.model.ModelId("m"), variantId = ai.localstudio.model.VariantId("v"),
+            installedAtEpochMs = 1, artifacts = files.toList(),
+        )
+        val main = ModelFile("acme/see-GGUF", commit, "see-Q4_K_M.gguf", 2_000_000_000)
+        val pair = ModelArtifact(main, ProjectorFile(main.copy(path = "mmproj-F16.gguf"), "gemma3"))
+
+        assertEquals(pair.id, manifest(file(ArtifactRoles.WEIGHTS, "see-Q4_K_M.gguf"), file(ArtifactRoles.PROJECTOR, "mmproj-F16.gguf")).artifactId())
+        assertEquals(ModelArtifact(main).id, manifest(file(ArtifactRoles.WEIGHTS, "see-Q4_K_M.gguf")).artifactId())
+        assertEquals(null, manifest(file(ArtifactRoles.WEIGHTS, "see-Q4_K_M.gguf", at = null)).artifactId(), "no commit recorded: no identity")
+        assertEquals(
+            null,
+            manifest(file(ArtifactRoles.WEIGHTS, "see-Q4_K_M.gguf"), file(ArtifactRoles.PROJECTOR, "mmproj-F16.gguf", repo = "other/repo")).artifactId(),
+            "a projector from elsewhere is not this artifact's",
+        )
     }
 
     @Test

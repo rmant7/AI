@@ -24,6 +24,12 @@ class CandidateTrialTest {
 
     private val textOnly = mapOf(VerifiedCapability.TEXT to FunctionalProbe.TEXT)
 
+    private val here = ai.localstudio.model.install.VerificationContext(
+        ai.localstudio.model.install.ArtifactId("acme/a-GGUF", "a".repeat(40), "a-Q4_K_M.gguf"),
+        "Google Pixel 10 Pro",
+        "llama.cpp b10448 / jni 2",
+    )
+
     /** Every reading 100 ms after the last. */
     private fun steppingClock(): () -> Long {
         var now = 0L
@@ -31,7 +37,7 @@ class CandidateTrialTest {
     }
 
     private fun run(suites: Map<String, List<FunctionalProbe>> = textOnly, runtime: TrialRuntime) = runBlocking {
-        CandidateTrial(steppingClock()).run("Pixel / API 37 / 16 GB / llama.cpp b10448", "llama_cpp", suites, runtime)
+        CandidateTrial(steppingClock()).run("Pixel / API 37 / 16 GB / llama.cpp b10448", "llama_cpp", suites, runtime, here)
     }
 
     /** Loads, then answers each prompt with the chunks [replies] gives for it. */
@@ -53,9 +59,9 @@ class CandidateTrialTest {
     @Test
     fun right_answers_to_every_text_probe_pass_text() {
         val result = run(runtime = answering(::correctChat))
-        assertEquals(CandidateTier.FUNCTIONAL, result.tier())
-        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT))
-        assertEquals(CheckStatus.NOT_TESTED, result.status(VerifiedCapability.TRANSLATION))
+        assertEquals(CandidateTier.FUNCTIONAL, result.tier(here))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT, here))
+        assertEquals(CheckStatus.NOT_TESTED, result.status(VerifiedCapability.TRANSLATION, here))
         assertNull(result.error)
         assertEquals("Paris. | 12", result.sampleOutput)
     }
@@ -74,10 +80,10 @@ class CandidateTrialTest {
             FunctionalProbe.SUITES,
             answering { prompt -> if ("```" in prompt) correctFrench(prompt) else listOf("Quelle est la capitale de la France ?") },
         )
-        assertEquals(CandidateTier.FUNCTIONAL, result.tier())
-        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TEXT))
-        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TRANSLATION))
-        assertEquals(listOf(VerifiedCapability.TRANSLATION), result.passed)
+        assertEquals(CandidateTier.FUNCTIONAL, result.tier(here))
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TEXT, here))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TRANSLATION, here))
+        assertEquals(listOf(VerifiedCapability.TRANSLATION), result.passed(here))
         assertTrue(result.error!!, result.error!!.startsWith("text: wrong answer to: What is the capital of France?"))
     }
 
@@ -88,7 +94,7 @@ class CandidateTrialTest {
             mapOf(VerifiedCapability.TRANSLATION to FunctionalProbe.TRANSLATION),
             answering { prompt -> if ("Good morning" in prompt) listOf("Bon jour, mon ami.") else correctFrench(prompt) },
         )
-        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TRANSLATION))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TRANSLATION, here))
         assertTrue(result.checks.getValue(VerifiedCapability.TRANSLATION).sample!!.startsWith("Bon jour, mon ami."))
     }
 
@@ -99,8 +105,8 @@ class CandidateTrialTest {
             mapOf(VerifiedCapability.TRANSLATION to FunctionalProbe.TRANSLATION),
             answering { listOf("Mwaramutse neza, nshuti yange.") },
         )
-        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TRANSLATION))
-        assertEquals(CandidateTier.LOADABLE, result.tier())
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TRANSLATION, here))
+        assertEquals(CandidateTier.LOADABLE, result.tier(here))
         assertTrue(result.checks.getValue(VerifiedCapability.TRANSLATION).detail!!.contains("expected bonjour"))
     }
 
@@ -125,15 +131,15 @@ class CandidateTrialTest {
             if (calls == 1) throw IllegalStateException("no complete answer within 10 min")
             correctFrench(probe.prompt).forEach(onChunk)
         })
-        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TEXT))
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TEXT, here))
         assertTrue(result.checks.getValue(VerifiedCapability.TEXT).detail!!.startsWith("generation failed: IllegalStateException"))
-        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TRANSLATION))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TRANSLATION, here))
     }
 
     @Test
     fun a_throw_before_the_model_loaded_is_a_load_failure_with_nothing_checked() {
         val result = run(FunctionalProbe.SUITES, TrialRuntime { _, _, _ -> throw IllegalStateException("llama.cpp could not load model.gguf") })
-        assertEquals(CandidateTier.UNVERIFIED, result.tier())
+        assertEquals(CandidateTier.UNVERIFIED, result.tier(here))
         assertEquals(false, result.loaded)
         assertTrue(result.error!!, result.error!!.startsWith("load failed: IllegalStateException: llama.cpp could not load"))
         assertTrue(result.checks.isEmpty())
@@ -144,14 +150,14 @@ class CandidateTrialTest {
     @Test
     fun a_throw_after_the_load_was_reported_is_a_generation_failure() {
         val result = run(runtime = TrialRuntime { _, onLoaded, _ -> onLoaded(); throw OutOfMemoryError("decode") })
-        assertEquals(CandidateTier.LOADABLE, result.tier())
+        assertEquals(CandidateTier.LOADABLE, result.tier(here))
         assertTrue(result.checks.getValue(VerifiedCapability.TEXT).detail!!.startsWith("generation failed: OutOfMemoryError"))
     }
 
     @Test
     fun text_itself_proves_the_load_even_without_the_callback() {
         val result = run(runtime = TrialRuntime { _, _, onChunk -> onChunk("Par"); throw RuntimeException("cut") })
-        assertEquals(CandidateTier.LOADABLE, result.tier())
+        assertEquals(CandidateTier.LOADABLE, result.tier(here))
         assertTrue(result.loaded)
         assertEquals("Par", result.sampleOutput)
     }
@@ -159,7 +165,7 @@ class CandidateTrialTest {
     @Test
     fun a_fluent_wrong_answer_fails_its_capability() {
         val result = run(runtime = answering { listOf("The capital is Lyon.") })
-        assertEquals(CandidateTier.LOADABLE, result.tier())
+        assertEquals(CandidateTier.LOADABLE, result.tier(here))
         assertTrue(result.error!!, result.error!!.startsWith("text: wrong answer to: What is the capital of France?"))
         assertEquals("The capital is Lyon.", result.sampleOutput)
     }
@@ -167,7 +173,7 @@ class CandidateTrialTest {
     @Test
     fun one_wrong_probe_out_of_two_fails_the_capability() {
         val result = run(runtime = answering { prompt -> if ("France" in prompt) listOf("Paris") else listOf("13") })
-        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TEXT))
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TEXT, here))
         assertTrue(result.error!!, result.error!!.contains("wrong answer to: What is 7 + 5?"))
     }
 
@@ -180,20 +186,20 @@ class CandidateTrialTest {
     @Test
     fun a_reply_cut_off_inside_its_reasoning_is_not_credited_even_if_the_draft_names_the_answer() {
         val result = run(runtime = answering { listOf("<think> Okay, the capital of France... I think it is Paris, but let me make sure") })
-        assertEquals(CandidateTier.LOADABLE, result.tier())
+        assertEquals(CandidateTier.LOADABLE, result.tier(here))
         assertTrue(result.error!!, result.error!!.startsWith("text: no answer to: What is the capital of France?"))
     }
 
     @Test
     fun only_the_answer_after_the_reasoning_is_judged() {
         val wrongAfterRightDraft = run(runtime = answering { listOf("<think>Paris? No.</think>", "Lyon") })
-        assertEquals(CandidateTier.LOADABLE, wrongAfterRightDraft.tier())
+        assertEquals(CandidateTier.LOADABLE, wrongAfterRightDraft.tier(here))
         assertEquals("Lyon", wrongAfterRightDraft.sampleOutput)
 
         val reasonedThenRight = run(
             runtime = answering { prompt -> if ("France" in prompt) listOf("<think>hmm</think>\n\nParis") else listOf("<think>7+5</think>12") },
         )
-        assertEquals(CandidateTier.FUNCTIONAL, reasonedThenRight.tier())
+        assertEquals(CandidateTier.FUNCTIONAL, reasonedThenRight.tier(here))
         assertEquals("Paris | 12", reasonedThenRight.sampleOutput)
     }
 
@@ -263,7 +269,7 @@ class CandidateTrialTest {
             onLoaded()
             (if (probe.prompt.contains("French")) correctFrench(probe.prompt) else correctChat(probe.prompt)).forEach(onChunk)
         })
-        assertEquals(CheckStatus.NOT_TESTED, textOnlyModel.status(VerifiedCapability.VISION))
+        assertEquals(CheckStatus.NOT_TESTED, textOnlyModel.status(VerifiedCapability.VISION, here))
     }
 
     @Test
@@ -277,8 +283,8 @@ class CandidateTrialTest {
                 seeing(probe).forEach(onChunk)
             },
         )
-        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT))
-        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.VISION))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT, here))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.VISION, here))
         assertEquals(listOf(null, null, ProbeImage.Digit(7), ProbeImage.Disc(ProbeImage.Disc.RED), null), asked)
     }
 
@@ -294,8 +300,8 @@ class CandidateTrialTest {
                 (if (probe.image == null && imagesSeen > 0) listOf("7") else seeing(probe)).forEach(onChunk)
             },
         )
-        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT))
-        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT, here))
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION, here))
         assertTrue(result.checks.getValue(VerifiedCapability.VISION).detail!!.contains("text after the images"))
     }
 
@@ -309,8 +315,8 @@ class CandidateTrialTest {
                 seeing(probe).forEach(onChunk)
             },
         )
-        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT))
-        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT, here))
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION, here))
         assertTrue(result.checks.getValue(VerifiedCapability.VISION).detail!!.contains("the image was not seen"))
     }
 
@@ -323,7 +329,15 @@ class CandidateTrialTest {
                 (if (probe.image is ProbeImage.Digit) listOf("1") else seeing(probe)).forEach(onChunk)
             },
         )
-        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION))
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION, here))
         assertTrue(result.checks.getValue(VerifiedCapability.VISION).detail!!.contains("the digit 7"))
+    }
+
+    @Test
+    fun a_result_records_what_it_is_evidence_for() {
+        val result = run(runtime = answering(::correctChat))
+        assertEquals(here, result.context)
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT, here))
+        assertEquals(CheckStatus.STALE, result.status(VerifiedCapability.TEXT, here.copy(runtimeVersion = "llama.cpp b11000 / jni 2")))
     }
 }
