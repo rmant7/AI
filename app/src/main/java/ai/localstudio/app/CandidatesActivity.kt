@@ -209,8 +209,18 @@ class CandidatesActivity : AppCompatActivity() {
         }
         fun <T> label(options: List<Pair<T, String>>, current: T) = options.firstOrNull { it.first == current }?.second ?: current.toString()
 
-        chip(getString(R.string.candidates_filter_purpose, label(purposes, filter.purpose))) {
-            choose(getString(R.string.candidates_filter_purpose, ""), purposes, filter.purpose) { filter.copy(purpose = it) }
+        // "For": what the search was for, then every purpose the found repositories' own tags declare,
+        // with how many say so -- only those actually present, so no choice leads to an empty list.
+        val found = container.discoveryStore.runs().flatMap { it.candidates }
+        val tagCounts = CandidatePurpose.entries
+            .map { p -> p to found.count { p in CandidateFacts.of(it.tags).purposes } }
+            .filter { it.second > 0 }
+        val forOptions: List<Pair<Pair<CandidateFilter.Purpose, CandidatePurpose?>, String>> =
+            purposes.map { (p, text) -> (p to null) to text } +
+                tagCounts.map { (p, n) -> (CandidateFilter.Purpose.ANY to p) to "${purposeLabel(p)} ($n)" }
+        val currentFor = filter.purpose to filter.tagged
+        chip(getString(R.string.candidates_filter_purpose, label(forOptions, currentFor))) {
+            choose(getString(R.string.candidates_filter_purpose, ""), forOptions, currentFor) { (p, tag) -> filter.copy(purpose = p, tagged = tag) }
         }
         chip(getString(R.string.candidates_filter_size, label(sizes, filter.maxBytes))) {
             choose(getString(R.string.candidates_filter_size, ""), sizes, filter.maxBytes) { filter.copy(maxBytes = it) }
@@ -239,6 +249,7 @@ class CandidatesActivity : AppCompatActivity() {
         CandidateFilter(
             text = prefs.getString("text", "").orEmpty(),
             purpose = CandidateFilter.Purpose.valueOf(prefs.getString("purpose", null) ?: CandidateFilter.Purpose.ANY.name),
+            tagged = prefs.getString("tagged", null)?.let { CandidatePurpose.valueOf(it) },
             maxBytes = prefs.getLong("maxBytes", -1L).takeIf { it > 0 },
             minDownloads = prefs.getLong("minDownloads", 0L),
             status = CandidateFilter.Status.valueOf(prefs.getString("status", null) ?: CandidateFilter.Status.ANY.name),
@@ -251,6 +262,7 @@ class CandidatesActivity : AppCompatActivity() {
             getSharedPreferences(FILTER_PREFS, MODE_PRIVATE).edit()
                 .putString("text", f.text)
                 .putString("purpose", f.purpose.name)
+                .putString("tagged", f.tagged?.name)
                 .putLong("maxBytes", f.maxBytes ?: -1L)
                 .putLong("minDownloads", f.minDownloads)
                 .putString("status", f.status.name)

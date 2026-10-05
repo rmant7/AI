@@ -11,6 +11,8 @@ data class CandidateFilter(
     /** Every word must appear in the repository, file, architecture or a tag (case ignored). */
     val text: String = "",
     val purpose: Purpose = Purpose.ANY,
+    /** What the repository's own tags say it is for (roleplay, code, math, ...); null = any. */
+    val tagged: CandidatePurpose? = null,
     /** Download size of the whole model (main file plus projector); null = any size. */
     val maxBytes: Long? = null,
     val minDownloads: Long = 0,
@@ -47,6 +49,7 @@ data class CandidateFilter(
             Purpose.VISION -> candidate.projector != null
         }
         if (!purposeOk) return false
+        if (tagged != null && tagged !in CandidateFacts.of(candidate.tags).purposes) return false
         if (maxBytes != null && candidate.totalBytes > maxBytes) return false
         if (candidate.downloads < minDownloads) return false
         val statusOk = when (status) {
@@ -58,7 +61,11 @@ data class CandidateFilter(
         if (!statusOk) return false
         val words = text.lowercase().split(' ', ',').filter { it.isNotBlank() }
         if (words.isEmpty()) return true
-        val haystack = (listOf(candidate.repoId, candidate.filePath, candidate.architecture) + candidate.tags).joinToString(" ").lowercase()
+        // Also what its tags say it is for, by name and every tag that means it: "rp" and "role" find a
+        // model tagged "roleplay" or "creative-writing", "code" one tagged "coder".
+        val purposes = CandidateFacts.of(candidate.tags).purposes.flatMap { listOf(it.name) + it.tags }
+        val haystack = (listOf(candidate.repoId, candidate.filePath, candidate.architecture) + candidate.tags + purposes)
+            .joinToString(" ").lowercase()
         return words.all { it in haystack }
     }
 

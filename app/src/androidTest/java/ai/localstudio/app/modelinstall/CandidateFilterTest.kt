@@ -81,4 +81,19 @@ class CandidateFilterTest {
         assertEquals(listOf(qwen, hy, gemma), CandidateFilter(sort = CandidateFilter.Sort.NEWEST).sorted(all) { it })
         assertEquals(listOf(qwen, gemma, hy), CandidateFilter(sort = CandidateFilter.Sort.SMALLEST).sorted(all) { it })
     }
+
+    @Test
+    fun what_the_tags_say_it_is_for_filters_and_is_searchable_by_name_and_synonym() {
+        val rp = candidate("acme/storyteller-GGUF", tags = listOf("gguf", "creative-writing"))
+        val coder = candidate("acme/x-GGUF", tags = listOf("gguf", "coder"))
+        val roleplay = CandidateFilter(tagged = CandidatePurpose.ROLEPLAY)
+        assertTrue(roleplay.ok("chat:mistral", rp))
+        assertFalse(roleplay.ok("chat:qwen", qwen))
+        assertFalse(roleplay.isDefault)
+        assertTrue("purpose name", CandidateFilter(text = "roleplay").ok("chat:mistral", rp))
+        assertTrue("part of a word", CandidateFilter(text = "role").ok("chat:mistral", rp))
+        assertTrue("a synonym tag", CandidateFilter(text = "rp").ok("chat:mistral", rp))
+        assertTrue(CandidateFilter(text = "code").ok("chat:x", coder))
+        assertFalse(CandidateFilter(text = "role").ok("chat:qwen", qwen))
+    }
 }
