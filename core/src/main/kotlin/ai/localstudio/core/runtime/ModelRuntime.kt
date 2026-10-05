@@ -120,9 +120,9 @@ data class GenerationRequest(
     val stopSequences: List<String> = emptyList(),
     /**
      * Attached images, in the order they should be shown to the model — see
-     * [ai.localstudio.core.context.AssembledContext.images]. Empty for every
-     * runtime that doesn't understand vision, including every current local
-     * one: a runtime that ignores this field simply behaves as it always did.
+     * [ai.localstudio.core.context.AssembledContext.images]. A local model
+     * with a projector sees all of them; one without refuses the turn rather
+     * than answering as if it had seen them.
      */
     val images: List<ImageRef> = emptyList(),
 )

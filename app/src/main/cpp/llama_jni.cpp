@@ -1282,7 +1282,8 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadMmproj(
 }
 
 /**
- * Same shape as nativeGenerate, for a turn with exactly one attached image.
+ * Same shape as nativeGenerate, for a turn with one or more attached images,
+ * shown to the model in the order given.
  * Deliberately a separate entry point rather than an optional-image branch
  * inside nativeGenerate: the prompt-caching machinery there (commonPrefixLen
  * against session->cachedTokens) operates on a plain llama_token vector,
@@ -1290,7 +1291,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadMmproj(
  * two would mean either corrupting that cache or silently disabling it for
  * every text-only turn too. This path always starts the KV cache clean.
  *
- * Takes the raw image bytes, not a file path: the Kotlin side already holds
+ * Takes the raw image bytes, not file paths: the Kotlin side already holds
  * an attached image as a decoded byte array (ImageRef carries a `data:`
  * URI, built that way so the cloud vision path — core/openai, plain JVM,
  * no Android Context — never needs to resolve a content:// URI itself).
@@ -1298,8 +1299,8 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadMmproj(
  * encoding existing solely for this path.
  */
 JNIEXPORT jint JNICALL
-Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
-    JNIEnv *env, jobject, jlong handle, jstring systemPrompt, jstring userPrompt, jbyteArray imageBytes,
+Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImages(
+    JNIEnv *env, jobject, jlong handle, jstring systemPrompt, jstring userPrompt, jobjectArray images,
     jint maxTokens, jfloat temperature, jfloat topP, jint topK, jfloat repeatPenalty,
     jobject callback) {
 
@@ -1313,37 +1314,49 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
     jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
     if (onToken == nullptr) return -2;
 
-    const jsize imageLen = env->GetArrayLength(imageBytes);
-    jbyte *imageData = env->GetByteArrayElements(imageBytes, nullptr);
-    if (imageData == nullptr) {
-        // The JNI spec allows this to fail and return null rather than
-        // guarantee a buffer — realistically only under exactly the memory
-        // pressure this app already runs close to. Passing null straight
-        // into mtmd_helper_bitmap_init_from_buf would be a null-pointer
-        // dereference a few frames down, not a clean failure.
-        LOGE("GetByteArrayElements returned null for the attached image (%d bytes)", (int) imageLen);
-        return -7;
+    const jsize imageCount = images == nullptr ? 0 : env->GetArrayLength(images);
+    if (imageCount <= 0) return -7;
+    std::vector<mtmd::bitmap_ptr> bitmapsOwned;
+    std::string markers;
+    for (jsize i = 0; i < imageCount; i++) {
+        auto imageBytes = (jbyteArray) env->GetObjectArrayElement(images, i);
+        if (imageBytes == nullptr) return -7;
+        const jsize imageLen = env->GetArrayLength(imageBytes);
+        jbyte *imageData = env->GetByteArrayElements(imageBytes, nullptr);
+        if (imageData == nullptr) {
+            // The JNI spec allows this to fail and return null rather than
+            // guarantee a buffer — realistically only under exactly the memory
+            // pressure this app already runs close to. Passing null straight
+            // into mtmd_helper_bitmap_init_from_buf would be a null-pointer
+            // dereference a few frames down, not a clean failure.
+            LOGE("GetByteArrayElements returned null for attached image %d (%d bytes)", (int) i, (int) imageLen);
+            env->DeleteLocalRef(imageBytes);
+            return -7;
+        }
+        mtmd_helper_bitmap_wrapper wrapper = mtmd_helper_bitmap_init_from_buf(
+            session->mctx, reinterpret_cast<const unsigned char *>(imageData), (size_t) imageLen, false);
+        env->ReleaseByteArrayElements(imageBytes, imageData, JNI_ABORT); // read-only access, nothing to write back
+        env->DeleteLocalRef(imageBytes);
+        if (wrapper.bitmap == nullptr) {
+            LOGE("could not decode attached image %d (%d bytes)", (int) i, (int) imageLen);
+            return -7;
+        }
+        if (wrapper.video_ctx != nullptr) mtmd_helper_video_free(wrapper.video_ctx); // not used for a still image
+        bitmapsOwned.emplace_back(wrapper.bitmap);
+        markers += std::string(mtmd_default_marker()) + "\n";
     }
-    mtmd_helper_bitmap_wrapper wrapper = mtmd_helper_bitmap_init_from_buf(
-        session->mctx, reinterpret_cast<const unsigned char *>(imageData), (size_t) imageLen, false);
-    env->ReleaseByteArrayElements(imageBytes, imageData, JNI_ABORT); // read-only access, nothing to write back
-    if (wrapper.bitmap == nullptr) {
-        LOGE("could not decode attached image (%d bytes)", (int) imageLen);
-        return -7;
-    }
-    if (wrapper.video_ctx != nullptr) mtmd_helper_video_free(wrapper.video_ctx); // not used for a still image
-    mtmd::bitmap bmp(wrapper.bitmap);
 
-    // The marker is where mtmd_tokenize splits the prompt into a text chunk,
-    // an image chunk, and another text chunk — placed before the question so
-    // the model reads the image, then what it was asked about it, matching
+    // Each marker is where mtmd_tokenize puts one image's chunk between text
+    // chunks — all placed before the question, in order, so the model reads
+    // the images, then what it was asked about them, matching
     // how the same request would read for a vision-capable cloud model.
-    const std::string userWithMarker = std::string(mtmd_default_marker()) + "\n" + toStdString(env, userPrompt);
+    const std::string userWithMarker = markers + toStdString(env, userPrompt);
     const std::string prompt = applyChatTemplate(session, toStdString(env, systemPrompt), userWithMarker);
 
     mtmd_input_text text{prompt.c_str(), prompt.size(), true, true};
     mtmd::input_chunks chunks(mtmd_input_chunks_init());
-    std::vector<const mtmd_bitmap *> bitmaps = {bmp.ptr.get()};
+    std::vector<const mtmd_bitmap *> bitmaps;
+    for (const auto &owned : bitmapsOwned) bitmaps.push_back(owned.get());
     const int32_t tokenizeResult = mtmd_tokenize(session->mctx, chunks.ptr.get(), &text, bitmaps.data(), bitmaps.size());
     if (tokenizeResult != 0) {
         LOGE("mtmd_tokenize failed with code %d", tokenizeResult);
@@ -1416,10 +1429,10 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImage(
     // encoder pass is one of the larger single allocations this app makes,
     // exactly where a std::bad_alloc is most likely to actually be thrown
     // rather than the process just being killed outright.
-    LOGE("nativeGenerateWithImage: exception: %s", e.what());
+    LOGE("nativeGenerateWithImages: exception: %s", e.what());
     return -10;
   } catch (...) {
-    LOGE("nativeGenerateWithImage: unknown exception");
+    LOGE("nativeGenerateWithImages: unknown exception");
     return -10;
   }
 }

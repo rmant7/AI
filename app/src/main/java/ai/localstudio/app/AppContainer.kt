@@ -1115,15 +1115,12 @@ class AppContainer private constructor(private val context: Context) {
                             onLoaded()
                             val handle = loaded as? ai.localstudio.core.runtime.TextModelHandle
                                 ?: throw IllegalStateException("${descriptor.id} did not load as a text model")
-                            handle.generate(
-                                ai.localstudio.core.runtime.GenerationRequest(
-                                    prompt = probe.prompt,
-                                    images = listOfNotNull(probe.image?.let { ai.localstudio.core.model.ImageRef(ai.localstudio.app.vision.ProbeImageRenderer.dataUri(it)) }),
-                                    maxTokens = CANDIDATE_MAX_TOKENS,
-                                    temperature = 0.0,
-                                    repeatPenalty = 1.0,
-                                ),
-                            ).collect { onChunk(it) }
+                            val input = ai.localstudio.app.localai.LocalAiInput(
+                                text = probe.prompt,
+                                images = listOfNotNull(probe.image?.let { ai.localstudio.core.model.ImageRef(ai.localstudio.app.vision.ProbeImageRenderer.dataUri(it)) }),
+                            )
+                            handle.generate(input.toRequest(maxTokens = CANDIDATE_MAX_TOKENS, temperature = 0.0, repeatPenalty = 1.0))
+                                .collect { onChunk(it) }
                         }
                     }
                 }
@@ -2690,11 +2687,8 @@ class AppContainer private constructor(private val context: Context) {
      * attaching an image was refused outright — "none of the enabled models
      * understands images" — for a model that, in fact, did.
      */
-    fun localVisionAvailable(): Boolean {
-        val seedId = effectiveLocalSelection(localRegistry())?.model?.id ?: return false
-        val seed = LocalModels.SEEDS.firstOrNull { it.id == seedId } ?: return false
-        return modelStore.hasMmproj(seed)
-    }
+    fun localVisionAvailable(): Boolean =
+        effectiveLocalSelection(localRegistry())?.binding?.mmprojArtifact != null
 
     /**
      * A [LlamaCppRuntime] whose loads go through [sharedRuntimeManager]. The
@@ -3096,6 +3090,7 @@ class AppContainer private constructor(private val context: Context) {
                 downloads.start(seed)
             }
             val file: File = modelStore.fileFor(seed)
+            val projector: File? = modelStore.mmprojFileFor(seed).takeIf { modelStore.hasMmproj(seed) }
             RegistryEntry(
                 ModelDescriptor(
                     id = seed.id,
@@ -3108,7 +3103,8 @@ class AppContainer private constructor(private val context: Context) {
                     // every model with one context size regardless of which
                     // model it is.
                     contextLength = settings.contextTokens,
-                    capabilities = seed.capabilities,
+                    // From what is installed: a projector on disk is what makes it see.
+                    capabilities = if (projector != null) seed.capabilities + Capability.VISION else seed.capabilities - Capability.VISION,
                     bindings = listOf(
                         RuntimeBinding(
                             runtime = RuntimeKind.LLAMA_CPP,
@@ -3119,8 +3115,7 @@ class AppContainer private constructor(private val context: Context) {
                             // sharedRuntimeManager's requiredBytesFor, so a cached
                             // orchestrator's binding never goes stale.
                             requiredRamBytes = null,
-                            mmprojArtifact = modelStore.mmprojFileFor(seed).absolutePath
-                                .takeIf { modelStore.hasMmproj(seed) },
+                            mmprojArtifact = projector?.absolutePath,
                         ),
                     ),
                 ),

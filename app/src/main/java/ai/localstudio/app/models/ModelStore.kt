@@ -94,13 +94,15 @@ class ModelStore(
     fun mmprojPartFor(seed: LocalModelSeed): File = File(directory(), "${seed.id}.mmproj.gguf.part")
 
     /**
-     * True once the projector is actually on disk, not just declared by the
-     * seed — a model whose main GGUF finished but whose (much smaller,
-     * best-effort) projector download failed is still usable, just
-     * text-only, and this is what [LlamaCppRuntime] checks to know which.
+     * True once a projector is actually on disk for this model, whether the
+     * seed declared one or not -- a model whose main GGUF finished but whose
+     * (much smaller, best-effort) projector download failed is still usable,
+     * just text-only; and a user's own model installed with its projector
+     * (a discovered candidate moved in by "Use") can see, though no
+     * built-in seed ever said so. What is installed decides, never the id.
      */
     fun hasMmproj(seed: LocalModelSeed): Boolean =
-        seed.mmprojFileName != null && mmprojFileFor(seed).let { it.isFile && it.length() > 0 }
+        mmprojFileFor(seed).let { it.isFile && it.length() > 0 }
 
     /**
      * Files sitting in the models directory that don't belong to any seed

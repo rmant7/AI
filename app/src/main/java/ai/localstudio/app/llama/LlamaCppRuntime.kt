@@ -512,7 +512,7 @@ private class LlamaTextModel(
         log(
             "LOCAL_GENERATE",
             "$modelId: starting (prompt=${request.prompt.length} chars, maxTokens=${request.maxTokens}" +
-                (if (image != null) ", with image" else "") + ")",
+                (if (image != null) ", with ${request.images.size} image(s)" else "") + ")",
         )
 
         val sink = object : LlamaBridge.TokenSink {
@@ -598,17 +598,20 @@ private class LlamaTextModel(
                     // here, never a content:// or file path — ChatActivity.attachImage()
                     // builds it that way specifically because core/openai are plain JVM
                     // modules with no Android Context to resolve a real URI against.
-                    val imageBytes = runCatching {
-                        android.util.Base64.decode(image.uri.substringAfter(",", ""), android.util.Base64.NO_WRAP)
-                    }.getOrNull()
-                    if (imageBytes == null || imageBytes.isEmpty()) {
+                    // Every attached image, in order -- one that will not decode fails the turn rather than being dropped.
+                    val decoded = request.images.map { ref ->
+                        runCatching {
+                            android.util.Base64.decode(ref.uri.substringAfter(",", ""), android.util.Base64.NO_WRAP)
+                        }.getOrNull()?.takeIf { it.isNotEmpty() }
+                    }
+                    if (decoded.any { it == null }) {
                         -1
                     } else {
-                        bridge.nativeGenerateWithImage(
+                        bridge.nativeGenerateWithImages(
                             handle = handle,
                             systemPrompt = request.systemPrompt,
                             userPrompt = request.prompt,
-                            imageBytes = imageBytes,
+                            images = decoded.filterNotNull().toTypedArray(),
                             maxTokens = request.maxTokens,
                             temperature = request.temperature.toFloat(),
                             topP = request.topP.toFloat(),

@@ -1265,7 +1265,7 @@ class ChatActivity : AppCompatActivity() {
         // included) operate on inputs well under this — while still far
         // below a modern phone camera's native resolution, which is what
         // was turning a single attached photo into a multi-minute vision
-        // encode on-device (see llama_jni.cpp's nativeGenerateWithImage).
+        // encode on-device (see llama_jni.cpp's nativeGenerateWithImages).
         const val MAX_IMAGE_DIMENSION = 1280
 
         const val IMAGE_JPEG_QUALITY = 85

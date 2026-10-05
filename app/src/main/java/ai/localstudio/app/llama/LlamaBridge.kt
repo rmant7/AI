@@ -143,24 +143,24 @@ class LlamaBridge {
      * this is a second call after [nativeLoad], not part of it. Returns
      * false for a model with no real projector at that path, or one whose
      * projector doesn't actually report vision support; either way
-     * [nativeGenerateWithImage] then has nothing to work with.
+     * [nativeGenerateWithImages] then has nothing to work with.
      */
     external fun nativeLoadMmproj(handle: Long, mmprojPath: String, threads: Int): Boolean
 
     /**
-     * Same contract as [nativeGenerate], for a turn with exactly one
-     * attached image — [imageBytes] is the raw, already-decoded file
+     * Same contract as [nativeGenerate], for a turn with one or more
+     * attached images, shown in order — each of [images] is the raw file
      * content (whatever format stb_image handles: jpg, png, bmp, gif, ...),
      * not a path or URI. Requires [nativeLoadMmproj] to have already
      * succeeded for this handle; the prompt-cache reuse [nativeGenerate]
      * does across turns does not apply here (see the native side's own doc
      * comment) — every image turn starts the KV cache clean.
      */
-    external fun nativeGenerateWithImage(
+    external fun nativeGenerateWithImages(
         handle: Long,
         systemPrompt: String?,
         userPrompt: String,
-        imageBytes: ByteArray,
+        images: Array<ByteArray>,
         maxTokens: Int,
         temperature: Float,
         topP: Float,
