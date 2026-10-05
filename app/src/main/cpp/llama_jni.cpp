@@ -122,6 +122,8 @@ struct Session {
     // collapsed rate, nor show whether prefix reuse is doing anything.
     int32_t promptTokens = 0;
     int32_t reusedTokens = 0;
+    // Set when the last turn's prefix trim was refused (see nativeGenerate) and the whole state was cleared instead.
+    bool stateReset = false;
     int32_t decodedTokens = 0;
     int64_t prefillMs = 0;
     int64_t decodeMs = 0;
@@ -560,12 +562,13 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLastTurnStats(JNIEnv *env, jobje
     if (session == nullptr) return env->NewStringUTF("no session");
 
     const int32_t prefilled = session->promptTokens - session->reusedTokens;
-    char buffer[320];
+    char buffer[400];
     snprintf(
         buffer, sizeof(buffer),
-        "prompt %d tok (%d reused from the last turn), prefill %d tok in %lldms (%.1f tok/s); "
+        "prompt %d tok (%d reused from the last turn%s), prefill %d tok in %lldms (%.1f tok/s); "
         "generated %d tok in %lldms (%.1f tok/s)",
         session->promptTokens, session->reusedTokens,
+        session->stateReset ? "; state cleared: this model's memory cannot trim a prefix" : "",
         prefilled, (long long) session->prefillMs,
         session->prefillMs > 0 ? prefilled * 1000.0 / (double) session->prefillMs : 0.0,
         session->decodedTokens, (long long) session->decodeMs,
@@ -982,7 +985,19 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerate(
     while (commonPrefixLen < maxCommon && session->cachedTokens[commonPrefixLen] == tokens[commonPrefixLen]) {
         commonPrefixLen++;
     }
-    llama_memory_seq_rm(llama_get_memory(session->ctx), 0, (llama_pos) commonPrefixLen, -1);
+    // The return value matters: recurrent and hybrid memory (Mamba, RWKV,
+    // LFM2, Qwen3.5's linear-attention layers) can only roll back the last
+    // few tokens; asked to drop more, llama_memory_seq_rm returns false and
+    // removes nothing. Ignored, the previous turn's whole state stayed in
+    // place under the new prompt -- a device test of LFM2.5 answered "Paris"
+    // to "What is 7 + 5?" right after being asked about France. Clearing
+    // everything and decoding the whole prompt is always correct.
+    session->stateReset = false;
+    if (!llama_memory_seq_rm(llama_get_memory(session->ctx), 0, (llama_pos) commonPrefixLen, -1)) {
+        llama_memory_seq_rm(llama_get_memory(session->ctx), 0, -1, -1);
+        commonPrefixLen = 0;
+        session->stateReset = true;
+    }
 
     // Processed in BATCH_SIZE-token pieces, checking cancellation between
     // them — a single llama_decode() call over the whole prompt cannot be
