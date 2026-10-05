@@ -44,6 +44,10 @@ class ModelInstallation(
     /** Searching the Hub for GGUF candidates (see [ModelDiscovery]); null when [hub] cannot search. */
     val discovery: ModelDiscovery? = (hub as? HuggingFaceSearch)?.let { ModelDiscovery(it, hub, ggufProbe) }
 
+    /** Discovery by model family (see [ai.localstudio.model.install.LineageDiscovery]); null when [hub] cannot search. */
+    val lineageDiscovery: ai.localstudio.model.install.LineageDiscovery? =
+        (hub as? HuggingFaceSearch)?.let { search -> discovery?.let { ai.localstudio.model.install.LineageDiscovery(search, it) } }
+
     /** Adopts proven legacy installations (see [LegacyInstallationScanner]); run for the embedding model only so far. */
     val migrator = LegacyMigrator(layout, hub)
 

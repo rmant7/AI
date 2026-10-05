@@ -75,7 +75,7 @@ class HuggingFaceApiClient(
             query.tags.forEach { add("filter" to it) }
             query.pipelineTag?.let { add("pipeline_tag" to it) }
             query.search?.let { add("search" to it) }
-            add("sort" to "downloads")
+            add("sort" to query.sort.apiValue)
             add("direction" to "-1")
             add("limit" to query.limit.toString())
         }
@@ -101,6 +101,7 @@ class HuggingFaceApiClient(
                 tags = (item["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }.orEmpty(),
                 pipelineTag = (item["pipeline_tag"] as? JsonPrimitive)?.content,
                 gated = gated,
+                createdAt = (item["createdAt"] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.content,
             )
         }
     }

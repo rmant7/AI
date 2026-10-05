@@ -7,6 +7,7 @@ import ai.localstudio.app.modelinstall.CandidateFacts
 import ai.localstudio.app.modelinstall.CandidatePurpose
 import ai.localstudio.app.modelinstall.CandidateWork
 import ai.localstudio.app.modelinstall.DiscoveredCandidate
+import ai.localstudio.app.modelinstall.DiscoveryLabels
 import ai.localstudio.app.modelinstall.DiscoveryRun
 import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.model.install.CandidateTier
@@ -90,7 +91,12 @@ class CandidatesActivity : AppCompatActivity() {
      * re-bound -- text, progress, buttons -- in place after that.
      */
     private fun render(work: CandidateWork = container.candidateWork.value) {
-        val runs = container.discoveryStore.runs().sortedBy { if (it.label == "chat") 0 else 1 }
+        // Chat families first, then translation, each in Lineages.ALL order; runs from before lineages last.
+        val order = ai.localstudio.model.install.Lineages.ALL.map { DiscoveryLabels.of(it) }
+        val runs = container.discoveryStore.runs().sortedWith(
+            compareBy<DiscoveryRun> { DiscoveryLabels.isTranslation(it.label) }
+                .thenBy { order.indexOf(it.label).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE },
+        )
         if (runs != shownRuns) {
             shownRuns = runs
             cards.clear()
@@ -110,7 +116,9 @@ class CandidatesActivity : AppCompatActivity() {
     }
 
     private fun sectionTitle(run: DiscoveryRun): String {
-        val group = getString(if (run.label == "translation") R.string.candidates_group_translation else R.string.candidates_group_chat)
+        val purpose = getString(if (DiscoveryLabels.isTranslation(run.label)) R.string.candidates_purpose_translation else R.string.candidates_purpose_chat)
+        val group = DiscoveryLabels.lineage(run.label)?.let { "${it.displayName} · $purpose" }
+            ?: getString(if (DiscoveryLabels.isTranslation(run.label)) R.string.candidates_group_translation else R.string.candidates_group_chat)
         val count = if (run.failure != null) {
             getString(R.string.candidates_section_failed, run.failure)
         } else {
@@ -135,7 +143,7 @@ class CandidatesActivity : AppCompatActivity() {
         val installedBytes = if (download == null) container.candidateInstalledBytes(c) else null
         val partialBytes = if (download == null && installedBytes == null) container.candidatePartialBytes(c) else null
 
-        card.localTitle.text = name.substringAfter('/')
+        card.localTitle.text = name.substringAfter('/') + if (container.discoveryStore.isNew(c)) "  · " + getString(R.string.candidate_new) else ""
         card.localSubtitle.text = subtitle(c, facts)
 
         val verification = c.verification
@@ -154,7 +162,7 @@ class CandidatesActivity : AppCompatActivity() {
             trial != null -> trial.describe(this)
             queued -> getString(R.string.candidate_queued)
             else -> listOfNotNull(
-                getString(if (label == "translation") R.string.candidate_in_use_translation else R.string.candidate_in_use_chat).takeIf { inUse },
+                getString(if (DiscoveryLabels.isTranslation(label)) R.string.candidate_in_use_translation else R.string.candidate_in_use_chat).takeIf { inUse },
                 partialBytes?.let { getString(R.string.candidate_paused, mb(it), mb(c.sizeBytes)) },
                 result,
                 work.failures[name]?.let { getString(R.string.candidate_download_failed, it) },
@@ -218,6 +226,7 @@ class CandidatesActivity : AppCompatActivity() {
         append(" · ").append(c.architecture)
         c.contextLength?.let { append(" · ").append(getString(R.string.candidate_context, it.toString())) }
         append(" · ").append(getString(R.string.candidate_downloads, compact(c.downloads)))
+        c.createdAt?.take(10)?.let { append(" · ").append(getString(R.string.candidate_created, it)) }
         append("\n")
         if (c.tags.isEmpty()) {
             append(getString(R.string.candidate_no_tags))
@@ -309,7 +318,7 @@ class CandidatesActivity : AppCompatActivity() {
         val seed = container.useCandidate(label, c)
         val message = when {
             seed == null -> getString(R.string.candidate_use_failed)
-            label == "translation" -> getString(R.string.models_switched_translation, seed.title)
+            DiscoveryLabels.isTranslation(label) -> getString(R.string.models_switched_translation, seed.title)
             else -> getString(R.string.models_switched_chat, seed.title)
         }
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()

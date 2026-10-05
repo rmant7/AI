@@ -22,11 +22,15 @@ data class DiscoveredCandidate(
     val downloads: Long,
     /** The repository's Hugging Face tags as the search returned them -- see [CandidateFacts]. Empty for a run stored before they were kept. */
     val tags: List<String> = emptyList(),
+    /** When the repository was created on the Hub (ISO 8601), if the search said. */
+    val createdAt: String? = null,
+    /** When a sweep on this phone first found this repository -- kept across sweeps; see [DiscoveryStore.isNew]. */
+    val firstSeenAtEpochMs: Long = 0L,
     /** Null until a real device has tried to load and use this exact file -- see [CandidateTier]. */
     val verification: ai.localstudio.model.install.DeviceVerification? = null,
 )
 
-/** One label's ("chat"/"translation") sweep -- what [DiscoveryStore] keeps. */
+/** One lineage's part of a sweep, by its label (see [DiscoveryLabels]) -- what [DiscoveryStore] keeps. */
 @Serializable
 data class DiscoveryRun(
     val label: String,
@@ -38,7 +42,13 @@ data class DiscoveryRun(
 )
 
 @Serializable
-private data class DiscoveryFile(val runs: List<DiscoveryRun> = emptyList(), val lastSeenAtEpochMs: Long = 0L)
+private data class DiscoveryFile(
+    val runs: List<DiscoveryRun> = emptyList(),
+    val lastSeenAtEpochMs: Long = 0L,
+    /** When the current (or last) sweep started, and the one before it -- what "new since the last search" is measured against. */
+    val sweepStartedAtEpochMs: Long = 0L,
+    val previousSweepStartedAtEpochMs: Long = 0L,
+)
 
 /**
  * The last discovery sweep's results, one per label, surviving the app
@@ -89,17 +99,44 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
      * changes nothing about it. A different commit or file starts over.
      */
     @Synchronized
-    fun record(run: DiscoveryRun) {
+    fun record(run: DiscoveryRun, nowMs: Long = System.currentTimeMillis()) {
         val current = read()
         val known = current.runs.flatMap { it.candidates }
             .mapNotNull { c -> c.verification?.let { Triple(c.repoId, c.commit, c.filePath) to it } }
             .toMap()
+        // Found before, under any label or commit: keeps the time it was first found (a run stored before this was kept: that run's own time).
+        val firstSeen = current.runs.flatMap { r -> r.candidates.map { it.repoId to (it.firstSeenAtEpochMs.takeIf { t -> t > 0 } ?: r.finishedAtEpochMs) } }
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, times) -> times.min() }
         val carried = run.copy(
             candidates = run.candidates.map { c ->
-                if (c.verification != null) c else c.copy(verification = known[Triple(c.repoId, c.commit, c.filePath)])
+                c.copy(
+                    verification = c.verification ?: known[Triple(c.repoId, c.commit, c.filePath)],
+                    firstSeenAtEpochMs = c.firstSeenAtEpochMs.takeIf { it > 0 } ?: firstSeen[c.repoId] ?: nowMs,
+                )
             },
         )
         write(current.copy(runs = current.runs.filterNot { it.label == run.label } + carried))
+    }
+
+    /** Marks a new sweep's start: candidates first found from here on are [isNew]. */
+    @Synchronized
+    fun beginSweep(nowMs: Long = System.currentTimeMillis()) {
+        val current = read()
+        val previous = current.sweepStartedAtEpochMs.takeIf { it > 0 } ?: current.runs.maxOfOrNull { it.finishedAtEpochMs } ?: 0L
+        write(current.copy(sweepStartedAtEpochMs = nowMs, previousSweepStartedAtEpochMs = previous))
+    }
+
+    /** After a complete sweep: drops runs whose label it no longer produces (a family removed, or the pre-lineage "chat"/"translation"). */
+    @Synchronized
+    fun retainLabels(labels: Set<String>) {
+        val current = read()
+        write(current.copy(runs = current.runs.filter { it.label in labels }))
+    }
+
+    /** First found by the latest sweep, when there was an earlier one to compare with -- on the very first sweep nothing is "new". */
+    fun isNew(candidate: DiscoveredCandidate): Boolean = read().let { f ->
+        f.previousSweepStartedAtEpochMs > 0 && candidate.firstSeenAtEpochMs >= f.sweepStartedAtEpochMs
     }
 
     /** Whether any run finished, or any candidate was verified, after the last time [markSeen] was called. */
@@ -146,6 +183,7 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
             commit = outcome.commit,
             downloads = outcome.repo.downloads,
             tags = outcome.repo.tags,
+            createdAt = outcome.repo.createdAt,
         )
     }
 }

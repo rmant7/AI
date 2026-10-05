@@ -77,6 +77,7 @@ import ai.localstudio.app.modelinstall.CandidateTrialMarker
 import ai.localstudio.app.modelinstall.CandidateWork
 import ai.localstudio.app.modelinstall.RunningTrial
 import ai.localstudio.app.modelinstall.DiscoveredCandidate
+import ai.localstudio.app.modelinstall.DiscoveryLabels
 import ai.localstudio.app.modelinstall.DiscoveryRun
 import ai.localstudio.app.modelinstall.FunctionalProbe
 import ai.localstudio.app.modelinstall.TrialRuntime
@@ -87,7 +88,6 @@ import ai.localstudio.model.install.CandidateModel
 import ai.localstudio.model.install.InstallResult
 import ai.localstudio.model.install.ModelDiscovery
 import ai.localstudio.model.install.tier
-import ai.localstudio.model.install.ModelSearchQuery
 import ai.localstudio.app.models.CatalogFreshness
 import ai.localstudio.app.models.LocalModelSeed
 import ai.localstudio.app.models.LocalModels
@@ -566,71 +566,79 @@ class AppContainer private constructor(private val context: Context) {
      */
     fun startDiscovery() {
         if (discoveryJob?.isActive == true) return
-        val discovery = modelInstallation.discovery ?: return
-        discoveryJob = discoveryScope.launch {
-            discoveryRunning.value = true
-            try {
-                val known = (LocalModels.SEEDS + TranslationModels.SEEDS + allCustomSeeds())
-                    .flatMap { it.repoIds }.toSet()
-                // The same 1.3x file-size-to-RAM estimate DeviceProfile.fitsBudget uses.
-                val maxModelBytes = device.usableRamBytes * 10 / 13
-                val queries = listOf(
-                    "chat" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "text-generation", limit = 15),
-                    "translation" to ModelSearchQuery(tags = listOf("gguf"), pipelineTag = "translation", limit = 15),
-                )
-                for ((label, query) in queries) {
-                    appLog.record("DISCOVERY", "$label: searching Hugging Face…")
-                    val outcomes = mutableListOf<ModelDiscovery.Outcome>()
-                    val result = runCatching {
-                        discovery.discover(
-                            query,
-                            ArtifactResolver.DEFAULT_QUANT_PRIORITY,
-                            maxModelBytes,
-                            known,
-                            onOutcome = { outcome ->
-                                outcomes += outcome
-                                appLog.record(
-                                    "DISCOVERY",
-                                    when (outcome) {
-                                        is ModelDiscovery.Outcome.Candidate ->
-                                            "$label CANDIDATE ${outcome.repo.id}: ${outcome.file.name} (${outcome.file.sizeBytes / 1_000_000} MB, " +
-                                                "${outcome.architecture}, context ${outcome.contextLength ?: "?"}${outcome.notes.joinToString("") { "; $it" }}) " +
-                                                "@${outcome.commit.take(8)}, ${outcome.repo.downloads} downloads"
-                                        is ModelDiscovery.Outcome.Dropped -> "$label dropped ${outcome.repo.id}: ${outcome.reason}"
-                                    },
-                                )
-                            },
-                        )
-                    }
-                    (modelInstallation.hub as? HuggingFaceApiClient)?.lastSearchShape
-                        ?.let { appLog.record("DISCOVERY", "$label search: $it") }
-                    val run = result.fold(
-                        onSuccess = { r ->
-                            DiscoveryRun(
-                                label = label,
-                                finishedAtEpochMs = System.currentTimeMillis(),
-                                checked = r.outcomes.size,
-                                candidates = r.candidates.map(DiscoveryStore::candidateOf),
-                            )
-                        },
-                        onFailure = { e ->
-                            appLog.record("DISCOVERY", "$label search FAILED: ${e.javaClass.simpleName}: ${e.message}")
-                            DiscoveryRun(
-                                label = label,
-                                finishedAtEpochMs = System.currentTimeMillis(),
-                                checked = outcomes.size,
-                                candidates = outcomes.filterIsInstance<ModelDiscovery.Outcome.Candidate>()
-                                    .map(DiscoveryStore::candidateOf),
-                                failure = "${e.javaClass.simpleName}: ${e.message}",
+        if (modelInstallation.lineageDiscovery == null) return
+        discoveryJob = discoveryScope.launch { runDiscoverySweep("manual") }
+    }
+
+    private val discoverySweepLock = Mutex()
+
+    /**
+     * One sweep over every [ai.localstudio.model.install.Lineages] family:
+     * each searched by its newest and most downloaded GGUFs, a shortlist
+     * examined (size, header), each family's run stored the moment it
+     * finishes. Families run in [Lineages.ALL] order and a repository is
+     * examined once, by the first family that finds it. Called by
+     * [startDiscovery] and by the weekly [DiscoveryWorker];
+     * a sweep already running makes a second call return at once.
+     */
+    suspend fun runDiscoverySweep(trigger: String) {
+        val lineageDiscovery = modelInstallation.lineageDiscovery ?: return
+        if (!discoverySweepLock.tryLock()) return
+        discoveryRunning.value = true
+        try {
+            appLog.record("DISCOVERY", "sweep started ($trigger)")
+            discoveryStore.beginSweep()
+            val claimed = (LocalModels.SEEDS + TranslationModels.SEEDS + allCustomSeeds()).flatMap { it.repoIds }.toMutableSet()
+            // The same 1.3x file-size-to-RAM estimate DeviceProfile.fitsBudget uses.
+            val maxModelBytes = device.usableRamBytes * 10 / 13
+            val labels = mutableSetOf<String>()
+            var complete = true
+            for (lineage in ai.localstudio.model.install.Lineages.ALL) {
+                val label = DiscoveryLabels.of(lineage)
+                appLog.record("DISCOVERY", "$label: searching Hugging Face…")
+                val result = runCatching {
+                    lineageDiscovery.discover(
+                        lineage,
+                        ArtifactResolver.DEFAULT_QUANT_PRIORITY,
+                        maxModelBytes,
+                        claimed.toSet(),
+                        onOutcome = { outcome ->
+                            appLog.record(
+                                "DISCOVERY",
+                                when (outcome) {
+                                    is ModelDiscovery.Outcome.Candidate ->
+                                        "$label CANDIDATE ${outcome.repo.id}: ${outcome.file.name} (${outcome.file.sizeBytes / 1_000_000} MB, " +
+                                            "${outcome.architecture}, context ${outcome.contextLength ?: "?"}${outcome.notes.joinToString("") { "; $it" }}) " +
+                                            "@${outcome.commit.take(8)}, ${outcome.repo.downloads} downloads, created ${outcome.repo.createdAt ?: "?"}"
+                                    is ModelDiscovery.Outcome.Dropped -> "$label dropped ${outcome.repo.id}: ${outcome.reason}"
+                                },
                             )
                         },
                     )
-                    discoveryStore.record(run)
+                }.getOrElse { e -> ai.localstudio.model.install.LineageDiscovery.Result(lineage, 0, emptyList(), "${e.javaClass.simpleName}: ${e.message}") }
+                (modelInstallation.hub as? HuggingFaceApiClient)?.lastSearchShape?.let { appLog.record("DISCOVERY", "$label last search: $it") }
+                result.failure?.let {
+                    complete = false
+                    appLog.record("DISCOVERY", "$label search FAILED: $it")
                 }
-                appLog.record("DISCOVERY", "sweep finished")
-            } finally {
-                discoveryRunning.value = false
+                claimed += result.outcomes.map { it.repo.id }
+                labels += label
+                discoveryStore.record(
+                    DiscoveryRun(
+                        label = label,
+                        finishedAtEpochMs = System.currentTimeMillis(),
+                        checked = result.found,
+                        candidates = result.candidates.map(DiscoveryStore::candidateOf),
+                        failure = result.failure,
+                    ),
+                )
             }
+            // Only a sweep that heard from every family may forget runs it did not produce.
+            if (complete) discoveryStore.retainLabels(labels)
+            appLog.record("DISCOVERY", "sweep finished ($trigger): ${discoveryStore.runs().sumOf { it.candidates.size }} candidates")
+        } finally {
+            discoveryRunning.value = false
+            discoverySweepLock.unlock()
         }
     }
 
@@ -842,9 +850,9 @@ class AppContainer private constructor(private val context: Context) {
 
     /** The user's own model a candidate becomes once it is in use: a custom chat or translation model of the same repository. */
     fun candidateSeed(label: String, candidate: DiscoveredCandidate): LocalModelSeed =
-        if (label == "translation") LocalModels.customTranslation(candidate.repoId) else LocalModels.custom(candidate.repoId)
+        if (DiscoveryLabels.isTranslation(label)) LocalModels.customTranslation(candidate.repoId) else LocalModels.custom(candidate.repoId)
 
-    private fun candidatePurpose(label: String) = if (label == "translation") ModelPurpose.TRANSLATION else ModelPurpose.CHAT
+    private fun candidatePurpose(label: String) = if (DiscoveryLabels.isTranslation(label)) ModelPurpose.TRANSLATION else ModelPurpose.CHAT
 
     /** Whether [candidate] is already one of the user's own models for [label]'s purpose, installed. */
     fun candidateInUse(label: String, candidate: DiscoveredCandidate): Boolean {
@@ -876,7 +884,7 @@ class AppContainer private constructor(private val context: Context) {
             ) ?: return null
         }
         addCustomModel(candidate.repoId, candidatePurpose(label))
-        if (label == "translation") {
+        if (DiscoveryLabels.isTranslation(label)) {
             settings.translationModel = seed.id
         } else {
             settings.providerId = CloudProviders.LOCAL.id
@@ -884,7 +892,7 @@ class AppContainer private constructor(private val context: Context) {
         }
         appLog.record(
             "MODEL_SWITCH",
-            "${if (label == "translation") "translation" else "chat"}: ${candidate.repoId} -- tested candidate in use as ${seed.id} " +
+            "${if (DiscoveryLabels.isTranslation(label)) "translation" else "chat"}: ${candidate.repoId} -- tested candidate in use as ${seed.id} " +
                 (adopted?.let { m -> "(moved in: ${m.artifacts.sumOf { it.sizeBytes } / 1_000_000} MB, ${candidate.filePath}@${candidate.commit.take(8)})" } ?: "(already installed)"),
         )
         return seed
@@ -1065,6 +1073,8 @@ class AppContainer private constructor(private val context: Context) {
         // itself kills the process before any of our own code can write
         // anything, but Android remembers why the previous instance died.
         recoverInterruptedCandidateTrial(appLog.recordProcessExitIfNotable())
+        runCatching { DiscoveryWorker.schedule(context) }
+            .onFailure { appLog.record("DISCOVERY", "weekly sweep not scheduled: ${it.javaClass.simpleName}: ${it.message}") }
 
         // Any exception that reaches here slipped past every runCatching in
         // the app — logging it before Android's own crash handling takes

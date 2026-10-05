@@ -27,10 +27,11 @@ class DiscoveryStoreTest {
 
     private fun store() = DiscoveryStore(context, baseDir = base)
 
-    private fun candidate(id: String) = DiscoveredCandidate(
+    /** firstSeen set, so a stored run compares equal to what was recorded; the firstSeen tests pass 0 to see it filled in. */
+    private fun candidate(id: String, firstSeen: Long = 1L) = DiscoveredCandidate(
         repoId = id, fileName = "model-Q4_K_M.gguf", filePath = "model-Q4_K_M.gguf", sizeBytes = 2_000_000_000,
         architecture = "qwen3", contextLength = 32768, notes = emptyList(),
-        commit = "a".repeat(40), downloads = 1234,
+        commit = "a".repeat(40), downloads = 1234, firstSeenAtEpochMs = firstSeen,
     )
 
     private fun verification(loaded: Boolean = true, inferenceOk: Boolean = true, at: Long = 5_000L) = DeviceVerification(
@@ -193,5 +194,53 @@ class DiscoveryStoreTest {
                 """"filePath":"a.gguf","sizeBytes":1,"architecture":"llama","contextLength":null,"notes":[],"commit":"c","downloads":0}]}]}""",
         )
         assertEquals(emptyList<String>(), store().runs().single().candidates.single().tags)
+    }
+
+    @Test
+    fun a_repository_found_again_keeps_when_it_was_first_found_even_at_a_new_commit() {
+        val store = store()
+        store.record(DiscoveryRun("chat:qwen", 1_000L, 1, listOf(candidate("acme/a-GGUF", firstSeen = 0))), nowMs = 1_000L)
+        store.record(
+            DiscoveryRun("chat:qwen", 2_000L, 2, listOf(candidate("acme/a-GGUF", firstSeen = 0).copy(commit = "c".repeat(40)), candidate("acme/b-GGUF", firstSeen = 0))),
+            nowMs = 2_000L,
+        )
+        val byId = store.runs().single().candidates.associateBy { it.repoId }
+        assertEquals(1_000L, byId.getValue("acme/a-GGUF").firstSeenAtEpochMs)
+        assertEquals(2_000L, byId.getValue("acme/b-GGUF").firstSeenAtEpochMs)
+    }
+
+    @Test
+    fun new_means_first_found_by_the_latest_sweep_and_nothing_is_new_on_the_very_first() {
+        val store = store()
+        store.beginSweep(nowMs = 1_000L)
+        store.record(DiscoveryRun("chat:qwen", 1_500L, 1, listOf(candidate("acme/a-GGUF", firstSeen = 0))), nowMs = 1_500L)
+        assertFalse("first sweep ever: nothing to compare with", store.isNew(store.runs().single().candidates.single()))
+
+        store.beginSweep(nowMs = 5_000L)
+        store.record(DiscoveryRun("chat:qwen", 5_500L, 2, listOf(candidate("acme/a-GGUF", firstSeen = 0), candidate("acme/b-GGUF", firstSeen = 0))), nowMs = 5_500L)
+        val byId = store.runs().single().candidates.associateBy { it.repoId }
+        assertFalse(store.isNew(byId.getValue("acme/a-GGUF")))
+        assertTrue(store.isNew(byId.getValue("acme/b-GGUF")))
+    }
+
+    @Test
+    fun a_complete_sweep_forgets_labels_it_no_longer_produces() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(candidate("acme/old-GGUF"))))
+        store.record(DiscoveryRun("chat:qwen", 2_000L, 1, listOf(candidate("acme/a-GGUF"))))
+        store.retainLabels(setOf("chat:qwen"))
+        assertEquals(listOf("chat:qwen"), store.runs().map { it.label })
+    }
+
+    @Test
+    fun labels_carry_purpose_and_family() {
+        val qwen = ai.localstudio.model.install.Lineages.byId("qwen")!!
+        assertEquals("chat:qwen", DiscoveryLabels.of(qwen))
+        assertEquals("translation:hunyuan-mt", DiscoveryLabels.of(ai.localstudio.model.install.Lineages.byId("hunyuan-mt")!!))
+        assertTrue(DiscoveryLabels.isTranslation("translation:hunyuan-mt"))
+        assertTrue("a run stored before lineages", DiscoveryLabels.isTranslation("translation"))
+        assertFalse(DiscoveryLabels.isTranslation("chat:qwen"))
+        assertEquals(qwen, DiscoveryLabels.lineage("chat:qwen"))
+        assertNull(DiscoveryLabels.lineage("chat"))
     }
 }

@@ -10,14 +10,19 @@ interface HuggingFaceSearch {
 /**
  * What to look for: [tags] all required (`gguf` among them for llama.cpp),
  * [pipelineTag] the Hub's task tag (`text-generation`, `translation`, ...),
- * [search] free text; most downloaded first.
+ * [search] free text in the repository id; [sort] decides which [limit]
+ * come back: the most downloaded, or the newest.
  */
 data class ModelSearchQuery(
     val tags: List<String> = listOf("gguf"),
     val pipelineTag: String? = null,
     val search: String? = null,
     val limit: Int = 20,
-)
+    val sort: Sort = Sort.DOWNLOADS,
+) {
+    /** [apiValue] is the Hub's own `sort` parameter value. */
+    enum class Sort(val apiValue: String) { DOWNLOADS("downloads"), NEWEST("createdAt") }
+}
 
 data class RepoSummary(
     val id: String,
@@ -27,6 +32,8 @@ data class RepoSummary(
     val pipelineTag: String? = null,
     /** Gated repositories need the user's accepted licence and a token; not offered blind. */
     val gated: Boolean = false,
+    /** When the repository was created, as the Hub reports it (ISO 8601); null when the listing leaves it out. */
+    val createdAt: String? = null,
 )
 
 /**
@@ -97,7 +104,8 @@ class ModelDiscovery(
         return Report(query, outcomes.sortedWith(compareBy<Outcome> { it !is Outcome.Candidate }.thenByDescending { it.repo.downloads }))
     }
 
-    private fun examine(repo: RepoSummary, quantPriority: List<String>, maxModelBytes: Long, skip: Set<String>): Outcome {
+    /** One repository through the same steps [discover] takes each search result through. */
+    fun examine(repo: RepoSummary, quantPriority: List<String>, maxModelBytes: Long, skip: Set<String> = emptySet()): Outcome {
         if (repo.id in skip) return Outcome.Dropped(repo, "already in the app")
         if (repo.gated) return Outcome.Dropped(repo, "gated (licence must be accepted on Hugging Face)")
         val commit = try {

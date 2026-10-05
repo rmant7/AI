@@ -20,8 +20,8 @@ data class FunctionalProbe(val prompt: String, val expectAnyOf: List<String>) {
 
     companion object {
         /** Per discovery label; anything unknown gets the chat probes. */
-        fun forLabel(label: String): List<FunctionalProbe> = when (label) {
-            "translation" -> listOf(
+        fun forLabel(label: String): List<FunctionalProbe> = when {
+            DiscoveryLabels.isTranslation(label) -> listOf(
                 FunctionalProbe("Translate into French. Reply with the translation only.\n\nGood morning, my friend.", listOf("bonjour")),
             )
             else -> listOf(

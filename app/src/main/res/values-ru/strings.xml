@@ -475,7 +475,7 @@
     <string name="discover_unavailable">Нечем искать: у приложения сейчас нет способа получить список моделей с Hugging Face</string>
     <string name="discover_menu">Найти новые модели (бета)</string>
     <string name="discover_already_running">Поиск уже идёт — результат появится здесь, когда он завершится</string>
-    <string name="discover_running">Поиск на Hugging Face… может занять пару минут; он продолжится, даже если вы уйдёте с экрана или закроете приложение, а результат появится здесь при следующем открытии экрана «Модели»</string>
+    <string name="discover_running">Поиск на Hugging Face по семействам моделей… занимает несколько минут; он продолжится, даже если вы уйдёте с экрана или закроете приложение, а результат появится здесь при следующем открытии экрана «Модели»</string>
     <string name="candidates_menu">Найденные кандидаты</string>
     <string name="candidates_none">Кандидатов пока нет — сначала «Найти новые модели»</string>
     <string name="candidate_tier_unverified">не проверена</string>
@@ -486,11 +486,15 @@
     <string name="candidate_delete">Удалить скачанное (%1$d МБ)</string>
     <string name="candidate_deleted">Удалено</string>
     <string name="candidate_delete_failed">Не удалено — идёт проверка, или ничего не установлено</string>
-    <string name="candidates_hint">Найдены на Hugging Face последним поиском и проверены только по заголовку файла и размеру. Ни одна не является рекомендацией, пока «Скачать и проверить» не загрузит её на этом телефоне и она правильно не ответит на тестовые вопросы. Назначение, базовая модель, языки и лицензия — это теги, которые поставил автор на Hugging Face. Нажмите на карточку для подробностей.</string>
+    <string name="candidates_hint">Поиск на Hugging Face по семействам (Qwen, Gemma, Llama, Phi, Mistral, SmolLM, LFM, Granite, модели перевода и самые популярные из остальных) — вручную из меню и сам раз в неделю по Wi-Fi. Сначала — загрузки самих авторов семейства и самые новые. Проверены только заголовок файла и размер: ни одна модель не является рекомендацией, пока «Скачать и проверить» не загрузит её на этом телефоне и она правильно не ответит на тестовые вопросы. Назначение, основа, языки и лицензия — это теги автора. Нажмите на карточку для подробностей.</string>
     <string name="candidates_group_chat">Генерация текста (чат, код, рассуждения — см. назначение каждой модели)</string>
     <string name="candidates_group_translation">Модели перевода</string>
-    <string name="candidates_section_count">кандидатов %1$d из %2$d просмотренных</string>
+    <string name="candidates_section_count">кандидатов %1$d из %2$d найденных</string>
     <string name="candidates_section_failed">поиск не удался — %1$s</string>
+    <string name="candidates_purpose_chat">чат</string>
+    <string name="candidates_purpose_translation">перевод</string>
+    <string name="candidate_created">опубликована %1$s</string>
+    <string name="candidate_new">НОВАЯ</string>
     <string name="candidate_retest">Проверить снова</string>
     <string name="candidate_use">Использовать</string>
     <string name="candidate_use_failed">Не переключено: использовать можно только скачанную модель, прошедшую проверку на этом телефоне</string>

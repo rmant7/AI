@@ -221,6 +221,8 @@ dependencies {
     // rotate tag rather than pre-rotated pixels.
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    // The weekly discovery sweep (DiscoveryWorker): survives reboots, waits for Wi-Fi.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")

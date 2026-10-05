@@ -479,7 +479,7 @@
     <string name="discover_unavailable">Nothing to search with: the app has no way to list Hugging Face models right now</string>
     <string name="discover_menu">Find new models (beta)</string>
     <string name="discover_already_running">Already searching — results will show here once it finishes</string>
-    <string name="discover_running">Searching Hugging Face… can take a couple of minutes; it keeps running if you leave this screen or close the app, and the result will be shown here next time you open Models</string>
+    <string name="discover_running">Searching Hugging Face family by family… takes a few minutes; it keeps running if you leave this screen or close the app, and the result will be shown here next time you open Models</string>
     <string name="candidates_menu">Discovered candidates</string>
     <string name="candidates_none">No candidates yet — use “Find new models” first</string>
     <string name="candidate_tier_unverified">unverified</string>
@@ -490,11 +490,15 @@
     <string name="candidate_delete">Delete download (%1$d MB)</string>
     <string name="candidate_deleted">Deleted</string>
     <string name="candidate_delete_failed">Not deleted — a test is running, or nothing was installed</string>
-    <string name="candidates_hint">Found on Hugging Face by the last search and checked only by file header and size. None of them is a recommendation until “Download &amp; Test” has loaded it on this phone and it answered the test questions correctly. Purpose, base model, languages and license are what the author tagged on Hugging Face. Tap a card for details.</string>
+    <string name="candidates_hint">Searched on Hugging Face by family (Qwen, Gemma, Llama, Phi, Mistral, SmolLM, LFM, Granite, translation models, and the most popular of the rest) — by hand from the menu, and on its own once a week on Wi-Fi. Each family\'s own uploads and the newest come first. Only the file header and size were checked: none of these is a recommendation until “Download &amp; Test” has loaded it on this phone and it answered the test questions correctly. Purpose, base model, languages and license are what the author tagged. Tap a card for details.</string>
     <string name="candidates_group_chat">Text generation (chat, code, reasoning — see each model\'s purpose)</string>
     <string name="candidates_group_translation">Translation models</string>
-    <string name="candidates_section_count">%1$d candidates of %2$d checked</string>
+    <string name="candidates_section_count">%1$d candidates of %2$d found</string>
     <string name="candidates_section_failed">search failed — %1$s</string>
+    <string name="candidates_purpose_chat">chat</string>
+    <string name="candidates_purpose_translation">translation</string>
+    <string name="candidate_created">published %1$s</string>
+    <string name="candidate_new">NEW</string>
     <string name="candidate_retest">Test again</string>
     <string name="candidate_use">Use</string>
     <string name="candidate_use_failed">Not switched: only a model that passed the test on this phone and is downloaded can be used</string>
