@@ -1,6 +1,6 @@
 package ai.localstudio.app.llama
 
-import ai.localstudio.core.registry.Capability
+import ai.localstudio.core.capability.Capability
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
