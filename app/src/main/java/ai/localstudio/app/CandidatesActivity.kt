@@ -360,6 +360,13 @@ class CandidatesActivity : AppCompatActivity() {
                         secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
                         secondary.setOnClickListener { deleteInstall(c) }
                     }
+                    // In use already (its files moved into the chat's model): testing again is still a tap away,
+                    // not hidden in the details dialog -- a real report could not find it.
+                    testable -> {
+                        secondary.visibility = View.VISIBLE
+                        secondary.text = getString(R.string.candidate_retest)
+                        secondary.setOnClickListener { test(label, c) }
+                    }
                 }
             }
             testable -> {
