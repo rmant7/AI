@@ -674,10 +674,16 @@ class AppContainer private constructor(private val context: Context) {
             try {
                 appLog.record(tag, "$name: downloading ${candidate.filePath}@${candidate.commit.take(8)} (${candidate.sizeBytes / 1_000_000} MB)")
                 var loggedQuarter = 0
+                var loggedFirst = false
+                val startedAt = System.currentTimeMillis()
                 val outcome = installCandidate(candidate, cancel) { done, total ->
                     if (cancel.get()) return@installCandidate
                     val progress = CandidateDownload(done, total)
                     candidateWork.update { w -> if (name in w.downloads) w.copy(downloads = w.downloads + (name to progress)) else w }
+                    if (!loggedFirst) {
+                        loggedFirst = true
+                        appLog.record(tag, "$name: receiving -- ${done / 1_000_000}/${total / 1_000_000} MB after ${(System.currentTimeMillis() - startedAt) / 1000}s")
+                    }
                     val quarter = (progress.percent ?: 0) / 25
                     if (quarter > loggedQuarter && quarter < 4) {
                         loggedQuarter = quarter
@@ -685,15 +691,20 @@ class AppContainer private constructor(private val context: Context) {
                     }
                 }
                 when {
-                    cancel.get() -> appLog.record(tag, "$name: download cancelled")
+                    cancel.get() -> appLog.record(tag, "$name: paused at ${(candidatePartialBytes(candidate) ?: 0) / 1_000_000} MB")
                     outcome.isSuccess -> installed = true
                     else -> failure = outcome.exceptionOrNull()?.message
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                failure = "${e.javaClass.simpleName}: ${e.message}"
-                appLog.record(tag, "$name: download FAILED: $failure")
+                // A pause surfaces as the transfer's own TransferCancelledException: kept bytes, not a failure.
+                if (cancel.get()) {
+                    appLog.record(tag, "$name: paused at ${(candidatePartialBytes(candidate) ?: 0) / 1_000_000} MB")
+                } else {
+                    failure = "${e.javaClass.simpleName}: ${e.message}"
+                    appLog.record(tag, "$name: download FAILED: $failure")
+                }
             } finally {
                 candidateDownloadCancels.remove(name)
                 // From downloading straight into the test queue in one step, for the same reason as the queue worker's.
@@ -710,9 +721,17 @@ class AppContainer private constructor(private val context: Context) {
         return true
     }
 
-    fun cancelCandidateDownload(candidate: DiscoveredCandidate) {
+    /** Stops [candidate]'s download, keeping what it has: [downloadCandidate] continues from there. */
+    fun pauseCandidateDownload(candidate: DiscoveredCandidate) {
         candidateDownloadCancels[candidate.repoId]?.set(true)
     }
+
+    /** Bytes a paused or interrupted download of [candidate] kept in staging; null when there are none. */
+    fun candidatePartialBytes(candidate: DiscoveredCandidate): Long? =
+        modelInstallation.layout.stagingDir(candidateVariantId(candidate)).walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".part") }
+            .sumOf { it.length() }
+            .takeIf { it > 0 }
 
     /** Queues a test of an installed [candidate]; false when it is not installed or already downloading, queued or being tested. */
     fun testCandidate(label: String, candidate: DiscoveredCandidate): Boolean {
@@ -834,11 +853,16 @@ class AppContainer private constructor(private val context: Context) {
         return modelInstallation.installed.pathOf(manifest, artifact).takeIf { it.isFile }
     }
 
-    /** Removes [candidate]'s installed file; its recorded verification stays, it is still what was observed. False while it is busy. */
+    /**
+     * Removes [candidate]'s installed file and any paused partial download;
+     * its recorded verification stays, it is still what was observed. False
+     * while it is busy, or when there was nothing to remove.
+     */
     fun deleteCandidateInstall(candidate: DiscoveredCandidate): Boolean {
         if (candidateWork.value.isBusy(candidate.repoId)) return false
-        val removed = modelInstallation.installed.uninstall(candidateVariantId(candidate))
-        appLog.record("CANDIDATE_TEST", "${candidate.repoId}: install ${if (removed) "deleted" else "not found"}")
+        val hadPartial = candidatePartialBytes(candidate) != null
+        val removed = modelInstallation.installed.uninstall(candidateVariantId(candidate)) || hadPartial
+        appLog.record("CANDIDATE_TEST", "${candidate.repoId}: ${if (removed) "deleted" else "nothing to delete"}")
         return removed
     }
 

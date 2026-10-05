@@ -63,18 +63,36 @@ class CandidatesActivity : AppCompatActivity() {
         return true
     }
 
+    /** The list as last built: rebuilt only when the stored runs change, never on a progress tick (see [render]). */
+    private var shownRuns: List<DiscoveryRun>? = null
+    private val cards = mutableListOf<Triple<String, DiscoveredCandidate, ItemLocalModelBinding>>()
+
+    /**
+     * Progress ticks arrive several times a second during a download, and a
+     * tap is a press and a release on the same view: rebuilding the cards on
+     * every tick (as the first version did) swapped the button out between
+     * the two, so Pause "did nothing" on a real device even when tapped
+     * twice. Cards are now built once per change of the stored runs and only
+     * re-bound -- text, progress, buttons -- in place after that.
+     */
     private fun render(work: CandidateWork = container.candidateWork.value) {
-        val list = binding.candidatesList
-        list.removeAllViews()
         val runs = container.discoveryStore.runs().sortedBy { if (it.label == "chat") 0 else 1 }
-        if (runs.isEmpty()) {
-            addHeader(getString(R.string.candidates_none))
-            return
+        if (runs != shownRuns) {
+            shownRuns = runs
+            cards.clear()
+            binding.candidatesList.removeAllViews()
+            if (runs.isEmpty()) addHeader(getString(R.string.candidates_none))
+            for (run in runs) {
+                addHeader(sectionTitle(run))
+                run.candidates.forEach { c ->
+                    val card = ItemLocalModelBinding.inflate(layoutInflater, binding.candidatesList, false)
+                    card.root.setOnClickListener { showDetails(c) }
+                    binding.candidatesList.addView(card.root)
+                    cards += Triple(run.label, c, card)
+                }
+            }
         }
-        for (run in runs) {
-            addHeader(sectionTitle(run))
-            run.candidates.forEach { addCard(run.label, it, work) }
-        }
+        cards.forEach { (label, c, card) -> bind(card, label, c, work) }
     }
 
     private fun sectionTitle(run: DiscoveryRun): String {
@@ -93,14 +111,14 @@ class CandidatesActivity : AppCompatActivity() {
         binding.candidatesList.addView(header.root)
     }
 
-    private fun addCard(label: String, c: DiscoveredCandidate, work: CandidateWork) {
-        val card = ItemLocalModelBinding.inflate(layoutInflater, binding.candidatesList, false)
+    private fun bind(card: ItemLocalModelBinding, label: String, c: DiscoveredCandidate, work: CandidateWork) {
         val facts = CandidateFacts.of(c.tags)
         val name = c.repoId
         val download = work.downloads[name]
         val trial = work.trial?.takeIf { it.repoId == name }
         val queued = name in work.queued
         val installedBytes = if (download == null) container.candidateInstalledBytes(c) else null
+        val partialBytes = if (download == null && installedBytes == null) container.candidatePartialBytes(c) else null
 
         card.localTitle.text = name.substringAfter('/')
         card.localSubtitle.text = subtitle(c, facts)
@@ -115,51 +133,56 @@ class CandidatesActivity : AppCompatActivity() {
                 verification.error?.let { append("\n").append(it) }
             }
         }
+        val mb = { bytes: Long -> (bytes / 1_000_000).toInt() }
         card.localStatus.text = when {
-            download != null -> getString(R.string.candidate_downloading, (download.bytesDone / 1_000_000).toInt(), (download.bytesTotal / 1_000_000).toInt())
+            download != null -> getString(R.string.candidate_downloading, mb(download.bytesDone), mb(download.bytesTotal))
             trial != null -> trial.describe(this)
             queued -> getString(R.string.candidate_queued)
             else -> listOfNotNull(
+                partialBytes?.let { getString(R.string.candidate_paused, mb(it), mb(c.sizeBytes)) },
                 result,
                 work.failures[name]?.let { getString(R.string.candidate_download_failed, it) },
             ).joinToString("\n")
         }
 
-        card.localProgress.visibility = if (download != null || trial != null) View.VISIBLE else View.GONE
-        val percent = download?.percent
+        val percent = download?.percent ?: partialBytes?.let { (it * 100 / c.sizeBytes.coerceAtLeast(1)).toInt().coerceIn(0, 100) }
+        card.localProgress.visibility = if (download != null || trial != null || partialBytes != null) View.VISIBLE else View.GONE
         card.localProgress.isIndeterminate = percent == null
         if (percent != null) card.localProgress.progress = percent
 
         val primary = card.localPrimaryButton
         val secondary = card.localSecondaryButton
         secondary.visibility = View.GONE
+        primary.isEnabled = true
         when {
             download != null -> {
-                primary.text = getString(R.string.candidate_cancel)
-                primary.isEnabled = true
-                primary.setOnClickListener { container.cancelCandidateDownload(c) }
+                primary.text = getString(R.string.model_pause)
+                primary.setOnClickListener { container.pauseCandidateDownload(c) }
             }
             trial != null || queued -> {
                 primary.text = getString(R.string.candidate_test)
                 primary.isEnabled = false
+                primary.setOnClickListener(null)
             }
             installedBytes != null -> {
                 primary.text = getString(if (verification == null) R.string.candidate_test else R.string.candidate_retest)
-                primary.isEnabled = true
                 primary.setOnClickListener { test(label, c) }
                 secondary.visibility = View.VISIBLE
-                secondary.text = getString(R.string.candidate_delete, (installedBytes / 1_000_000).toInt())
+                secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
+                secondary.setOnClickListener { deleteInstall(c) }
+            }
+            partialBytes != null -> {
+                primary.text = getString(R.string.model_resume)
+                primary.setOnClickListener { download(label, c) }
+                secondary.visibility = View.VISIBLE
+                secondary.text = getString(R.string.candidate_delete, mb(partialBytes))
                 secondary.setOnClickListener { deleteInstall(c) }
             }
             else -> {
-                primary.text = getString(R.string.candidate_download, (c.sizeBytes / 1_000_000).toInt())
-                primary.isEnabled = true
+                primary.text = getString(R.string.candidate_download, mb(c.sizeBytes))
                 primary.setOnClickListener { download(label, c) }
             }
         }
-
-        card.root.setOnClickListener { showDetails(c) }
-        binding.candidatesList.addView(card.root)
     }
 
     private fun subtitle(c: DiscoveredCandidate, facts: CandidateFacts): String = buildString {

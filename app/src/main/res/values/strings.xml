@@ -498,7 +498,7 @@
     <string name="candidate_retest">Test again</string>
     <string name="candidate_test">Test</string>
     <string name="candidate_download">Download &amp; Test (%1$d MB)</string>
-    <string name="candidate_cancel">Cancel</string>
+    <string name="candidate_paused">Paused: %1$d of %2$d MB downloaded</string>
     <string name="candidate_downloading">Downloading %1$d of %2$d MB</string>
     <string name="candidate_queued">Waiting to be tested — one model is tested at a time</string>
     <string name="candidate_download_failed">Download failed: %1$s</string>

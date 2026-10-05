@@ -494,7 +494,7 @@
     <string name="candidate_retest">Проверить снова</string>
     <string name="candidate_test">Проверить</string>
     <string name="candidate_download">Скачать и проверить (%1$d МБ)</string>
-    <string name="candidate_cancel">Отмена</string>
+    <string name="candidate_paused">Пауза: скачано %1$d из %2$d МБ</string>
     <string name="candidate_downloading">Скачано %1$d из %2$d МБ</string>
     <string name="candidate_queued">В очереди на проверку — модели проверяются по одной</string>
     <string name="candidate_download_failed">Скачивание не удалось: %1$s</string>
