@@ -496,6 +496,10 @@
     <string name="candidates_section_count">%1$d candidates of %2$d checked</string>
     <string name="candidates_section_failed">search failed — %1$s</string>
     <string name="candidate_retest">Test again</string>
+    <string name="candidate_use">Use</string>
+    <string name="candidate_use_failed">Not switched: only a model that passed the test on this phone and is downloaded can be used</string>
+    <string name="candidate_in_use_chat">In your models (chat)</string>
+    <string name="candidate_in_use_translation">In your models (translation)</string>
     <string name="candidate_test">Test</string>
     <string name="candidate_download">Download &amp; Test (%1$d MB)</string>
     <string name="candidate_paused">Paused: %1$d of %2$d MB downloaded</string>

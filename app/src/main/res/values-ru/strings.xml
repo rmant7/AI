@@ -492,6 +492,10 @@
     <string name="candidates_section_count">кандидатов %1$d из %2$d просмотренных</string>
     <string name="candidates_section_failed">поиск не удался — %1$s</string>
     <string name="candidate_retest">Проверить снова</string>
+    <string name="candidate_use">Использовать</string>
+    <string name="candidate_use_failed">Не переключено: использовать можно только скачанную модель, прошедшую проверку на этом телефоне</string>
+    <string name="candidate_in_use_chat">В ваших моделях (чат)</string>
+    <string name="candidate_in_use_translation">В ваших моделях (перевод)</string>
     <string name="candidate_test">Проверить</string>
     <string name="candidate_download">Скачать и проверить (%1$d МБ)</string>
     <string name="candidate_paused">Пауза: скачано %1$d из %2$d МБ</string>

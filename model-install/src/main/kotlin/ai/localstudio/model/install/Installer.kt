@@ -370,6 +370,29 @@ class InstalledVariants(private val layout: InstallLayout) {
         return if (unverifiable.isEmpty()) InstallHealth.Intact else InstallHealth.UnverifiableContents(unverifiable)
     }
 
+    /**
+     * Re-labels the installed variant [from] as [to] (model [modelId]): its
+     * files move as they are, by one directory rename, so a variant installed
+     * under one name -- a tested discovery candidate -- becomes another's
+     * installation without a second download. An existing [to] is replaced
+     * (see [InstallLayout.promote]). Null, and nothing changed, when [from]
+     * is not installed intact.
+     */
+    fun adopt(from: VariantId, to: VariantId, modelId: ModelId, nowMs: Long = System.currentTimeMillis()): InstallManifest? {
+        val manifest = manifest(from)?.takeIf { health(it) == InstallHealth.Intact } ?: return null
+        val relabelled = manifest.copy(modelId = modelId, variantId = to)
+        val source = layout.variantDir(from)
+        val manifestFile = File(source, InstallManifest.FILE_NAME)
+        manifestFile.writeText(ManifestCodec.encode(relabelled))
+        try {
+            layout.promote(source, layout.variantDir(to), nowMs)
+        } catch (e: IOException) {
+            manifestFile.writeText(ManifestCodec.encode(manifest))
+            throw e
+        }
+        return relabelled
+    }
+
     fun uninstall(variant: VariantId): Boolean {
         val dir = layout.variantDir(variant)
         layout.stagingDir(variant).deleteRecursively()

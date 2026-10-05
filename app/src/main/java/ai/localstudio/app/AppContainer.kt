@@ -840,6 +840,56 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
+    /** The user's own model a candidate becomes once it is in use: a custom chat or translation model of the same repository. */
+    fun candidateSeed(label: String, candidate: DiscoveredCandidate): LocalModelSeed =
+        if (label == "translation") LocalModels.customTranslation(candidate.repoId) else LocalModels.custom(candidate.repoId)
+
+    private fun candidatePurpose(label: String) = if (label == "translation") ModelPurpose.TRANSLATION else ModelPurpose.CHAT
+
+    /** Whether [candidate] is already one of the user's own models for [label]'s purpose, installed. */
+    fun candidateInUse(label: String, candidate: DiscoveredCandidate): Boolean {
+        val seed = candidateSeed(label, candidate)
+        return customSeeds(candidatePurpose(label)).any { it.id == seed.id } && modelStore.isInstalled(seed)
+    }
+
+    /**
+     * Makes a candidate that passed this device's test one of the user's own
+     * models and selects it -- for chat or translation, by the search it came
+     * from. Its tested file moves into place as that model's installation
+     * (see [ai.localstudio.model.install.InstalledVariants.adopt]): nothing is
+     * downloaded again, and what runs is byte for byte what was tested.
+     * Null, and nothing changed, unless the candidate is installed and
+     * FUNCTIONAL by the current check -- never on discovery's word alone.
+     */
+    fun useCandidate(label: String, candidate: DiscoveredCandidate): LocalModelSeed? {
+        if (candidate.verification.tier() != ai.localstudio.model.install.CandidateTier.FUNCTIONAL) return null
+        if (candidateWork.value.isBusy(candidate.repoId)) return null
+        val seed = candidateSeed(label, candidate)
+        // Already moved in earlier: only the selection is left to do.
+        val adopted = if (candidateInUse(label, candidate)) {
+            null
+        } else {
+            modelInstallation.installed.adopt(
+                candidateVariantId(candidate),
+                modelStore.variantId(seed),
+                ai.localstudio.model.ModelId(seed.id),
+            ) ?: return null
+        }
+        addCustomModel(candidate.repoId, candidatePurpose(label))
+        if (label == "translation") {
+            settings.translationModel = seed.id
+        } else {
+            settings.providerId = CloudProviders.LOCAL.id
+            settings.chatModel = seed.id
+        }
+        appLog.record(
+            "MODEL_SWITCH",
+            "${if (label == "translation") "translation" else "chat"}: ${candidate.repoId} -- tested candidate in use as ${seed.id} " +
+                (adopted?.let { m -> "(moved in: ${m.artifacts.sumOf { it.sizeBytes } / 1_000_000} MB, ${candidate.filePath}@${candidate.commit.take(8)})" } ?: "(already installed)"),
+        )
+        return seed
+    }
+
     private fun candidateVariantId(candidate: DiscoveredCandidate) =
         ai.localstudio.model.VariantId("discovered-" + candidate.repoId.replace('/', '_').lowercase() + "-" + candidate.commit.take(12))
 

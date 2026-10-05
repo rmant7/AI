@@ -171,6 +171,42 @@ class InstallerTest {
         assertEquals(emptyList(), installed.all())
     }
 
+    @Test
+    fun `adopting moves an intact install to another variant with the same bytes and a relabelled manifest`() {
+        install(gemmaLike())
+        val from = VariantId("m@legacy")
+        val to = VariantId("custom-org_m-gguf@legacy")
+
+        val adopted = installed.adopt(from, to, ModelId("custom-org_m-gguf"), nowMs = 2_000L)!!
+
+        assertEquals(to, adopted.variantId)
+        assertEquals(ModelId("custom-org_m-gguf"), adopted.modelId)
+        assertFalse(layout.variantDir(from).exists(), "moved, not copied")
+        assertEquals(null, installed.manifest(from))
+        assertEquals(adopted, installed.manifest(to))
+        assertEquals(InstallHealth.Intact, installed.health(adopted))
+        assertEquals(InstallHealth.Intact, installed.verifyHashes(adopted))
+        assertContentEquals(weightsBytes, File(layout.variantDir(to), "model.gguf").readBytes())
+    }
+
+    @Test
+    fun `adopting replaces whatever the target held, and does nothing for a missing or damaged source`() {
+        install(gemmaLike())
+        val to = VariantId("custom@legacy")
+        layout.variantDir(to).mkdirs()
+        File(layout.variantDir(to), "old.gguf").writeText("previous download")
+
+        assertEquals(null, installed.adopt(VariantId("nothing@legacy"), to, ModelId("custom")))
+        assertTrue(File(layout.variantDir(to), "old.gguf").exists(), "a failed adopt changes nothing")
+
+        File(layout.variantDir(VariantId("m@legacy")), "projector.gguf").delete()
+        assertEquals(null, installed.adopt(VariantId("m@legacy"), to, ModelId("custom")), "a damaged install is not adopted")
+
+        install(gemmaLike())
+        installed.adopt(VariantId("m@legacy"), to, ModelId("custom"))!!
+        assertFalse(File(layout.variantDir(to), "old.gguf").exists())
+    }
+
     // --- the Phase 2 catalogue, end to end ---
 
     private fun legacyCatalog() =

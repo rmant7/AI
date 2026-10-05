@@ -86,7 +86,7 @@ class CandidatesActivity : AppCompatActivity() {
                 addHeader(sectionTitle(run))
                 run.candidates.forEach { c ->
                     val card = ItemLocalModelBinding.inflate(layoutInflater, binding.candidatesList, false)
-                    card.root.setOnClickListener { showDetails(c) }
+                    card.root.setOnClickListener { showDetails(run.label, c) }
                     binding.candidatesList.addView(card.root)
                     cards += Triple(run.label, c, card)
                 }
@@ -117,6 +117,7 @@ class CandidatesActivity : AppCompatActivity() {
         val download = work.downloads[name]
         val trial = work.trial?.takeIf { it.repoId == name }
         val queued = name in work.queued
+        val inUse = download == null && container.candidateInUse(label, c)
         val installedBytes = if (download == null) container.candidateInstalledBytes(c) else null
         val partialBytes = if (download == null && installedBytes == null) container.candidatePartialBytes(c) else null
 
@@ -139,6 +140,7 @@ class CandidatesActivity : AppCompatActivity() {
             trial != null -> trial.describe(this)
             queued -> getString(R.string.candidate_queued)
             else -> listOfNotNull(
+                getString(if (label == "translation") R.string.candidate_in_use_translation else R.string.candidate_in_use_chat).takeIf { inUse },
                 partialBytes?.let { getString(R.string.candidate_paused, mb(it), mb(c.sizeBytes)) },
                 result,
                 work.failures[name]?.let { getString(R.string.candidate_download_failed, it) },
@@ -163,6 +165,17 @@ class CandidatesActivity : AppCompatActivity() {
                 primary.text = getString(R.string.candidate_test)
                 primary.isEnabled = false
                 primary.setOnClickListener(null)
+            }
+            inUse -> {
+                primary.text = getString(R.string.candidate_use)
+                primary.setOnClickListener { use(label, c) }
+            }
+            installedBytes != null && verification.tier() == CandidateTier.FUNCTIONAL -> {
+                primary.text = getString(R.string.candidate_use)
+                primary.setOnClickListener { use(label, c) }
+                secondary.visibility = View.VISIBLE
+                secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
+                secondary.setOnClickListener { deleteInstall(c) }
             }
             installedBytes != null -> {
                 primary.text = getString(if (verification == null) R.string.candidate_test else R.string.candidate_retest)
@@ -235,7 +248,7 @@ class CandidatesActivity : AppCompatActivity() {
         },
     )
 
-    private fun showDetails(c: DiscoveredCandidate) {
+    private fun showDetails(label: String, c: DiscoveredCandidate) {
         val dash = "—"
         val details = buildString {
             append(
@@ -262,10 +275,12 @@ class CandidatesActivity : AppCompatActivity() {
             }
             if (c.tags.isNotEmpty()) append("\n\n").append(getString(R.string.candidate_all_tags, c.tags.joinToString(", ")))
         }
+        val canRetest = container.candidateInstalledBytes(c) != null && !container.candidateWork.value.isBusy(c.repoId)
         AlertDialog.Builder(this)
             .setTitle(c.repoId)
             .setMessage(details)
             .setPositiveButton(android.R.string.ok, null)
+            .apply { if (canRetest) setNeutralButton(R.string.candidate_retest) { _, _ -> test(label, c) } }
             .show()
     }
 
@@ -274,6 +289,17 @@ class CandidatesActivity : AppCompatActivity() {
             ModelDownloadService.ensureStarted(this)
             if (!container.downloadCandidate(label, c)) Toast.makeText(this, R.string.candidate_busy, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun use(label: String, c: DiscoveredCandidate) {
+        val seed = container.useCandidate(label, c)
+        val message = when {
+            seed == null -> getString(R.string.candidate_use_failed)
+            label == "translation" -> getString(R.string.models_switched_translation, seed.title)
+            else -> getString(R.string.models_switched_chat, seed.title)
+        }
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        render()
     }
 
     private fun test(label: String, c: DiscoveredCandidate) {
