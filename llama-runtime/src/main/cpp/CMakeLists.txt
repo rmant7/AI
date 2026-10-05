@@ -109,6 +109,12 @@ add_subdirectory(${llamacpp_SOURCE_DIR}/tools/mtmd ${CMAKE_CURRENT_BINARY_DIR}/m
 
 add_library(${LOCALAI_JNI_LIB} SHARED llama_jni.cpp)
 
+# 16 KB memory pages (Android 15+ devices; Google Play rejects a library
+# without it -- IntelliVerse's first real-signing-key upload, which builds this
+# same file). llama/ggml/mtmd are static (BUILD_SHARED_LIBS OFF): this .so is
+# the only shared object here, the only one whose ELF segments need aligning.
+target_link_options(${LOCALAI_JNI_LIB} PRIVATE "-Wl,-z,max-page-size=16384")
+
 target_include_directories(${LOCALAI_JNI_LIB} PRIVATE
     ${llamacpp_SOURCE_DIR}/include
     ${llamacpp_SOURCE_DIR}/ggml/include
