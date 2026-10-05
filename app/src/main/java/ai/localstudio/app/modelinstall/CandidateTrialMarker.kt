@@ -59,6 +59,7 @@ class CandidateTrialMarker(private val file: File) {
                 inferenceOk = false,
                 error = "the app was killed $stage: ${death.reason}" + (death.detail?.let { " -- $it" } ?: ""),
                 verifiedAtEpochMs = death.atEpochMs,
+                checkVersion = DeviceVerification.CURRENT_CHECK,
             )
         }
     }

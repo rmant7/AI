@@ -3054,8 +3054,13 @@ class AppContainer private constructor(private val context: Context) {
         /** Per probe; the first includes the load, which has taken minutes for a large model on this class of device. */
         private const val CANDIDATE_PROBE_TIMEOUT_MS = 10 * 60_000L
 
-        /** Enough for a reasoning model's short thinking block before its one-word answer. */
-        private const val CANDIDATE_MAX_TOKENS = 256
+        /**
+         * Room for a reasoning model to finish its thinking block and answer: a
+         * device run of a 1.5B reasoning model spent all of 256 tokens inside
+         * <think> on "capital of France". A reply still reasoning at the limit
+         * fails the probe (see finalAnswer), it is never credited.
+         */
+        private const val CANDIDATE_MAX_TOKENS = 1024
 
         // Ceiling for a local context even when a document or memory recall
         // IS in play — see effectiveContextTokens(). Room for real context,

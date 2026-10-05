@@ -35,7 +35,18 @@ data class DeviceVerification(
     /** Set on either a load or an inference failure; which one is told apart by [loaded]. */
     val error: String? = null,
     val verifiedAtEpochMs: Long,
-)
+    /**
+     * Which version of the answer check produced [inferenceOk]. A record
+     * from before [CURRENT_CHECK] (absent in older files: 1) is not trusted
+     * for FUNCTIONAL -- the first check also credited a word found inside an
+     * unfinished reasoning draft.
+     */
+    val checkVersion: Int = 1,
+) {
+    companion object {
+        const val CURRENT_CHECK = 2
+    }
+}
 
 /**
  * UNVERIFIED is where every discovered candidate starts and stays until a
@@ -53,8 +64,9 @@ enum class CandidateTier {
 /** The one place a [DeviceVerification] becomes a [CandidateTier] -- see that enum's own doc comment on why this is the only path to anything past UNVERIFIED. */
 fun DeviceVerification?.tier(): CandidateTier = when {
     this == null -> CandidateTier.UNVERIFIED
-    inferenceOk -> CandidateTier.FUNCTIONAL
-    loaded -> CandidateTier.LOADABLE
+    inferenceOk && checkVersion >= DeviceVerification.CURRENT_CHECK -> CandidateTier.FUNCTIONAL
+    // An older check's "answered" still proves it loaded and produced text.
+    inferenceOk || loaded -> CandidateTier.LOADABLE
     else -> CandidateTier.UNVERIFIED
 }
 

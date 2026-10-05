@@ -5,6 +5,7 @@ import ai.localstudio.model.install.tier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -123,5 +124,45 @@ class CandidateTrialTest {
             fail("cancellation must propagate, not become a verification")
         } catch (_: CancellationException) {
         }
+    }
+
+    @Test
+    fun a_reply_cut_off_inside_its_reasoning_is_not_credited_even_if_the_draft_names_the_answer() {
+        // The device run (build #465) that this exists for: all 256 tokens inside <think>, "Paris" only in the draft.
+        val result = run(runtime = answering { listOf("<think> Okay, the capital of France... I think it is Paris, but let me make sure") })
+        assertEquals(CandidateTier.LOADABLE, result.tier())
+        assertTrue(result.error!!, result.error!!.startsWith("no answer to: What is the capital of France?"))
+    }
+
+    @Test
+    fun only_the_answer_after_the_reasoning_is_judged() {
+        val wrongAfterRightDraft = run(runtime = answering { listOf("<think>Paris? No.</think>", "Lyon") })
+        assertEquals(CandidateTier.LOADABLE, wrongAfterRightDraft.tier())
+        assertEquals("Lyon", wrongAfterRightDraft.sampleOutput)
+
+        val reasonedThenRight = run(
+            runtime = answering { prompt -> if ("France" in prompt) listOf("<think>hmm</think>\n\nParis") else listOf("<think>7+5</think>12") },
+        )
+        assertEquals(CandidateTier.FUNCTIONAL, reasonedThenRight.tier())
+        assertEquals("Paris | 12", reasonedThenRight.sampleOutput)
+    }
+
+    @Test
+    fun an_expected_answer_counts_only_as_a_whole_word() {
+        val probe = FunctionalProbe("q", listOf("12"))
+        assertTrue(probe.passes("12"))
+        assertTrue(probe.passes("The answer is 12."))
+        assertFalse(probe.passes("120"))
+        assertFalse(probe.passes("3.12"))
+        assertFalse(probe.passes("12.5"))
+        assertTrue(probe.passes("It is 12, of course"))
+        assertFalse(FunctionalProbe("q", listOf("Paris")).passes("Parisian"))
+    }
+
+    @Test
+    fun the_final_answer_is_what_follows_the_last_reasoning_block() {
+        assertEquals("plain", finalAnswer("plain"))
+        assertEquals(" b", finalAnswer("<think>x</think> a <think>y</think> b"))
+        assertNull(finalAnswer("<think>never closed"))
     }
 }

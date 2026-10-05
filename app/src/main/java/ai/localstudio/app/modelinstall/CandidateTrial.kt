@@ -9,7 +9,12 @@ import kotlin.coroutines.cancellation.CancellationException
  * from what it actually said, never from it merely producing text.
  */
 data class FunctionalProbe(val prompt: String, val expectAnyOf: List<String>) {
-    fun passes(answer: String): Boolean = expectAnyOf.any { answer.contains(it, ignoreCase = true) }
+    /** [answer] is the final answer only (see [finalAnswer]); each expectation must appear as a whole word -- "12" is not in "120". */
+    fun passes(answer: String): Boolean = expectAnyOf.any { expected ->
+        // Not inside a longer word or number: "3.12" and "12.5" do not contain the answer 12; "12." ending a sentence does.
+        Regex("(?<![\\p{L}\\p{N}])(?<!\\p{N}[.,])" + Regex.escape(expected) + "(?![\\p{L}\\p{N}])(?![.,]\\p{N})", RegexOption.IGNORE_CASE)
+            .containsMatchIn(answer)
+    }
 
     val title: String get() = prompt.lineSequence().first()
 
@@ -27,6 +32,22 @@ data class FunctionalProbe(val prompt: String, val expectAnyOf: List<String>) {
     }
 }
 
+/**
+ * The part of a reply that is the model's answer: everything after the last
+ * `</think>`, or the whole reply when it never opened a `<think>` block.
+ * Null when a `<think>` block was opened and never closed -- the model was
+ * still reasoning when the reply ended, so whatever its draft mentions is
+ * not an answer it gave.
+ */
+fun finalAnswer(reply: String): String? {
+    val close = reply.lastIndexOf("</think>")
+    return when {
+        close >= 0 -> reply.substring(close + "</think>".length)
+        reply.contains("<think>") -> null
+        else -> reply
+    }
+}
+
 /** What [CandidateTrial.run] needs from the real runtime: load (once) and answer one prompt. */
 fun interface TrialRuntime {
     /**
@@ -41,8 +62,9 @@ fun interface TrialRuntime {
 /**
  * Runs [FunctionalProbe]s through a [TrialRuntime] and records what was
  * observed -- nothing more. inferenceOk is true only when every probe's
- * answer contains what it was expected to: an answer that is fluent but
- * wrong is LOADABLE, not FUNCTIONAL.
+ * final answer (after any reasoning block) contains what it was expected
+ * to: an answer that is fluent but wrong, or a reply that never got past
+ * its reasoning, is LOADABLE, not FUNCTIONAL.
  */
 class CandidateTrial(
     private val clock: () -> Long = System::currentTimeMillis,
@@ -68,6 +90,7 @@ class CandidateTrial(
             tokensPerSecond = if (intervals > 0 && generatingMs > 0) intervals * 1000.0 / generatingMs else null,
             error = error,
             verifiedAtEpochMs = clock(),
+            checkVersion = DeviceVerification.CURRENT_CHECK,
         )
 
         for (probe in probes) {
@@ -102,10 +125,15 @@ class CandidateTrial(
                 intervals += chunks - 1
                 generatingMs += lastAt - firstAt
             }
-            val text = answer.toString()
-            answers += text
-            if (text.isBlank()) return verdict(inferenceOk = false, error = "empty answer to: ${probe.title}")
-            if (!probe.passes(text)) {
+            val reply = answer.toString()
+            val final = finalAnswer(reply)
+            if (final == null) {
+                answers += reply
+                return verdict(inferenceOk = false, error = "no answer to: ${probe.title} -- still reasoning (<think> not closed) when the reply ended")
+            }
+            answers += final
+            if (final.isBlank()) return verdict(inferenceOk = false, error = "empty answer to: ${probe.title}")
+            if (!probe.passes(final)) {
                 return verdict(inferenceOk = false, error = "wrong answer to: ${probe.title} (expected ${probe.expectAnyOf.joinToString(" or ")})")
             }
         }

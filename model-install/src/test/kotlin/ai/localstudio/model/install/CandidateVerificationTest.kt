@@ -17,13 +17,30 @@ class CandidateVerificationTest {
         assertEquals(CandidateTier.UNVERIFIED, null.tier())
     }
 
-    private fun verification(loaded: Boolean, inferenceOk: Boolean) = DeviceVerification(
+    private fun verification(loaded: Boolean, inferenceOk: Boolean, checkVersion: Int = DeviceVerification.CURRENT_CHECK) = DeviceVerification(
         deviceProfile = "Pixel 10 Pro / API 37 / 16.3 GB / llama.cpp b10448 (i8mm)",
         runtimeId = "llama_cpp",
         loaded = loaded,
         inferenceOk = inferenceOk,
         verifiedAtEpochMs = 1_000L,
+        checkVersion = checkVersion,
     )
+
+    @Test
+    fun an_answer_judged_by_an_older_check_is_not_trusted_as_functional() {
+        assertEquals(CandidateTier.LOADABLE, verification(loaded = true, inferenceOk = true, checkVersion = 1).tier())
+        assertEquals(CandidateTier.LOADABLE, verification(loaded = false, inferenceOk = true, checkVersion = 1).tier())
+    }
+
+    @Test
+    fun a_record_written_before_check_versions_existed_reads_as_the_first_check() {
+        val old = kotlinx.serialization.json.Json.decodeFromString(
+            DeviceVerification.serializer(),
+            """{"deviceProfile":"p","runtimeId":"llama_cpp","loaded":true,"inferenceOk":true,"verifiedAtEpochMs":1}""",
+        )
+        assertEquals(1, old.checkVersion)
+        assertEquals(CandidateTier.LOADABLE, old.tier())
+    }
 
     @Test
     fun a_load_failure_is_unverified_not_loadable() {
