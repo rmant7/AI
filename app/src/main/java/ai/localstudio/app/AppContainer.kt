@@ -842,8 +842,7 @@ class AppContainer private constructor(private val context: Context) {
     fun checkInstalledModel(modelId: String): Boolean = localSeed(modelId)?.let { checkInstalledModel(it) } ?: false
 
     fun checkInstalledModel(seed: LocalModelSeed): Boolean {
-        val artifact = checkIdentity(seed) ?: return false
-        val key = artifact.key
+        val key = checkKey(seed) ?: return false
         fun waiting(w: CandidateWork) = key in w.queued || w.trial?.key == key
         val before = candidateWork.getAndUpdate { if (waiting(it)) it else it.copy(queued = it.queued + key) }
         if (waiting(before)) return false
@@ -851,8 +850,18 @@ class AppContainer private constructor(private val context: Context) {
             TrialSubject(key, seed.id, label = null) files@{
                 val weights = modelStore.fileFor(seed).takeIf { modelStore.isInstalled(seed) && it.isFile } ?: return@files null
                 val projector = modelStore.mmprojFileFor(seed).takeIf { modelStore.hasMmproj(seed) }
-                // The bytes may have changed while it waited (deleted and downloaded again): checked as what is there now.
-                val now = checkIdentity(seed) ?: return@files null
+                // Checked as what is there now: the bytes may have changed while it waited (deleted and downloaded again).
+                val now = pinnedIdentity(seed) ?: run {
+                    // No manifest says what these files are: their contents do, read through once and remembered.
+                    val unknown = listOfNotNull(weights, projector).filter { fileHashes.known(it) == null }
+                    if (unknown.isNotEmpty()) {
+                        val startedAt = System.currentTimeMillis()
+                        appLog.record("CANDIDATE_TEST", "${seed.id}: no recorded source; hashing ${unknown.sumOf { it.length() } / 1_000_000} MB to know which files are checked")
+                        unknown.forEach { fileHashes.hash(it) }
+                        appLog.record("CANDIDATE_TEST", "${seed.id}: hashed in ${(System.currentTimeMillis() - startedAt) / 1000}s")
+                    }
+                    ai.localstudio.model.install.ArtifactId.unpinned(fileHashes.hash(weights), projector?.let { fileHashes.hash(it) })
+                }
                 TrialFiles(
                     weights, projector, now,
                     FunctionalProbe.suitesFor(
@@ -868,39 +877,58 @@ class AppContainer private constructor(private val context: Context) {
         return true
     }
 
-    /**
-     * Which bytes the installed [seed] is, for a check: its install's pinned
-     * id when that covers exactly what loads (weights, and the projector
-     * when one is installed); otherwise -- a legacy download, a projector
-     * added outside the install -- an unpinned id from its files' sizes.
-     */
-    internal fun checkIdentity(seed: LocalModelSeed): ai.localstudio.model.install.ArtifactId? {
-        if (!modelStore.isInstalled(seed)) return null
-        val projector = modelStore.mmprojFileFor(seed).takeIf { modelStore.hasMmproj(seed) }
-        modelStore.installedArtifact(seed)?.takeIf { (it.projectorFile != null) == (projector != null) }?.let { return it }
-        val weights = modelStore.fileFor(seed).takeIf { it.isFile } ?: return null
-        return ai.localstudio.model.install.ArtifactId.unpinned(seed.id, weights.length(), projector?.length())
+    /** sha256 of installed files no manifest describes (see [checkIdentity]). */
+    private val fileHashes = ai.localstudio.model.install.FileHashes(File(context.filesDir, "file_hashes.json"))
+
+    /** [seed]'s install's pinned id, when it covers exactly what loads: the weights, and the projector when one is installed. */
+    private fun pinnedIdentity(seed: LocalModelSeed): ai.localstudio.model.install.ArtifactId? {
+        val projector = modelStore.hasMmproj(seed)
+        return modelStore.installedArtifact(seed)?.takeIf { (it.projectorFile != null) == projector }
     }
 
     /**
-     * Where installed [seed]'s check stands: its last [record] (null when
-     * never checked), what that is compared against [now], and whether a
-     * check of it is [queued] or [running] right now. Null when not installed.
+     * Which bytes the installed [seed] is, for a check: its [pinnedIdentity];
+     * otherwise -- a legacy download, a projector added outside the install
+     * -- an unpinned id from its files' sha256, known once a check hashed
+     * them. Null when not installed, or not hashed as the files are now: no
+     * check is valid for files nobody has identified.
+     */
+    internal fun checkIdentity(seed: LocalModelSeed): ai.localstudio.model.install.ArtifactId? {
+        if (!modelStore.isInstalled(seed)) return null
+        pinnedIdentity(seed)?.let { return it }
+        val weights = modelStore.fileFor(seed).takeIf { it.isFile } ?: return null
+        val main = fileHashes.known(weights) ?: return null
+        val projector = if (modelStore.hasMmproj(seed)) fileHashes.known(modelStore.mmprojFileFor(seed)) ?: return null else null
+        return ai.localstudio.model.install.ArtifactId.unpinned(main, projector)
+    }
+
+    /** What [candidateWork] tracks [seed]'s check under: its pinned id (shared with the candidate it came from), else its model id. */
+    internal fun checkKey(seed: LocalModelSeed): String? {
+        if (!modelStore.isInstalled(seed)) return null
+        return pinnedIdentity(seed)?.key ?: "installed:${seed.id}"
+    }
+
+    /**
+     * Where installed [seed]'s check stands: its last record (null when
+     * never checked), what that is compared against now, and whether a
+     * check of it is queued or running right now. Null when not installed.
      */
     fun installedCheck(seed: LocalModelSeed): InstalledCheck? {
-        val artifact = checkIdentity(seed) ?: return null
+        val key = checkKey(seed) ?: return null
+        val artifact = checkIdentity(seed)
         val work = candidateWork.value
         return InstalledCheck(
-            record = recordedVerification(artifact),
-            now = verificationContext(artifact),
-            queued = artifact.key in work.queued,
-            running = work.trial?.takeIf { it.key == artifact.key },
+            record = artifact?.let { recordedVerification(it) },
+            now = artifact?.let { verificationContext(it) },
+            queued = key in work.queued,
+            running = work.trial?.takeIf { it.key == key },
         )
     }
 
     data class InstalledCheck(
         val record: ai.localstudio.model.install.DeviceVerification?,
-        val now: ai.localstudio.model.install.VerificationContext,
+        /** Null while the files are not identified (see [checkIdentity]): then no record applies. */
+        val now: ai.localstudio.model.install.VerificationContext?,
         val queued: Boolean,
         val running: CandidateTrialState?,
     ) {

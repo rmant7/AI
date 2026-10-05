@@ -32,24 +32,25 @@ data class ArtifactId(
 ) {
     val key: String get() = listOfNotNull(repository, revision, mainFile, projectorFile).joinToString("|")
 
-    /** False for an [unpinned] id: no repository commit stands behind it, only the files' sizes. */
-    val isPinned: Boolean get() = !repository.startsWith(UNPINNED_PREFIX)
+    /** False for an [unpinned] id: no repository commit stands behind it, only its files' contents. */
+    val isPinned: Boolean get() = repository != UNPINNED
 
     companion object {
-        private const val UNPINNED_PREFIX = "local/"
+        private const val UNPINNED = "local"
 
         /**
          * An installed model with no recorded source (a download from before
-         * install manifests): named by the app's model id and its files'
-         * exact sizes. A check of it holds while those files stay as they are;
-         * a different file under the same name is a different id, and its
-         * old check is STALE. Never offered to anyone as a repository.
+         * install manifests), named by its files' contents: the sha256 of the
+         * main file and of the projector when it has one. The same bytes are
+         * the same id whatever the app calls the model; any other bytes are
+         * another id, and an old check of them is STALE. Never offered to
+         * anyone as a repository.
          */
-        fun unpinned(modelId: String, mainBytes: Long, projectorBytes: Long?): ArtifactId = ArtifactId(
-            repository = UNPINNED_PREFIX + modelId,
-            revision = "bytes-$mainBytes" + (projectorBytes?.let { "-$it" } ?: ""),
+        fun unpinned(mainSha256: String, projectorSha256: String?): ArtifactId = ArtifactId(
+            repository = UNPINNED,
+            revision = "sha256-$mainSha256" + (projectorSha256?.let { "-$it" } ?: ""),
             mainFile = "model.gguf",
-            projectorFile = projectorBytes?.let { "projector.gguf" },
+            projectorFile = projectorSha256?.let { "projector.gguf" },
         )
     }
 }

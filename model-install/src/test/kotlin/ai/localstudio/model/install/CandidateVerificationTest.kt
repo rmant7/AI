@@ -72,7 +72,7 @@ class CandidateVerificationTest {
         for ((what, now) in changes) {
             assertEquals(CheckStatus.STALE, v.status(VerifiedCapability.TEXT, now), what)
             assertEquals(false, v.passes(VerifiedCapability.TEXT, now), what)
-            assertEquals(CandidateTier.LOADABLE, v.tier(now), "$what: still proves it loaded")
+            assertEquals(CandidateTier.UNVERIFIED, v.tier(now), "$what: proves nothing here, not even a load")
             assertEquals(true, v.staleReason(now) != null, what)
             assertEquals(CheckStatus.NOT_TESTED, v.status(VerifiedCapability.VISION, now), "$what: never tested stays never tested, not stale")
             assertEquals(CheckStatus.PASS, v.recorded(VerifiedCapability.TEXT), "$what: the record itself is kept")
@@ -83,7 +83,7 @@ class CandidateVerificationTest {
     fun a_pass_recorded_by_the_previous_check_version_is_stale() {
         // Version 2 judged translation with a chat-style prompt the Translation screen never sends.
         val v = verification(loaded = true, inferenceOk = true, checkVersion = 2)
-        assertEquals(CandidateTier.LOADABLE, v.tier(here))
+        assertEquals(CandidateTier.UNVERIFIED, v.tier(here))
         assertEquals(emptyList(), v.passed(here))
         assertEquals(CheckStatus.STALE, v.status(VerifiedCapability.TEXT, here))
     }
@@ -106,8 +106,8 @@ class CandidateVerificationTest {
 
     @Test
     fun an_answer_judged_by_an_older_check_is_not_trusted_as_functional() {
-        assertEquals(CandidateTier.LOADABLE, verification(loaded = true, inferenceOk = true, checkVersion = 1).tier(here))
-        assertEquals(CandidateTier.LOADABLE, verification(loaded = false, inferenceOk = true, checkVersion = 1).tier(here))
+        assertEquals(CandidateTier.UNVERIFIED, verification(loaded = true, inferenceOk = true, checkVersion = 1).tier(here))
+        assertEquals(CandidateTier.UNVERIFIED, verification(loaded = false, inferenceOk = true, checkVersion = 1).tier(here))
     }
 
     @Test
@@ -118,7 +118,7 @@ class CandidateVerificationTest {
         )
         assertEquals(1, old.checkVersion)
         assertEquals(null, old.context)
-        assertEquals(CandidateTier.LOADABLE, old.tier(here))
+        assertEquals(CandidateTier.UNVERIFIED, old.tier(here))
     }
 
     @Test

@@ -73,13 +73,31 @@ class VerificationStoreTest {
     }
 
     @Test
-    fun an_unpinned_id_changes_with_the_files_and_is_not_a_repository() {
-        val a = ArtifactId.unpinned("gemma-4-e4b-it-q4", 4_980_000_000, 990_000_000)
+    fun an_unpinned_id_is_the_files_contents_and_is_not_a_repository() {
+        val a = ArtifactId.unpinned("a".repeat(64), "b".repeat(64))
         assertFalse(a.isPinned)
         assertTrue(gemma.isPinned)
         assertEquals("projector.gguf", a.projectorFile)
-        assertNotEquals(a, ArtifactId.unpinned("gemma-4-e4b-it-q4", 4_980_000_001, 990_000_000))
-        assertNotEquals(a, ArtifactId.unpinned("gemma-4-e4b-it-q4", 4_980_000_000, null))
-        assertNull(ArtifactId.unpinned("x", 1, null).projectorFile)
+        assertEquals(a, ArtifactId.unpinned("a".repeat(64), "b".repeat(64)))
+        assertNotEquals(a, ArtifactId.unpinned("c".repeat(64), "b".repeat(64)))
+        assertNotEquals(a, ArtifactId.unpinned("a".repeat(64), null))
+        assertNull(ArtifactId.unpinned("a".repeat(64), null).projectorFile)
+    }
+
+    @Test
+    fun a_file_hash_is_reused_only_while_the_file_is_unchanged() {
+        val dir = Files.createTempDirectory("hashes").toFile()
+        val model = java.io.File(dir, "model.gguf").apply { writeText("abc") }
+        val hashes = FileHashes(java.io.File(dir, "hashes.json"))
+        assertNull(hashes.known(model))
+        val sha = hashes.hash(model)
+        assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", sha)
+        assertEquals(sha, FileHashes(java.io.File(dir, "hashes.json")).known(model))
+
+        // Same size, other bytes, a later time: unknown until hashed again.
+        model.writeText("abd")
+        model.setLastModified(model.lastModified() + 5_000)
+        assertNull(hashes.known(model))
+        assertNotEquals(sha, hashes.hash(model))
     }
 }

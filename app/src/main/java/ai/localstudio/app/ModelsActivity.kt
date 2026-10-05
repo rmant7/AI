@@ -528,12 +528,12 @@ class ModelsActivity : AppCompatActivity() {
                 if (running.phase == ai.localstudio.app.modelinstall.CandidateTrialState.Phase.LOADING) getString(R.string.model_check_loading)
                 else getString(R.string.model_check_answering, running.probe, running.probes)
             check.queued -> getString(R.string.model_check_queued)
-            record == null -> getString(R.string.model_check_none)
+            record == null || now == null -> getString(R.string.model_check_none)
             else -> VerificationText.summary(this, record, now)
         }
         return Row.CheckLine(
             text = text,
-            buttonLabel = getString(if (record == null) R.string.model_check else R.string.model_check_again),
+            buttonLabel = getString(if (record == null || now == null) R.string.model_check else R.string.model_check_again),
             buttonEnabled = !check.busy,
             onButton = {
                 if (container.checkInstalledModel(seed)) {
@@ -542,7 +542,11 @@ class ModelsActivity : AppCompatActivity() {
                 }
                 render()
             },
-            onDetails = record?.let { r -> { showCheckDetails(seed.title, VerificationText.details(this, r, now)) } },
+            onDetails = if (record != null && now != null) {
+                { showCheckDetails(seed.title, VerificationText.details(this, record, now)) }
+            } else {
+                null
+            },
         )
     }
 

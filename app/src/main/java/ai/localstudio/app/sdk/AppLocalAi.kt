@@ -96,7 +96,7 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
 
     override suspend fun verify(modelId: String): Map<LocalCapability, CheckResult> {
         val seed = container.localSeed(modelId) ?: throw LocalAiException.UnknownModel(modelId)
-        val key = container.checkIdentity(seed)?.key ?: throw LocalAiException.UnknownModel(modelId)
+        val key = container.checkKey(seed) ?: throw LocalAiException.UnknownModel(modelId)
         container.checkInstalledModel(modelId)
         container.candidateWork.first { key !in it.queued && it.trial?.key != key }
         val (record, now) = container.installedCheck(seed) ?: throw LocalAiException.Failed("$modelId is not installed any more")

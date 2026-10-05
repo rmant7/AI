@@ -180,8 +180,9 @@ enum class CandidateTier {
 /** The one place a [DeviceVerification] becomes a [CandidateTier] -- see that enum's own doc comment on why this is the only path to anything past UNVERIFIED. */
 fun DeviceVerification?.tier(current: VerificationContext): CandidateTier = when {
     this == null -> CandidateTier.UNVERIFIED
+    // A record for other bytes, another device, runtime or set of questions proves nothing here -- not even a load.
+    !isValidFor(current) -> CandidateTier.UNVERIFIED
     passed(current).isNotEmpty() -> CandidateTier.FUNCTIONAL
-    // An older check's "answered" still proves it loaded and produced text.
     inferenceOk || loaded -> CandidateTier.LOADABLE
     else -> CandidateTier.UNVERIFIED
 }
