@@ -96,4 +96,19 @@ class CandidateFilterTest {
         assertTrue(CandidateFilter(text = "code").ok("chat:x", coder))
         assertFalse(CandidateFilter(text = "role").ok("chat:qwen", qwen))
     }
+
+    @Test
+    fun a_minimum_context_leaves_out_shorter_ones_and_those_that_do_not_say() {
+        val million = qwen.copy(contextLength = 1_048_576)
+        val long = qwen.copy(contextLength = 262_144)
+        val short = qwen.copy(contextLength = 8_192)
+        val unknown = qwen.copy(contextLength = null)
+        val f = CandidateFilter(minContextTokens = 32_768)
+        assertTrue(f.ok("chat:qwen", long))
+        assertFalse(f.ok("chat:qwen", short))
+        assertFalse(f.ok("chat:qwen", unknown))
+        assertTrue(CandidateFilter().ok("chat:qwen", unknown))
+        assertTrue(CandidateFilter(minContextTokens = 1_048_576).ok("chat:qwen", million))
+        assertFalse(CandidateFilter(minContextTokens = 1_048_576).ok("chat:qwen", long))
+    }
 }

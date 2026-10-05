@@ -535,6 +535,7 @@
     <string name="candidates_filter_purpose">Для: %1$s</string>
     <string name="candidates_filter_size">Размер: %1$s</string>
     <string name="candidates_filter_downloads">Загрузки: %1$s</string>
+    <string name="candidates_filter_context">Контекст: %1$s</string>
     <string name="candidates_filter_status">Статус: %1$s</string>
     <string name="candidates_filter_sort">Порядок: %1$s</string>
     <string name="candidates_filter_reset">Сбросить фильтры</string>

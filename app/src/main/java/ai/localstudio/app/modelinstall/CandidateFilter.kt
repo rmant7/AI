@@ -16,6 +16,8 @@ data class CandidateFilter(
     /** Download size of the whole model (main file plus projector); null = any size. */
     val maxBytes: Long? = null,
     val minDownloads: Long = 0,
+    /** The model's own maximum context, from its GGUF header; a model whose header did not say is left out once this is set. */
+    val minContextTokens: Long = 0,
     val status: Status = Status.ANY,
     val sort: Sort = Sort.SEARCH,
 ) {
@@ -52,6 +54,7 @@ data class CandidateFilter(
         if (tagged != null && tagged !in CandidateFacts.of(candidate.tags).purposes) return false
         if (maxBytes != null && candidate.totalBytes > maxBytes) return false
         if (candidate.downloads < minDownloads) return false
+        if (minContextTokens > 0 && (candidate.contextLength ?: 0L) < minContextTokens) return false
         val statusOk = when (status) {
             Status.ANY -> true
             Status.NOT_TESTED -> !testedNow

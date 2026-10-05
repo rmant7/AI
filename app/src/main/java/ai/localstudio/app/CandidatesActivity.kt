@@ -185,6 +185,8 @@ class CandidatesActivity : AppCompatActivity() {
             SIZE_LIMITS_GB.map { gb -> gb * 1_000_000_000L to "≤ $gb GB" }
         val downloads = listOf(0L to getString(R.string.candidates_filter_any)) +
             DOWNLOAD_MINIMUMS.map { n -> n to "≥ ${compact(n)}" }
+        val contexts = listOf(0L to getString(R.string.candidates_filter_any)) +
+            CONTEXT_MINIMUMS.map { n -> n to "≥ " + if (n >= 1_048_576) "${n / 1_048_576}M" else "${n / 1024}K" }
         val statuses = listOf(
             CandidateFilter.Status.ANY to R.string.candidates_filter_all,
             CandidateFilter.Status.NOT_TESTED to R.string.candidates_filter_not_tested,
@@ -228,6 +230,9 @@ class CandidatesActivity : AppCompatActivity() {
         chip(getString(R.string.candidates_filter_downloads, label(downloads, filter.minDownloads))) {
             choose(getString(R.string.candidates_filter_downloads, ""), downloads, filter.minDownloads) { filter.copy(minDownloads = it) }
         }
+        chip(getString(R.string.candidates_filter_context, label(contexts, filter.minContextTokens))) {
+            choose(getString(R.string.candidates_filter_context, ""), contexts, filter.minContextTokens) { filter.copy(minContextTokens = it) }
+        }
         chip(getString(R.string.candidates_filter_status, label(statuses, filter.status))) {
             choose(getString(R.string.candidates_filter_status, ""), statuses, filter.status) { filter.copy(status = it) }
         }
@@ -252,6 +257,7 @@ class CandidatesActivity : AppCompatActivity() {
             tagged = prefs.getString("tagged", null)?.let { CandidatePurpose.valueOf(it) },
             maxBytes = prefs.getLong("maxBytes", -1L).takeIf { it > 0 },
             minDownloads = prefs.getLong("minDownloads", 0L),
+            minContextTokens = prefs.getLong("minContextTokens", 0L),
             status = CandidateFilter.Status.valueOf(prefs.getString("status", null) ?: CandidateFilter.Status.ANY.name),
             sort = CandidateFilter.Sort.valueOf(prefs.getString("sort", null) ?: CandidateFilter.Sort.SEARCH.name),
         )
@@ -265,6 +271,7 @@ class CandidatesActivity : AppCompatActivity() {
                 .putString("tagged", f.tagged?.name)
                 .putLong("maxBytes", f.maxBytes ?: -1L)
                 .putLong("minDownloads", f.minDownloads)
+                .putLong("minContextTokens", f.minContextTokens)
                 .putString("status", f.status.name)
                 .putString("sort", f.sort.name)
                 .apply()
@@ -625,6 +632,9 @@ class CandidatesActivity : AppCompatActivity() {
         const val SEARCH_DELAY_MS = 300L
         val SIZE_LIMITS_GB = listOf(2L, 4L, 6L, 8L)
         val DOWNLOAD_MINIMUMS = listOf(1_000L, 10_000L, 100_000L)
+
+        /** 4K .. 1M: the range models on the Hub actually declare (some 1M+). */
+        val CONTEXT_MINIMUMS = listOf(4_096L, 8_192L, 16_384L, 32_768L, 65_536L, 131_072L, 262_144L, 524_288L, 1_048_576L)
 
         /** The capabilities a model can be put to use for from here; vision joins once it is checked. */
         val USABLE = listOf(VerifiedCapability.TEXT, VerifiedCapability.TRANSLATION)

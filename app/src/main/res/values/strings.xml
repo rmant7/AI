@@ -539,6 +539,7 @@
     <string name="candidates_filter_purpose">For: %1$s</string>
     <string name="candidates_filter_size">Size: %1$s</string>
     <string name="candidates_filter_downloads">Downloads: %1$s</string>
+    <string name="candidates_filter_context">Context: %1$s</string>
     <string name="candidates_filter_status">Status: %1$s</string>
     <string name="candidates_filter_sort">Sort: %1$s</string>
     <string name="candidates_filter_reset">Reset filters</string>
