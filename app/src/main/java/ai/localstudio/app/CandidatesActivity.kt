@@ -362,7 +362,8 @@ class CandidatesActivity : AppCompatActivity() {
                         secondary.visibility = View.VISIBLE
                         bindAction(secondary, actions[1], usage.getValue(actions[1]), c)
                     }
-                    installedBytes != null -> {
+                    // A model already in use is deleted from its details, with a confirmation -- not by one tap here.
+                    installedBytes != null && usage.values.all { it == CandidateUsage.NONE } -> {
                         secondary.visibility = View.VISIBLE
                         secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
                         secondary.setOnClickListener { deleteInstall(c) }
@@ -568,7 +569,18 @@ class CandidatesActivity : AppCompatActivity() {
             .apply { if (canRetest) setNeutralButton(R.string.candidate_retest) { _, _ -> test(label, c) } }
             .apply {
                 if (installedBytes != null && !busy) {
-                    setNegativeButton(getString(R.string.candidate_delete, (installedBytes / 1_000_000).toInt())) { _, _ -> deleteInstall(c) }
+                    setNegativeButton(getString(R.string.candidate_delete, (installedBytes / 1_000_000).toInt())) { _, _ ->
+                        val inUse = USABLE.any { container.candidateUsage(it, c) != CandidateUsage.NONE }
+                        if (!inUse) {
+                            deleteInstall(c)
+                        } else {
+                            AlertDialog.Builder(this@CandidatesActivity)
+                                .setMessage(getString(R.string.candidate_delete_in_use, c.repoId.substringAfter('/'), (installedBytes / 1_000_000).toInt()))
+                                .setPositiveButton(getString(R.string.candidate_delete, (installedBytes / 1_000_000).toInt())) { _, _ -> deleteInstall(c) }
+                                .setNegativeButton(android.R.string.cancel, null)
+                                .show()
+                        }
+                    }
                 }
             }
             .show()

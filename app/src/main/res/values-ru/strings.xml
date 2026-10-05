@@ -559,6 +559,7 @@
     <string name="candidates_shown">Показано %1$d из %2$d</string>
     <string name="candidate_copy">Копировать</string>
     <string name="candidate_copied">Скопировано — вставьте в чат с ИИ и спросите, подходит ли вам эта модель</string>
+    <string name="candidate_delete_in_use">%1$s уже среди ваших моделей. Удалить её файлы (%2$d МБ)? Она пропадёт из чата и перевода, выбор там вернётся к автоматическому. Результаты проверки сохранятся.</string>
     <string name="candidate_download">Скачать и проверить (%1$d МБ)</string>
     <string name="candidate_vision">зрение (%1$s)</string>
     <string name="candidate_projector">Проектор: %1$s, %2$d МБ, тип %3$s — тот же репозиторий и коммит</string>

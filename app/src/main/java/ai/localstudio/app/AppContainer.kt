@@ -1041,9 +1041,21 @@ class AppContainer private constructor(private val context: Context) {
     private fun candidateManifest(candidate: DiscoveredCandidate): ai.localstudio.model.install.InstallManifest? =
         modelInstallation.installed.manifest(candidateVariantId(candidate))?.takeIf { holdsCandidate(it, candidate) }
 
-    /** Bytes a download left on disk for [candidate]; null when nothing is installed for it. */
+    /**
+     * Bytes [candidate]'s files take on disk: its own install, or -- once
+     * "Use" moved them into one of the user's models -- that model's; null
+     * when nothing is installed for it.
+     */
     fun candidateInstalledBytes(candidate: DiscoveredCandidate): Long? =
         candidateManifest(candidate)?.let { m -> m.artifacts.sumOf { it.unpackedBytes ?: it.sizeBytes } }
+            ?: adoptedSeed(candidate)?.let { modelStore.installedSize(it) }
+
+    /** The user's model [candidate]'s files were moved into by "Use", when they are still exactly its files. */
+    private fun adoptedSeed(candidate: DiscoveredCandidate): LocalModelSeed? {
+        val seed = LocalModels.custom(candidate.repoId)
+        val manifest = modelInstallation.installed.manifest(modelStore.variantId(seed)) ?: return null
+        return seed.takeIf { holdsCandidate(manifest, candidate) }
+    }
 
     /**
      * The candidate's files on disk -- weights, and its projector when it has
@@ -1075,7 +1087,18 @@ class AppContainer private constructor(private val context: Context) {
     fun deleteCandidateInstall(candidate: DiscoveredCandidate): Boolean {
         if (candidateWork.value.isBusy(candidate.identity)) return false
         val hadPartial = candidatePartialBytes(candidate) != null
-        val removed = modelInstallation.installed.uninstall(candidateVariantId(candidate)) || hadPartial
+        var removed = modelInstallation.installed.uninstall(candidateVariantId(candidate)) || hadPartial
+        // Moved into the user's models by "Use": deleting it here removes that model too (chat and
+        // translation), selections first -- nothing may keep pointing at a model that is gone.
+        adoptedSeed(candidate)?.let { seed ->
+            if (settings.chatModelFor(CloudProviders.LOCAL.id) == seed.id) settings.setChatModelFor(CloudProviders.LOCAL.id, "")
+            val translationSeed = LocalModels.customTranslation(candidate.repoId)
+            if (settings.translationModel == seed.id || settings.translationModel == translationSeed.id) settings.translationModel = ""
+            removeCustomModel(candidate.repoId, ModelPurpose.CHAT)
+            removeCustomModel(candidate.repoId, ModelPurpose.TRANSLATION)
+            removeCustomModel(candidate.repoId, null)
+            removed = true
+        }
         appLog.record("CANDIDATE_TEST", "${candidate.repoId}: ${if (removed) "deleted" else "nothing to delete"}")
         return removed
     }

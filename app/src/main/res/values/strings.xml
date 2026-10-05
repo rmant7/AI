@@ -563,6 +563,7 @@
     <string name="candidates_shown">Shown %1$d of %2$d</string>
     <string name="candidate_copy">Copy</string>
     <string name="candidate_copied">Copied — paste it into an AI chat to ask whether this model fits your needs</string>
+    <string name="candidate_delete_in_use">%1$s is one of your models now. Delete its files (%2$d MB)? It is removed from Chat and Translation; whatever was selected there goes back to automatic. Its test results stay.</string>
     <string name="candidate_download">Download &amp; Test (%1$d MB)</string>
     <string name="candidate_vision">vision (%1$s)</string>
     <string name="candidate_projector">Projector: %1$s, %2$d MB, type %3$s — same repository and commit</string>
