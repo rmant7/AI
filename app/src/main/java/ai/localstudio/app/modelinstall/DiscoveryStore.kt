@@ -26,9 +26,23 @@ data class DiscoveredCandidate(
     val createdAt: String? = null,
     /** When a sweep on this phone first found this repository -- kept across sweeps; see [DiscoveryStore.isNew]. */
     val firstSeenAtEpochMs: Long = 0L,
+    /** The vision projector that is part of this model (same repository and commit); null for a text-only model. */
+    val projector: ai.localstudio.model.install.ProjectorFile? = null,
     /** Null until a real device has tried to load and use this exact file -- see [CandidateTier]. */
     val verification: ai.localstudio.model.install.DeviceVerification? = null,
-)
+) {
+    /** The exact bytes a verification is about: repository, commit, file -- and the projector, when there is one. */
+    val identity: String get() = listOfNotNull(repoId, commit, filePath, projector?.file?.path).joinToString("|")
+
+    /** What installing it downloads: the main file plus its projector. */
+    val totalBytes: Long get() = artifact().totalBytes
+
+    /** This candidate as one model: its main file and, when it has one, its projector. */
+    fun artifact(): ai.localstudio.model.install.ModelArtifact = ai.localstudio.model.install.ModelArtifact(
+        main = ai.localstudio.model.install.ModelFile(repoId, commit, filePath, sizeBytes, sha256),
+        projector = projector,
+    )
+}
 
 /** One lineage's part of a sweep, by its label (see [DiscoveryLabels]) -- what [DiscoveryStore] keeps. */
 @Serializable
@@ -102,7 +116,7 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
     fun record(run: DiscoveryRun, nowMs: Long = System.currentTimeMillis()) {
         val current = read()
         val known = current.runs.flatMap { it.candidates }
-            .mapNotNull { c -> c.verification?.let { Triple(c.repoId, c.commit, c.filePath) to it } }
+            .mapNotNull { c -> c.verification?.let { c.identity to it } }
             .toMap()
         // Found before, under any label or commit: keeps the time it was first found (a run stored before this was kept: that run's own time).
         val firstSeen = current.runs.flatMap { r -> r.candidates.map { it.repoId to (it.firstSeenAtEpochMs.takeIf { t -> t > 0 } ?: r.finishedAtEpochMs) } }
@@ -111,7 +125,7 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
         val carried = run.copy(
             candidates = run.candidates.map { c ->
                 c.copy(
-                    verification = c.verification ?: known[Triple(c.repoId, c.commit, c.filePath)],
+                    verification = c.verification ?: known[c.identity],
                     firstSeenAtEpochMs = c.firstSeenAtEpochMs.takeIf { it > 0 } ?: firstSeen[c.repoId] ?: nowMs,
                 )
             },
@@ -180,11 +194,18 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
      * worth, this method does not guess.
      */
     @Synchronized
-    fun recordVerification(label: String, repoId: String, verification: ai.localstudio.model.install.DeviceVerification): Boolean {
+    fun recordVerification(
+        label: String,
+        repoId: String,
+        verification: ai.localstudio.model.install.DeviceVerification,
+        /** When given, the verification lands only on the candidate with this exact [DiscoveredCandidate.identity]: a sweep since may have moved the repository to other bytes. */
+        identity: String? = null,
+    ): Boolean {
         val current = read()
         val run = current.runs.firstOrNull { it.label == label } ?: return false
-        if (run.candidates.none { it.repoId == repoId }) return false
-        val updatedRun = run.copy(candidates = run.candidates.map { if (it.repoId == repoId) it.copy(verification = verification) else it })
+        fun matches(c: DiscoveredCandidate) = c.repoId == repoId && (identity == null || c.identity == identity)
+        if (run.candidates.none(::matches)) return false
+        val updatedRun = run.copy(candidates = run.candidates.map { if (matches(it)) it.copy(verification = verification) else it })
         write(current.copy(runs = current.runs.map { if (it.label == label) updatedRun else it }))
         return true
     }
@@ -203,6 +224,7 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
             downloads = outcome.repo.downloads,
             tags = outcome.repo.tags,
             createdAt = outcome.repo.createdAt,
+            projector = outcome.artifact().projector,
         )
     }
 }

@@ -54,6 +54,18 @@ class GgufProbe(
     fun probe(artifact: ResolvedArtifact, stopWhen: (Map<String, Any>) -> Boolean = ::hasArchitectureAndContext): Result =
         probe(artifact.candidates.first().url, stopWhen)
 
+    /** A projector (mmproj) file's header, judged as one ([ProjectorCompatibility]) rather than as a model. */
+    fun probeProjector(url: String): ProjectorResult = when (val result = probe(url, ProjectorCompatibility::hasVerdictKeys)) {
+        is Result.Unreadable -> ProjectorResult.Unreadable(result.reason)
+        is Result.Probed -> ProjectorResult.Probed(result.metadata, ProjectorCompatibility.of(result.metadata), result.bytesRead)
+    }
+
+    sealed interface ProjectorResult {
+        data class Probed(val metadata: GgufMetadata, val compatibility: ProjectorCompatibility, val bytesRead: Long) : ProjectorResult
+
+        data class Unreadable(val reason: String) : ProjectorResult
+    }
+
     private class BudgetExceeded : IOException()
 
     private class CountingStream(input: InputStream, private val max: Long) : FilterInputStream(input) {

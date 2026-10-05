@@ -194,6 +194,78 @@ class DiscoveryStoreTest {
                 """"filePath":"a.gguf","sizeBytes":1,"architecture":"llama","contextLength":null,"notes":[],"commit":"c","downloads":0}]}]}""",
         )
         assertEquals(emptyList<String>(), store().runs().single().candidates.single().tags)
+        assertNull("stored before projectors: a text-only model", store().runs().single().candidates.single().projector)
+    }
+
+    private fun projector(path: String = "mmproj-F16.gguf", commit: String = "a".repeat(40)) = ai.localstudio.model.install.ProjectorFile(
+        ai.localstudio.model.install.ModelFile("acme/a-GGUF", commit, path, 800_000_000, "d".repeat(64)),
+        "gemma3",
+    )
+
+    @Test
+    fun a_projector_is_stored_as_part_of_its_model_not_as_a_candidate() {
+        val outcome = ai.localstudio.model.install.ModelDiscovery.Outcome.Candidate(
+            repo = ai.localstudio.model.install.RepoSummary(id = "acme/a-GGUF", downloads = 7),
+            commit = "a".repeat(40),
+            file = ai.localstudio.model.install.RepoFile("a-Q4_K_M.gguf", 2_000_000_000, "b".repeat(64)),
+            architecture = "gemma3",
+            contextLength = 4096,
+            notes = emptyList(),
+            projector = ai.localstudio.model.install.ModelDiscovery.Outcome.Projector(
+                ai.localstudio.model.install.RepoFile("mmproj-F16.gguf", 800_000_000, "d".repeat(64)),
+                "gemma3",
+            ),
+        )
+        store().record(DiscoveryRun("chat", 1_000L, 1, listOf(DiscoveryStore.candidateOf(outcome))))
+
+        val reloaded = store().runs().single().candidates.single()
+        assertEquals(projector(), reloaded.projector)
+        assertEquals(2_800_000_000, reloaded.totalBytes)
+        assertEquals("a".repeat(40), reloaded.artifact().projector?.file?.revision)
+        assertTrue(reloaded.artifact().canCheck(ai.localstudio.model.install.VerifiedCapability.VISION))
+    }
+
+    @Test
+    fun the_same_pair_keeps_its_verification_and_a_new_or_different_projector_starts_over() {
+        val store = store()
+        val pair = candidate("acme/a-GGUF").copy(projector = projector())
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(pair)))
+        store.recordVerification("chat", "acme/a-GGUF", verification(), pair.identity)
+
+        store.record(DiscoveryRun("chat", 2_000L, 1, listOf(pair)))
+        assertEquals(verification(), store.runs().single().candidates.single().verification)
+
+        store.record(DiscoveryRun("chat", 3_000L, 1, listOf(candidate("acme/a-GGUF").copy(projector = projector("mmproj-Q8_0.gguf")))))
+        assertNull("another projector: other bytes under test", store.runs().single().candidates.single().verification)
+
+        store.recordVerification("chat", "acme/a-GGUF", verification(), candidate("acme/a-GGUF").identity)
+        assertNull("a result about the text-only file does not land on the pair", store.runs().single().candidates.single().verification)
+    }
+
+    @Test
+    fun a_text_only_verification_does_not_carry_to_the_same_file_found_with_a_projector() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(candidate("acme/a-GGUF"))))
+        store.recordVerification("chat", "acme/a-GGUF", verification())
+
+        store.record(DiscoveryRun("chat", 2_000L, 1, listOf(candidate("acme/a-GGUF").copy(projector = projector()))))
+        assertNull(store.runs().single().candidates.single().verification)
+    }
+
+    @Test
+    fun a_verification_for_files_a_sweep_has_since_replaced_is_not_recorded() {
+        val store = store()
+        val tested = candidate("acme/a-GGUF")
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(tested.copy(commit = "c".repeat(40)))))
+
+        assertFalse(store.recordVerification("chat", "acme/a-GGUF", verification(), tested.identity))
+        assertNull(store.runs().single().candidates.single().verification)
+    }
+
+    @Test
+    fun a_projector_from_another_commit_is_refused() {
+        val failure = runCatching { candidate("acme/a-GGUF").copy(projector = projector(commit = "e".repeat(40))).artifact() }
+        assertTrue(failure.exceptionOrNull() is IllegalArgumentException)
     }
 
     @Test

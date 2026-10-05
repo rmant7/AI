@@ -89,7 +89,10 @@ class ModelDiscoveryDeviceTest {
         assertTrue(query, "filter=gguf" in query && "pipeline_tag=text-generation" in query && "sort=downloads" in query && "limit=15" in query)
         assertTrue((installation.hub as HuggingFaceApiClient).lastSearchShape!!.contains("4 items"))
 
+        // The mmproj is never a model of its own; it is read as qwen's projector and, with no vision keys in its header, left out.
+        assertEquals(null, qwen.projector)
+        assertTrue(qwen.notes.toString(), qwen.notes.any { "mmproj-qwen-F16.gguf" in it && "left out" in it })
         val headerBytes = hub.fileRequests().count()
-        assertEquals("one header read per probed file, the projector never", 2, headerBytes)
+        assertEquals("one header read per probed file: two models and qwen's projector", 3, headerBytes)
     }
 }

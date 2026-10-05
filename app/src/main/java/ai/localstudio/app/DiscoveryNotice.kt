@@ -73,7 +73,7 @@ object DiscoveryNotice {
     private fun describe(activity: AppCompatActivity, label: String, c: DiscoveredCandidate): String {
         val purpose = activity.getString(if (DiscoveryLabels.isTranslation(label)) R.string.notice_for_translation else R.string.notice_for_chat)
         val family = DiscoveryLabels.lineage(label)?.displayName
-        val size = String.format(Locale.ROOT, "%.1f GB", c.sizeBytes / 1e9)
+        val size = String.format(Locale.ROOT, "%.1f GB", c.totalBytes / 1e9)
         return listOfNotNull(
             c.repoId.substringAfter('/'),
             family,

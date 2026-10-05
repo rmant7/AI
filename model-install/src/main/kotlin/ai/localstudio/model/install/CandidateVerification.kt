@@ -3,6 +3,8 @@ package ai.localstudio.model.install
 import ai.localstudio.model.ArtifactRoles
 import ai.localstudio.model.ArtifactSource
 import ai.localstudio.model.ArtifactSpec
+import ai.localstudio.model.Capabilities
+import ai.localstudio.model.GenericFacet
 import ai.localstudio.model.CapabilityFacet
 import ai.localstudio.model.CapabilityId
 import ai.localstudio.model.CatalogStatus
@@ -115,39 +117,62 @@ fun DeviceVerification?.tier(): CandidateTier = when {
  * device run.
  */
 object CandidateModel {
-    fun of(
-        repoId: String,
-        commit: String,
-        filePath: String,
-        sizeBytes: Long,
-        sha256: String?,
-        variantId: String,
-        capability: CapabilityId,
-        capabilityFacet: CapabilityFacet,
-        runtime: RuntimeId,
-        config: Map<String, String> = emptyMap(),
-    ): ModelDefinition = ModelDefinition(
-        id = ModelId("discovered-${sanitize(repoId)}"),
-        family = ModelFamilyId("discovered"),
-        displayName = repoId,
-        status = CatalogStatus.UNVERIFIED,
-        capabilities = mapOf(capability to capabilityFacet),
-        variants = listOf(
-            ModelVariant(
-                id = VariantId(variantId),
-                artifacts = listOf(
-                    ArtifactSpec(
-                        role = ArtifactRoles.WEIGHTS,
-                        fileName = "model.gguf",
-                        sizeBytes = sizeBytes,
-                        sha256 = sha256,
-                        source = ArtifactSource.HuggingFace(repo = repoId, revision = commit, path = filePath),
+    /**
+     * The install-ready definition of a whole [ModelArtifact]: the main file
+     * as WEIGHTS and, when it has one, its projector as PROJECTOR -- two roles
+     * of one model, both pinned to the commit discovery read them at, never
+     * re-resolved. TEXT_GENERATION needs the weights alone; VISION is declared
+     * only with a projector and needs it (the catalog's own way of saying
+     * VISION = MAIN + PROJECTOR). The projector is required, not optional: a
+     * vision candidate is installed and checked as the pair, or not at all.
+     */
+    fun of(artifact: ModelArtifact, variantId: String, runtime: RuntimeId): ModelDefinition {
+        val main = artifact.main
+        val projector = artifact.projector
+        return ModelDefinition(
+            id = ModelId("discovered-${sanitize(main.repo)}"),
+            family = ModelFamilyId("discovered"),
+            displayName = main.repo,
+            status = CatalogStatus.UNVERIFIED,
+            capabilities = buildMap {
+                put(Capabilities.TEXT_GENERATION, GenericFacet())
+                if (projector != null) put(Capabilities.VISION, GenericFacet(setOf(ArtifactRoles.PROJECTOR)))
+            },
+            variants = listOf(
+                ModelVariant(
+                    id = VariantId(variantId),
+                    artifacts = listOfNotNull(
+                        ArtifactSpec(
+                            role = ArtifactRoles.WEIGHTS,
+                            fileName = "model.gguf",
+                            sizeBytes = main.sizeBytes,
+                            sha256 = main.sha256,
+                            source = ArtifactSource.HuggingFace(repo = main.repo, revision = main.revision, path = main.path),
+                        ),
+                        projector?.let {
+                            ArtifactSpec(
+                                role = ArtifactRoles.PROJECTOR,
+                                fileName = PROJECTOR_FILE_NAME,
+                                sizeBytes = it.file.sizeBytes,
+                                sha256 = it.file.sha256,
+                                source = ArtifactSource.HuggingFace(repo = it.file.repo, revision = it.file.revision, path = it.file.path),
+                            )
+                        },
+                    ),
+                    bindings = listOf(
+                        RuntimeBinding(
+                            runtime = runtime,
+                            requiredRoles = setOf(ArtifactRoles.WEIGHTS),
+                            optionalRoles = if (projector != null) setOf(ArtifactRoles.PROJECTOR) else emptySet(),
+                        ),
                     ),
                 ),
-                bindings = listOf(RuntimeBinding(runtime = runtime, requiredRoles = setOf(ArtifactRoles.WEIGHTS), config = config)),
             ),
-        ),
-    )
+        )
+    }
+
+    /** The projector's file name inside an installed variant -- the same one the legacy catalogue's vision models use. */
+    const val PROJECTOR_FILE_NAME = "projector.gguf"
 
     private fun sanitize(repoId: String) = repoId.replace('/', '_').lowercase()
 }

@@ -688,7 +688,7 @@ class AppContainer private constructor(private val context: Context) {
         val name = candidate.repoId
         val cancel = java.util.concurrent.atomic.AtomicBoolean(false)
         val before = candidateWork.getAndUpdate {
-            if (it.isBusy(name)) it else it.copy(downloads = it.downloads + (name to CandidateDownload(0, candidate.sizeBytes)), failures = it.failures - name)
+            if (it.isBusy(name)) it else it.copy(downloads = it.downloads + (name to CandidateDownload(0, candidate.totalBytes)), failures = it.failures - name)
         }
         if (before.isBusy(name)) return false
         candidateDownloadCancels[name] = cancel
@@ -697,7 +697,11 @@ class AppContainer private constructor(private val context: Context) {
             var failure: String? = null
             var installed = false
             try {
-                appLog.record(tag, "$name: downloading ${candidate.filePath}@${candidate.commit.take(8)} (${candidate.sizeBytes / 1_000_000} MB)")
+                appLog.record(
+                    tag,
+                    "$name: downloading ${candidate.filePath}@${candidate.commit.take(8)} (${candidate.sizeBytes / 1_000_000} MB)" +
+                        (candidate.projector?.let { " + projector ${it.file.path} (${it.type}, ${it.file.sizeBytes / 1_000_000} MB)" } ?: ""),
+                )
                 var loggedQuarter = 0
                 var loggedFirst = false
                 val startedAt = System.currentTimeMillis()
@@ -794,7 +798,7 @@ class AppContainer private constructor(private val context: Context) {
                     ai.localstudio.model.install.LlamaCppArchitectures.LLAMA_CPP_TAG,
                     LlamaBridge.loadedLibrary ?: "unavailable",
                 )
-            val running = RunningTrial(label, name, profile, RuntimeKind.LLAMA_CPP.id, System.currentTimeMillis())
+            val running = RunningTrial(label, name, profile, RuntimeKind.LLAMA_CPP.id, System.currentTimeMillis(), identity = candidate.identity)
             candidateTrialMarker.write(running)
             logChatTemplate(name, weights)
             val suites = FunctionalProbe.SUITES
@@ -823,7 +827,7 @@ class AppContainer private constructor(private val context: Context) {
                     )
                 },
             )
-            recordCandidateVerification(label, name, verification)
+            recordCandidateVerification(label, name, verification, candidate.identity)
         } catch (e: kotlinx.coroutines.CancellationException) {
             appLog.record(tag, "$name: test cancelled")
             throw e
@@ -837,7 +841,7 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
-    private fun recordCandidateVerification(label: String, name: String, verification: ai.localstudio.model.install.DeviceVerification) {
+    private fun recordCandidateVerification(label: String, name: String, verification: ai.localstudio.model.install.DeviceVerification, identity: String?) {
         val tag = "CANDIDATE_TEST"
         appLog.record(
             tag,
@@ -848,7 +852,7 @@ class AppContainer private constructor(private val context: Context) {
                 (verification.error?.let { ", $it" } ?: "") +
                 (verification.sampleOutput?.let { " -- said: $it" } ?: ""),
         )
-        if (!discoveryStore.recordVerification(label, name, verification)) {
+        if (!discoveryStore.recordVerification(label, name, verification, identity)) {
             appLog.record(tag, "$name: no longer in the last $label sweep; result logged only")
         }
     }
@@ -865,7 +869,7 @@ class AppContainer private constructor(private val context: Context) {
         if (verdict == null) {
             appLog.record("CANDIDATE_TEST", "${running.repoId}: the previous test did not finish and the app did not crash; nothing recorded")
         } else {
-            recordCandidateVerification(running.label, running.repoId, verdict)
+            recordCandidateVerification(running.label, running.repoId, verdict, running.identity)
         }
     }
 
@@ -965,12 +969,34 @@ class AppContainer private constructor(private val context: Context) {
         }.onFailure { appLog.record(tag, "$name: chat template not read: ${it.javaClass.simpleName}: ${it.message}") }
     }
 
-    private fun candidateVariantId(candidate: DiscoveredCandidate) =
-        ai.localstudio.model.VariantId("discovered-" + candidate.repoId.replace('/', '_').lowercase() + "-" + candidate.commit.take(12))
+    /**
+     * Where [candidate] installs. A text-only model keeps the id it always
+     * had (installs from before projectors existed stay valid); a model with
+     * a projector gets its own, so an earlier text-only install of the same
+     * commit never passes for the pair (the installer would call it
+     * already installed, without the projector).
+     */
+    private fun candidateVariantId(candidate: DiscoveredCandidate): ai.localstudio.model.VariantId {
+        val base = "discovered-" + candidate.repoId.replace('/', '_').lowercase() + "-" + candidate.commit.take(12)
+        return ai.localstudio.model.VariantId(if (candidate.projector == null) base else "$base-mm")
+    }
+
+    /** Whether [manifest] holds exactly [candidate]'s files: its main file and, when it has one, its projector, at its commit. */
+    private fun holdsCandidate(manifest: ai.localstudio.model.install.InstallManifest, candidate: DiscoveredCandidate): Boolean {
+        fun has(role: ai.localstudio.model.ArtifactRole, file: ai.localstudio.model.install.ModelFile) =
+            manifest.artifacts.any { it.role == role && it.source.commit == file.revision && it.source.path == file.path }
+        val artifact = candidate.artifact()
+        return has(ai.localstudio.model.ArtifactRoles.WEIGHTS, artifact.main) &&
+            (artifact.projector?.let { has(ai.localstudio.model.ArtifactRoles.PROJECTOR, it.file) } ?: true)
+    }
+
+    /** [candidate]'s own install, when it holds exactly its files. */
+    private fun candidateManifest(candidate: DiscoveredCandidate): ai.localstudio.model.install.InstallManifest? =
+        modelInstallation.installed.manifest(candidateVariantId(candidate))?.takeIf { holdsCandidate(it, candidate) }
 
     /** Bytes a download left on disk for [candidate]; null when nothing is installed for it. */
     fun candidateInstalledBytes(candidate: DiscoveredCandidate): Long? =
-        modelInstallation.installed.manifest(candidateVariantId(candidate))?.let { m -> m.artifacts.sumOf { it.unpackedBytes ?: it.sizeBytes } }
+        candidateManifest(candidate)?.let { m -> m.artifacts.sumOf { it.unpackedBytes ?: it.sizeBytes } }
 
     /**
      * The candidate's weights on disk: its own install, or -- once "Use" moved
@@ -979,13 +1005,8 @@ class AppContainer private constructor(private val context: Context) {
      */
     private fun candidateWeights(candidate: DiscoveredCandidate): File? {
         val installed = modelInstallation.installed
-        val own = installed.manifest(candidateVariantId(candidate))
-        val manifest = own ?: installed.manifest(modelStore.variantId(LocalModels.custom(candidate.repoId)))
-            ?.takeIf { m ->
-                m.artifacts.any {
-                    it.role == ai.localstudio.model.ArtifactRoles.WEIGHTS && it.source.commit == candidate.commit && it.source.path == candidate.filePath
-                }
-            }
+        val manifest = candidateManifest(candidate)
+            ?: installed.manifest(modelStore.variantId(LocalModels.custom(candidate.repoId)))?.takeIf { holdsCandidate(it, candidate) }
             ?: return null
         val artifact = manifest.artifacts.firstOrNull { it.role == ai.localstudio.model.ArtifactRoles.WEIGHTS } ?: return null
         return installed.pathOf(manifest, artifact).takeIf { it.isFile }
@@ -1013,17 +1034,8 @@ class AppContainer private constructor(private val context: Context) {
         cancel: java.util.concurrent.atomic.AtomicBoolean,
         progress: (done: Long, total: Long) -> Unit,
     ): Result<Unit> {
-        val model = CandidateModel.of(
-            repoId = candidate.repoId,
-            commit = candidate.commit,
-            filePath = candidate.filePath,
-            sizeBytes = candidate.sizeBytes,
-            sha256 = candidate.sha256,
-            variantId = candidateVariantId(candidate).id,
-            capability = ai.localstudio.model.Capabilities.TEXT_GENERATION,
-            capabilityFacet = ai.localstudio.model.GenericFacet(),
-            runtime = ai.localstudio.model.Runtimes.LLAMA_CPP,
-        )
+        val artifact = candidate.artifact()
+        val model = CandidateModel.of(artifact, candidateVariantId(candidate).id, ai.localstudio.model.Runtimes.LLAMA_CPP)
         var lastReportedMb = -1L
         val result = modelInstallation.installer.install(
             CANDIDATE_CATALOG_ID,
@@ -1033,17 +1045,19 @@ class AppContainer private constructor(private val context: Context) {
             modelInstallation::freeBytes,
             cancel = { cancel.get() },
         ) { p ->
-            val mb = p.transfer.bytesDone / 1_000_000
+            // One bar for the whole model: the projector's bytes count after the main file's.
+            val done = p.transfer.bytesDone + if (p.artifact == ai.localstudio.model.ArtifactRoles.PROJECTOR) artifact.main.sizeBytes else 0L
+            val mb = done / 1_000_000
             if (mb / 10 != lastReportedMb / 10) {
                 lastReportedMb = mb
-                progress(p.transfer.bytesDone, p.transfer.bytesTotal ?: candidate.sizeBytes)
+                progress(done, artifact.totalBytes)
             }
         }
         val tag = "CANDIDATE_TEST"
         val name = candidate.repoId
         val failure = when (result) {
             is InstallResult.Installed -> {
-                result.manifest.artifacts.forEach { appLog.record(tag, "$name: installed (${it.sizeBytes / 1_000_000} MB, ${it.integrity})") }
+                result.manifest.artifacts.forEach { appLog.record(tag, "$name: installed ${it.role.id} (${it.sizeBytes / 1_000_000} MB, ${it.integrity})") }
                 null
             }
             is InstallResult.AlreadyInstalled -> null

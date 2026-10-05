@@ -92,4 +92,72 @@ class ModelDiscoveryTest {
         assertEquals(report.outcomes.map { it.repo.id }.toSet(), seenBeforeReturn.toSet())
         assertEquals(2, seenBeforeReturn.size)
     }
+
+    private fun mmproj(type: String?, hasVision: Boolean = true, payload: Int = 1_000) =
+        GgufBytes().string("general.architecture", "clip").bool("clip.has_vision_encoder", hasVision)
+            .apply { if (type != null) string("clip.projector_type", type) }.bytes(payload)
+
+    @Test
+    fun a_vision_repository_is_one_candidate_whose_projector_is_part_of_it_at_the_same_commit() {
+        publish(
+            "acme/see-GGUF", COMMIT_A, 500,
+            "see-Q4_K_M.gguf" to gguf("gemma3"),
+            "mmproj-see-BF16.gguf" to mmproj("gemma3"),
+            "mmproj-see-F16.gguf" to mmproj("gemma3"),
+            "mmproj-see-Q8_0.gguf" to mmproj("gemma3"),
+        )
+        val report = discovery.discover(ModelSearchQuery(), quants, maxModelBytes = 100_000)
+
+        val candidate = report.candidates.single()
+        assertEquals("see-Q4_K_M.gguf", candidate.file.name, "a projector is never the model")
+        assertEquals("mmproj-see-F16.gguf", candidate.projector!!.file.name, "F16 first -- and not BF16, which merely contains f16")
+        assertEquals("gemma3", candidate.projector!!.type)
+        val artifact = candidate.artifact()
+        assertEquals(artifact.main.revision, artifact.projector!!.file.revision)
+        assertEquals(COMMIT_A, artifact.projector!!.file.revision)
+        assertTrue(artifact.canCheck(VerifiedCapability.VISION))
+        assertEquals(1, report.outcomes.size, "the projector is not an outcome of its own")
+    }
+
+    @Test
+    fun a_projector_that_cannot_be_used_leaves_a_text_model_with_the_reason() {
+        publish("acme/audio-GGUF", COMMIT_A, 3, "audio-Q4_K_M.gguf" to gguf("qwen3"), "mmproj-audio-F16.gguf" to mmproj("qwen2a", hasVision = false))
+        publish("acme/future-GGUF", COMMIT_A, 2, "future-Q4_K_M.gguf" to gguf("qwen3"), "mmproj-future-F16.gguf" to mmproj("hologram9"))
+        publish("acme/typeless-GGUF", COMMIT_A, 1, "typeless-Q4_K_M.gguf" to gguf("qwen3"), "mmproj-typeless-F16.gguf" to mmproj(null))
+        val byId = discovery.discover(ModelSearchQuery(), quants, maxModelBytes = 100_000).candidates.associateBy { it.repo.id }
+
+        assertEquals(3, byId.size, "each is still a text candidate")
+        assertTrue(byId.values.all { it.projector == null && !it.artifact().canCheck(VerifiedCapability.VISION) })
+        assertTrue(byId.getValue("acme/audio-GGUF").notes.any { it.contains("no vision encoder") })
+        assertTrue(byId.getValue("acme/future-GGUF").notes.any { it.contains("cannot load projector type \"hologram9\"") })
+        assertTrue(byId.getValue("acme/typeless-GGUF").notes.any { it.contains("no projector type") })
+    }
+
+    @Test
+    fun a_projector_that_would_not_fit_with_its_model_is_left_out_and_never_downloaded() {
+        publish("acme/tight-GGUF", COMMIT_A, 1, "tight-Q4_K_M.gguf" to gguf("gemma3", payload = 60_000), "mmproj-tight-F16.gguf" to mmproj("gemma3", payload = 60_000))
+        val candidate = discovery.discover(ModelSearchQuery(), quants, maxModelBytes = 100_000).candidates.single()
+        assertEquals(null, candidate.projector)
+        assertTrue(candidate.notes.any { it.startsWith("projector mmproj-tight-F16.gguf left out: with it the model needs") })
+        assertTrue(transport.opens.none { it.first.contains("mmproj") }, "not even its header is read")
+    }
+
+    @Test
+    fun a_text_only_repository_is_examined_exactly_as_before() {
+        publish("acme/plain-GGUF", COMMIT_A, 1, "plain-Q4_K_M.gguf" to gguf("llama"))
+        val candidate = discovery.discover(ModelSearchQuery(), quants, maxModelBytes = 100_000).candidates.single()
+        assertEquals(null, candidate.projector)
+        assertTrue(candidate.notes.none { it.startsWith("projector") })
+        assertEquals(1, transport.opens.size)
+    }
+
+    @Test
+    fun a_projector_in_the_same_quantization_and_smaller_is_still_never_picked_as_the_model() {
+        // Listed first: FileSelection takes the first file in listing order that matches the quantization.
+        publish("acme/same-GGUF", COMMIT_A, 1, "mmproj-same-Q4_0.gguf" to mmproj("gemma3", payload = 100), "same-Q4_0.gguf" to gguf("gemma3", payload = 20_000))
+        val candidate = discovery.discover(ModelSearchQuery(), quants, maxModelBytes = 100_000).candidates.single()
+        assertEquals("same-Q4_0.gguf", candidate.file.name)
+        assertEquals("mmproj-same-Q4_0.gguf", candidate.projector!!.file.name)
+    }
 }
+

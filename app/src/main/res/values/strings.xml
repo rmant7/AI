@@ -533,6 +533,8 @@
     <string name="candidate_use_failed">Not switched: only a model that passed the test on this phone and is downloaded can be used</string>
     <string name="candidate_test">Test</string>
     <string name="candidate_download">Download &amp; Test (%1$d MB)</string>
+    <string name="candidate_vision">vision (%1$s)</string>
+    <string name="candidate_projector">Projector: %1$s, %2$d MB, type %3$s — same repository and commit</string>
     <string name="candidate_paused">Paused: %1$d of %2$d MB downloaded</string>
     <string name="candidate_downloading">Downloading %1$d of %2$d MB</string>
     <string name="candidate_queued">Waiting to be tested — one model is tested at a time</string>

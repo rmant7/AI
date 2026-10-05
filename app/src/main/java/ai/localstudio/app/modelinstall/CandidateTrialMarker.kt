@@ -20,6 +20,8 @@ data class RunningTrial(
     val startedAtEpochMs: Long,
     /** Whether the runtime had reported the weights loaded before the process ended. */
     val loaded: Boolean = false,
+    /** The exact files under test ([DiscoveredCandidate.identity]); null in a marker written before it was kept. */
+    val identity: String? = null,
 )
 
 /** Why the previous process ended, as the system reported it -- only the exits worth attributing. */

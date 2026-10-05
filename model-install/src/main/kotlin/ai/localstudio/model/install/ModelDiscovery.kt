@@ -60,7 +60,17 @@ class ModelDiscovery(
             val architecture: String,
             val contextLength: Long?,
             val notes: List<String>,
-        ) : Outcome
+            /** The vision projector shipped with [file] in the same repository and commit, header-checked; null for a text-only model. */
+            val projector: Projector? = null,
+        ) : Outcome {
+            /** The candidate as one model: main file + its projector, both pinned to [commit]. */
+            fun artifact(): ModelArtifact = ModelArtifact(
+                main = ModelFile(repo.id, commit, file.path, file.sizeBytes, file.lfsSha256),
+                projector = projector?.let { ProjectorFile(ModelFile(repo.id, commit, it.file.path, it.file.sizeBytes, it.file.lfsSha256), it.type) },
+            )
+        }
+
+        data class Projector(val file: RepoFile, val type: String)
 
         data class Dropped(override val repo: RepoSummary, val reason: String) : Outcome
     }
@@ -118,8 +128,8 @@ class ModelDiscovery(
         } catch (e: SourceException) {
             return Outcome.Dropped(repo, "file list unavailable: ${e.message}")
         }
-        // A vision projector is a GGUF too, and the smallest one in its repository.
-        val weights = files.filterNot { it.name.contains("mmproj", ignoreCase = true) }
+        // A vision projector is a GGUF too, and the smallest one in its repository: never the model itself.
+        val weights = files.filterNot(::isProjector)
         val file = FileSelection.select(FileSelector.ByQuantization(quantPriority, ".gguf"), weights)
             ?: return Outcome.Dropped(repo, "no single-file GGUF")
         if (file.sizeBytes > maxModelBytes) {
@@ -130,12 +140,53 @@ class ModelDiscovery(
             is GgufProbe.Result.Unreadable -> Outcome.Dropped(repo, "${file.name}: header unreadable (${result.reason})")
             is GgufProbe.Result.Probed -> when (val verdict = result.compatibility) {
                 is GgufCompatibility.NotLoadable -> Outcome.Dropped(repo, "${file.name}: ${verdict.reason}")
-                is GgufCompatibility.Loadable -> Outcome.Candidate(repo, commit, file, verdict.architecture, verdict.contextLength, verdict.notes)
+                is GgufCompatibility.Loadable -> {
+                    val (projector, projectorNote) = projectorFor(repo, commit, files, file, maxModelBytes)
+                    Outcome.Candidate(repo, commit, file, verdict.architecture, verdict.contextLength, verdict.notes + listOfNotNull(projectorNote), projector)
+                }
+            }
+        }
+    }
+
+    /**
+     * The projector that ships with [main]: an mmproj GGUF from the same
+     * listing -- the same repository at the same commit -- preferring F16,
+     * then BF16, Q8_0, F32 (the precisions publishers ship them in), judged
+     * by its own header ([ProjectorCompatibility]) and kept only when model
+     * and projector fit this device together. A projector that is not
+     * usable never costs the candidate: it stays a text model, with the
+     * reason as a note. Several mmproj files for different models in one
+     * repository are not told apart here; the device check of the pair is
+     * what proves a projector fits its model.
+     */
+    private fun projectorFor(repo: RepoSummary, commit: String, files: List<RepoFile>, main: RepoFile, maxModelBytes: Long): Pair<Outcome.Projector?, String?> {
+        val projectors = files.filter { isProjector(it) && it.name.endsWith(".gguf", ignoreCase = true) }
+        if (projectors.isEmpty()) return null to null
+        val chosen = projectors.minWith(
+            compareBy<RepoFile> { file -> PROJECTOR_PRECISIONS.indexOfFirst { it.containsMatchIn(file.name) }.let { if (it < 0) Int.MAX_VALUE else it } }
+                .thenBy { it.sizeBytes },
+        )
+        if (main.sizeBytes + chosen.sizeBytes > maxModelBytes) {
+            return null to "projector ${chosen.name} left out: with it the model needs ${(main.sizeBytes + chosen.sizeBytes) / MB} MB, more than this device can hold (${maxModelBytes / MB} MB)"
+        }
+        return when (val result = probe.probeProjector(ArtifactResolver.resolveUrl(repo.id, commit, chosen.path))) {
+            is GgufProbe.ProjectorResult.Unreadable -> null to "projector ${chosen.name} left out: header unreadable (${result.reason})"
+            is GgufProbe.ProjectorResult.Probed -> when (val verdict = result.compatibility) {
+                is ProjectorCompatibility.NotUsable -> null to "projector ${chosen.name} left out: ${verdict.reason}"
+                is ProjectorCompatibility.Vision -> Outcome.Projector(chosen, verdict.projectorType) to null
             }
         }
     }
 
     private companion object {
         const val MB = 1024L * 1024
+
+        /** Order of preference among a repository's projector files. */
+        val PROJECTOR_PRECISIONS = listOf("f16", "bf16", "q8_0", "f32").map {
+            // A whole token: "f16" must not match inside "bf16".
+            Regex("(?<![a-z0-9])" + Regex.escape(it) + "(?![a-z0-9])", RegexOption.IGNORE_CASE)
+        }
+
+        fun isProjector(file: RepoFile) = file.name.contains("mmproj", ignoreCase = true)
     }
 }

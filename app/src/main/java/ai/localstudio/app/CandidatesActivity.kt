@@ -168,13 +168,13 @@ class CandidatesActivity : AppCompatActivity() {
                         CandidateUsage.NONE -> null
                     }
                 }.toTypedArray(),
-                partialBytes?.let { getString(R.string.candidate_paused, mb(it), mb(c.sizeBytes)) },
+                partialBytes?.let { getString(R.string.candidate_paused, mb(it), mb(c.totalBytes)) },
                 checksSummary(verification),
                 work.failures[name]?.let { getString(R.string.candidate_download_failed, it) },
             ).joinToString("\n")
         }
 
-        val percent = download?.percent ?: partialBytes?.let { (it * 100 / c.sizeBytes.coerceAtLeast(1)).toInt().coerceIn(0, 100) }
+        val percent = download?.percent ?: partialBytes?.let { (it * 100 / c.totalBytes.coerceAtLeast(1)).toInt().coerceIn(0, 100) }
         card.localProgress.visibility = if (download != null || trial != null || partialBytes != null) View.VISIBLE else View.GONE
         card.localProgress.isIndeterminate = percent == null
         if (percent != null) card.localProgress.progress = percent
@@ -224,7 +224,7 @@ class CandidatesActivity : AppCompatActivity() {
                 secondary.setOnClickListener { deleteInstall(c) }
             }
             else -> {
-                primary.text = getString(R.string.candidate_download, mb(c.sizeBytes))
+                primary.text = getString(R.string.candidate_download, mb(c.totalBytes))
                 primary.setOnClickListener { download(label, c) }
             }
         }
@@ -272,8 +272,9 @@ class CandidatesActivity : AppCompatActivity() {
 
     private fun subtitle(c: DiscoveredCandidate, facts: CandidateFacts): String = buildString {
         append(c.repoId.substringBefore('/'))
-        append(" · ").append(c.sizeBytes / 1_000_000).append(" MB")
+        append(" · ").append(c.totalBytes / 1_000_000).append(" MB")
         append(" · ").append(c.architecture)
+        c.projector?.let { append(" · ").append(getString(R.string.candidate_vision, it.type)) }
         c.contextLength?.let { append(" · ").append(getString(R.string.candidate_context, it.toString())) }
         append(" · ").append(getString(R.string.candidate_downloads, compact(c.downloads)))
         c.createdAt?.take(10)?.let { append(" · ").append(getString(R.string.candidate_created, it)) }
@@ -331,6 +332,7 @@ class CandidatesActivity : AppCompatActivity() {
                     c.contextLength?.toString() ?: dash, c.commit.take(12), tierLabel(c.verification.tier()),
                 ),
             )
+            c.projector?.let { p -> append("\n").append(getString(R.string.candidate_projector, p.file.path, (p.file.sizeBytes / 1_000_000).toInt(), p.type)) }
             c.notes.forEach { append("\n• ").append(it) }
             c.verification?.let { v ->
                 append("\n\n")
