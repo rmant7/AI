@@ -1060,6 +1060,23 @@ class AppContainer private constructor(private val context: Context) {
     ): Result<Unit> {
         val artifact = candidate.artifact()
         val model = CandidateModel.of(artifact, candidateVariantId(candidate).id, ai.localstudio.model.Runtimes.LLAMA_CPP)
+        // Bytes already on this phone are never fetched again: the same model's earlier install (its
+        // text-only version, before its projector was found) hands its file over; any other install
+        // with the identical file (a model in use) keeps it and lends a local copy.
+        val reused = ai.localstudio.model.install.InstalledFileReuse.seed(
+            modelInstallation.layout,
+            model.variants.single(),
+            mayMove = { manifest, _ ->
+                manifest.variantId.id.startsWith("discovered-") &&
+                    manifest.artifactId()?.let { it.repository == candidate.repoId && it.revision == candidate.commit && it.mainFile == candidate.filePath } == true
+            },
+        )
+        reused.forEach {
+            appLog.record(
+                "CANDIDATE_TEST",
+                "${candidate.repoId}: ${it.role.id} not downloaded again -- ${if (it.moved) "moved" else "copied"} from ${it.fromVariant.id} (${it.bytes / 1_000_000} MB)",
+            )
+        }
         var lastReportedMb = -1L
         val result = modelInstallation.installer.install(
             CANDIDATE_CATALOG_ID,
