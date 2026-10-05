@@ -277,17 +277,15 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_AUTO_DOWNLOAD, value).apply()
 
     /**
-     * Local model weights mapped from their file (the default) or read into
-     * the app's own memory. Mapped pages are counted in the process's
-     * resident set while the kernel may drop and re-read them, and with
-     * llama.cpp's CPU repacking the same weights also exist once more as a
-     * repacked copy -- a real measurement (Qwen2.5-VL-7B, #485): +8.2 GB
-     * peak = 3.9 GB anonymous + 4.2 GB file pages for a 4.7 GB file. Off is
-     * an experiment: every weight in the app's own memory, counted once.
+     * How local model weights get into memory -- see
+     * [ai.localstudio.core.runtime.WeightsLoading]: AUTO (default) decides per
+     * model from its own measurement; the other two force one way for every
+     * model (diagnostics).
      */
-    var mapModelWeights: Boolean
-        get() = prefs.getBoolean(KEY_MAP_MODEL_WEIGHTS, true)
-        set(value) = prefs.edit().putBoolean(KEY_MAP_MODEL_WEIGHTS, value).apply()
+    var weightsLoading: ai.localstudio.core.runtime.WeightsLoading
+        get() = runCatching { ai.localstudio.core.runtime.WeightsLoading.valueOf(prefs.getString(KEY_WEIGHTS_LOADING, null).orEmpty()) }
+            .getOrDefault(ai.localstudio.core.runtime.WeightsLoading.AUTO)
+        set(value) = prefs.edit().putString(KEY_WEIGHTS_LOADING, value.name).apply()
 
     var memoryEnabled: Boolean
         get() = prefs.getBoolean(KEY_MEMORY, true)
@@ -416,7 +414,8 @@ class Settings(context: Context) {
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_DOWNLOAD_POLICY = "downloadPolicy"
         const val KEY_AUTO_DOWNLOAD = "autoDownloadEnabled"
-        const val KEY_MAP_MODEL_WEIGHTS = "mapModelWeights"
+        // Replaces the #488 experiment's "mapModelWeights" switch, which is no longer read.
+        const val KEY_WEIGHTS_LOADING = "weightsLoading"
         const val KEY_TEMPERATURE = "temperature"
         const val KEY_TOP_P = "topP"
         const val KEY_TOP_K = "topK"

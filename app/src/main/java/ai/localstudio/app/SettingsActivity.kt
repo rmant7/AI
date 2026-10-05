@@ -183,8 +183,20 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        binding.mapWeightsCheck.isChecked = settings.mapModelWeights
-        binding.mapWeightsCheck.setOnCheckedChangeListener { _, checked -> settings.mapModelWeights = checked }
+        binding.weightsLoadingGroup.check(
+            when (settings.weightsLoading) {
+                ai.localstudio.core.runtime.WeightsLoading.AUTO -> R.id.weightsLoadingAuto
+                ai.localstudio.core.runtime.WeightsLoading.MAPPED -> R.id.weightsLoadingMapped
+                ai.localstudio.core.runtime.WeightsLoading.IN_MEMORY -> R.id.weightsLoadingInMemory
+            },
+        )
+        binding.weightsLoadingGroup.setOnCheckedChangeListener { _, id ->
+            settings.weightsLoading = when (id) {
+                R.id.weightsLoadingMapped -> ai.localstudio.core.runtime.WeightsLoading.MAPPED
+                R.id.weightsLoadingInMemory -> ai.localstudio.core.runtime.WeightsLoading.IN_MEMORY
+                else -> ai.localstudio.core.runtime.WeightsLoading.AUTO
+            }
+        }
         binding.autoDownloadCheck.isChecked = settings.autoDownloadEnabled
         binding.autoDownloadCheck.setOnCheckedChangeListener { _, checked -> settings.autoDownloadEnabled = checked }
     }

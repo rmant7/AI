@@ -232,8 +232,10 @@ class LlamaCppRuntime(
      * a caller with no manager): the live free-RAM reading decides alone.
      */
     private val memory: ModelMemory? = null,
-    /** Read at every load: map the weights from their file (default) or read them into memory -- see Settings.mapModelWeights. */
-    private val mapWeights: () -> Boolean = { true },
+    /** Decided at every load, per model file: map its weights or read them into memory -- see [ai.localstudio.core.runtime.WeightsLoadPolicy]. */
+    private val weightsLoading: (File) -> ai.localstudio.core.runtime.WeightsLoadDecision = {
+        ai.localstudio.core.runtime.WeightsLoadDecision(true, "mapped (default)")
+    },
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
@@ -308,10 +310,11 @@ class LlamaCppRuntime(
         // predicts is otherwise invisible here until someone asks "was
         // something else holding memory at the time" and has no log line to
         // check.
-        val mapped = mapWeights()
+        val weights = weightsLoading(file)
+        val mapped = weights.mapped
         log(
             "LOCAL_LOAD",
-            "${file.name}: starting (ctx=$contextTokens, threads=$threads, weights ${if (mapped) "mapped" else "read into memory"}, " +
+            "${file.name}: starting (ctx=$contextTokens, threads=$threads, weights ${if (mapped) "mapped" else "read into memory"} -- ${weights.reason}, " +
                 "free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)",
         )
 

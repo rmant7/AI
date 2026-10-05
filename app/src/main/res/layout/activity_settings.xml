@@ -307,18 +307,43 @@
 
         </RadioGroup>
 
-        <CheckBox
-            android:id="@+id/mapWeightsCheck"
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/settings_map_weights" />
+            android:paddingTop="12dp"
+            android:text="@string/settings_weights_loading"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/weightsLoadingGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <RadioButton
+                android:id="@+id/weightsLoadingAuto"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_weights_loading_auto" />
+
+            <RadioButton
+                android:id="@+id/weightsLoadingMapped"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_weights_loading_mapped" />
+
+            <RadioButton
+                android:id="@+id/weightsLoadingInMemory"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_weights_loading_in_memory" />
+
+        </RadioGroup>
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="2dp"
-            android:text="@string/settings_map_weights_hint"
+            android:text="@string/settings_weights_loading_hint"
             android:textSize="12sp" />
 
         <CheckBox

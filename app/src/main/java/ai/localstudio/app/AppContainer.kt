@@ -188,7 +188,11 @@ class AppContainer private constructor(private val context: Context) {
      * only the outer gate deciding whether to attempt the load at all.
      */
     /** Real per-model RAM costs measured on this device — see [RamMeasuringRuntime]. */
-    private val measuredRam = MeasuredRamStore(context, weightsMapped = { settings.mapModelWeights })
+    private val measuredRam: MeasuredRamStore = MeasuredRamStore(context, weightsMapped = { path -> weightsLoadDecision(File(path)).mapped })
+
+    /** How [file]'s weights load: the setting, and for AUTO this file's own measured profile. */
+    private fun weightsLoadDecision(file: File): ai.localstudio.core.runtime.WeightsLoadDecision =
+        ai.localstudio.core.runtime.WeightsLoadPolicy.decide(settings.weightsLoading, measuredRam.mappedAnonymousBytes(file.path), file.length())
 
     private val sharedRuntimeManager = RuntimeManager(
         budgetBytes = { device.liveRamBytes },
@@ -1151,7 +1155,7 @@ class AppContainer private constructor(private val context: Context) {
                 availableRamBytes = { currentAvailableRamBytes(context) },
                 memoryDiagnostics = { currentMemoryDiagnostics(context) },
                 memory = sharedRuntimeManager,
-                mapWeights = { settings.mapModelWeights },
+                weightsLoading = ::weightsLoadDecision,
             ),
             contextTokens = contextTokens,
             store = measuredRam,
@@ -2836,7 +2840,7 @@ class AppContainer private constructor(private val context: Context) {
                         availableRamBytes = { currentAvailableRamBytes(context) },
                         memoryDiagnostics = { currentMemoryDiagnostics(context) },
                         memory = sharedRuntimeManager,
-                        mapWeights = { settings.mapModelWeights },
+                        weightsLoading = ::weightsLoadDecision,
                     ),
                     contextTokens = contextTokens,
                     store = measuredRam,

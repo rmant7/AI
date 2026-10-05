@@ -149,8 +149,11 @@
     <string name="settings_download_policy_wifi_only">Только Wi-Fi</string>
     <string name="settings_download_policy_wifi_and_mobile">Wi-Fi + мобильный интернет</string>
     <string name="settings_download_policy_ask_every_time">Спрашивать каждый раз</string>
-    <string name="settings_map_weights">Отображать веса локальных моделей из файла (по умолчанию)</string>
-    <string name="settings_map_weights_hint">Выкл. (эксперимент): веса читаются в собственную память приложения — без двойного счёта с переупакованными весами, но система уже не может сбросить их и перечитать при нехватке памяти. Действует со следующей загрузки модели.</string>
+    <string name="settings_weights_loading">Веса локальных моделей</string>
+    <string name="settings_weights_loading_auto">Авто, по каждой модели (рекомендуется)</string>
+    <string name="settings_weights_loading_mapped">Отображать из файла (все модели)</string>
+    <string name="settings_weights_loading_in_memory">Читать в память (все модели)</string>
+    <string name="settings_weights_loading_hint">Авто: модель сначала загружается отображением из файла; если llama.cpp при этом копирует веса (переупаковка), следующие загрузки читают её в память, а не считают дважды. Два других режима — для диагностики, для всех моделей сразу. Действует со следующей загрузки.</string>
     <string name="settings_auto_download">Скачивать рекомендуемые модели автоматически</string>
     <string name="settings_auto_download_hint">Сейчас это касается только модели эмбеддингов для семантической памяти — она скачивается сама в фоне после включения памяти. На ручной тап по «Скачать» это не влияет.</string>
     <string name="settings_whisper_installed">Установлена: %1$s</string>

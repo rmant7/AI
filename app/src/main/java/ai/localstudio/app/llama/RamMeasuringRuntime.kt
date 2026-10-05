@@ -51,6 +51,7 @@ class RamMeasuringRuntime(
     override fun canRun(model: ModelDescriptor, binding: RuntimeBinding): Boolean = inner.canRun(model, binding)
 
     override suspend fun load(model: ModelDescriptor, binding: RuntimeBinding): LoadedModel {
+        val loadedMapped = store.loadsMapped(binding.artifact)
         val probe = readSelfRssBytes()?.let { PeakProbe(it) }
         val loaded = try {
             inner.load(model, binding)
@@ -62,13 +63,15 @@ class RamMeasuringRuntime(
             probe?.stop()
             return loaded
         }
-        return MeasuredTextHandle(handle, binding.artifact, probe)
+        return MeasuredTextHandle(handle, binding.artifact, probe, loadedMapped)
     }
 
     private inner class MeasuredTextHandle(
         private val handle: TextModelHandle,
         private val artifactPath: String,
         probe: PeakProbe?,
+        /** How the weights were loaded, decided before the load (see [MeasuredRamStore.loadsMapped]). */
+        private val loadedMapped: Boolean,
     ) : TextModelHandle {
         private val pendingProbe = AtomicReference(probe)
 
@@ -111,7 +114,12 @@ class RamMeasuringRuntime(
                 log("RAM_MEASURE", "$prefix: no measurable growth (${mb(deltaBytes)} MB) — not recorded")
                 return
             }
-            val merged = store.record(artifactPath, contextTokens, deltaBytes) ?: return
+            // Stored under the way it was loaded -- before the profile below can change that way for the next load.
+            val merged = store.record(artifactPath, contextTokens, deltaBytes)
+            // What decides how this file loads from now on: only a mapped load's anonymous growth says
+            // whether llama.cpp copied the weights out of the file.
+            if (loadedMapped) probe.anonymousGrowth()?.takeIf { it > 0 }?.let { store.recordMappedAnonymous(artifactPath, it) }
+            if (merged == null) return
             measuredRequiredBytes = merged.requiredBytes
             log(
                 "RAM_MEASURE",
@@ -154,6 +162,12 @@ class RamMeasuringRuntime(
             sampler.cancel()
             sample()
             return peakBytes.get() - baselineBytes
+        }
+
+        /** Anonymous growth at the peak sample; null when the kernel does not report it. */
+        fun anonymousGrowth(): Long? {
+            val base = baselineParts?.anonBytes ?: return null
+            return peakParts?.anonBytes?.let { it - base }
         }
 
         /** " (anonymous +A MB, file pages +F MB)" at the peak, or "" when the kernel does not report the split. */
