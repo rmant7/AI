@@ -15,6 +15,8 @@ class MeasuredRamStore(
     context: Context,
     /** Whether this model file's weights are mapped from it (see [ai.localstudio.core.runtime.WeightsLoadPolicy]): each way is measured on its own. */
     private val weightsMapped: (artifactPath: String) -> Boolean = { true },
+    /** The native runtime that measured (llama.cpp build, JNI revision): another one is another figure, never reused. */
+    private val runtimeVersion: () -> String = { "" },
 ) {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -48,11 +50,18 @@ class MeasuredRamStore(
         prefs.edit().putString(key, anonymousBytes.toString()).apply()
     }
 
-    private fun profileKey(artifactPath: String): String? {
+    private fun profileKey(artifactPath: String): String? = fileIdentity(artifactPath)?.let { "mapped-anon|$it" }
+
+    /**
+     * Which file a figure belongs to: its path, size and modification time
+     * (a different file put in its place is another file, even at the same
+     * size) and the runtime that measured it.
+     */
+    private fun fileIdentity(artifactPath: String): String? {
         val file = File(artifactPath)
         if (!file.isFile) return null
         val canonical = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
-        return "mapped-anon|$canonical|${file.length()}"
+        return "$canonical|${file.length()}|${file.lastModified()}|${runtimeVersion()}"
     }
 
     /** Drops what was measured for this file and context size; the next run measures from scratch. True when there was something. */
@@ -93,22 +102,13 @@ class MeasuredRamStore(
         }.sortedWith(compareBy({ it.first }, { it.second }))
     }
 
-    private fun filePrefix(artifactPath: String): String? {
-        val file = File(artifactPath)
-        if (!file.isFile) return null
-        val canonical = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
-        return "$KEY_VERSION|$canonical|${file.length()}|"
-    }
+    private fun filePrefix(artifactPath: String): String? = fileIdentity(artifactPath)?.let { "$KEY_VERSION|$it|" }
 
     private fun keyFor(artifactPath: String, contextTokens: Int): String? {
-        val file = File(artifactPath)
-        if (!file.isFile) return null
-        val canonical = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
-        // KEY_VERSION: measurements from before the projector was loaded
-        // lazily include it (~1 GB for Gemma's) — dropped rather than trusted.
+        val prefix = filePrefix(artifactPath) ?: return null
         // Mapped and read-into-memory weights cost differently (mapped pages and a repacked copy count twice): never mixed.
         val mode = if (weightsMapped(artifactPath)) "" else "|read"
-        return "$KEY_VERSION|$canonical|${file.length()}|$contextTokens$mode"
+        return "$prefix$contextTokens$mode"
     }
 
     private fun decode(raw: String?): RamMeasurement? {
@@ -120,6 +120,10 @@ class MeasuredRamStore(
 
     private companion object {
         const val PREFS_NAME = "measured_ram"
-        const val KEY_VERSION = "v2"
+        // v2: from before the projector was loaded lazily, figures included it (~1 GB for Gemma's).
+        // v3: keyed by file time and runtime too; v2 figures were max-merged across runs that also
+        // counted mapped pages twice (#492: a September 4096-token peak refused Gemma 4 E4B at
+        // ~9.8 GB right after its check measured 7.6) -- dropped, measured again on the next load.
+        const val KEY_VERSION = "v3"
     }
 }

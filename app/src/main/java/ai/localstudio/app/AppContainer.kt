@@ -188,7 +188,11 @@ class AppContainer private constructor(private val context: Context) {
      * only the outer gate deciding whether to attempt the load at all.
      */
     /** Real per-model RAM costs measured on this device — see [RamMeasuringRuntime]. */
-    private val measuredRam: MeasuredRamStore = MeasuredRamStore(context, weightsMapped = { path -> weightsLoadDecision(File(path)).mapped })
+    private val measuredRam: MeasuredRamStore = MeasuredRamStore(
+        context,
+        weightsMapped = { path -> weightsLoadDecision(File(path)).mapped },
+        runtimeVersion = { verificationRuntime },
+    )
 
     /** How [file]'s weights load: the setting, and for AUTO this file's own measured profile. */
     private fun weightsLoadDecision(file: File): ai.localstudio.core.runtime.WeightsLoadDecision =
@@ -932,6 +936,19 @@ class AppContainer private constructor(private val context: Context) {
             queued = key in work.queued,
             running = work.trial?.takeIf { it.key == key },
         )
+    }
+
+    /**
+     * What loading [seed] for chat is admitted against, the very figure
+     * [sharedRuntimeManager] uses: its measurement at the context chat
+     * loads it with, once measured; else the file's size × 1.3. For a model
+     * not installed yet, the catalog's size × 1.3. Its projector is
+     * reserved separately on the first image turn, not counted here.
+     */
+    fun admissionBytes(seed: LocalModelSeed): Long {
+        val weights = modelStore.fileFor(seed).takeIf { modelStore.isInstalled(seed) && it.isFile }
+            ?: return seed.approxSizeBytes * 13 / 10
+        return measuredRam.measurementFor(weights.absolutePath, effectiveContextTokens())?.requiredBytes ?: weights.length() * 13 / 10
     }
 
     /**

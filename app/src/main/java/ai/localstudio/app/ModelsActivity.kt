@@ -280,10 +280,11 @@ class ModelsActivity : AppCompatActivity() {
      * would have picked a smaller model had they known.
      */
     private fun useLocally(seed: LocalModelSeed) {
-        if (needsRamWarning(seed.approxSizeBytes)) {
+        val need = container.admissionBytes(seed)
+        if (needsRamWarning(need)) {
             AlertDialog.Builder(this)
                 .setTitle(seed.title)
-                .setMessage(ramWarningMessage(seed.approxSizeBytes))
+                .setMessage(ramWarningMessage(need))
                 .setPositiveButton(R.string.model_ram_warning_continue) { _, _ -> switchToLocal(seed) }
                 .setNegativeButton(R.string.dialog_cancel, null)
                 .show()
@@ -305,18 +306,21 @@ class ModelsActivity : AppCompatActivity() {
      * [DeviceProfile.fitsLiveMemory]'s own doc comment) — with nothing in
      * between to tell the user beforehand.
      */
-    private fun needsRamWarning(approxSizeBytes: Long): Boolean =
-        !container.device.fitsBudget(approxSizeBytes) || !container.device.fitsLiveMemory(approxSizeBytes)
+    // [needBytes] is what loading it is admitted against ([AppContainer.admissionBytes]): the
+    // measured figure at chat's context once there is one, never the file size alone (#492:
+    // no warning for Gemma 4 E4B on 4.98 GB × 1.3, then a refusal at load on a measured 9.8 GB).
+    private fun needsRamWarning(needBytes: Long): Boolean =
+        needBytes > container.device.usableRamBytes || needBytes > container.device.liveRamBytes
 
-    private fun ramWarningMessage(approxSizeBytes: Long): String {
+    private fun ramWarningMessage(needBytes: Long): String {
         val device = container.device
-        val estimate = approxSizeBytes * DeviceProfile.ESTIMATE_NUMERATOR / DeviceProfile.ESTIMATE_DENOMINATOR
+        val estimate = needBytes
         // fitsBudget can still be true here (that's exactly needsRamWarning's
         // second case) — the headline and the number quoted both need to
         // match whichever check actually failed, or the message reads as
         // contradicting itself ("exceeds your budget" next to a budget
         // figure comfortably above the estimate).
-        return if (!device.fitsBudget(approxSizeBytes)) {
+        return if (needBytes > device.usableRamBytes) {
             getString(R.string.model_ram_warning) + "\n\n" +
                 getString(R.string.model_ram_warning_numbers, size(estimate), size(device.usableRamBytes))
         } else {
@@ -326,7 +330,7 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun switchToLocal(seed: LocalModelSeed) {
-        logModelSwitch("chat", seed.title, seed.approxSizeBytes)
+        logModelSwitch("chat", seed.title, seed.approxSizeBytes, container.admissionBytes(seed))
         container.settings.providerId = CloudProviders.LOCAL.id
         container.settings.chatModel = seed.id
         Toast.makeText(this, getString(R.string.models_switched_chat, seed.title), Toast.LENGTH_SHORT).show()
@@ -344,12 +348,13 @@ class ModelsActivity : AppCompatActivity() {
      * [useLocally] already has, so the warning lands at the moment a smaller
      * model could still be picked instead, not after a confusing failure.
      */
-    private fun logModelSwitch(purpose: String, title: String, approxSizeBytes: Long) {
+    private fun logModelSwitch(purpose: String, title: String, approxSizeBytes: Long, admissionBytes: Long? = null) {
         val device = container.device
         container.appLog.record(
             "MODEL_SWITCH",
             "$purpose: $title — size=" +
                 (if (approxSizeBytes > 0) size(approxSizeBytes) else "n/a") +
+                (admissionBytes?.let { " admittedAt=${size(it)}" } ?: "") +
                 " fitsBudget=${device.fitsBudget(approxSizeBytes)} usableRamBudget=${size(device.usableRamBytes)}" +
                 " fitsLiveMemory=${device.fitsLiveMemory(approxSizeBytes)} liveRamBudget=${size(device.liveRamBytes)} — " +
                 AppContainer.currentMemoryDiagnostics(this),
@@ -380,10 +385,11 @@ class ModelsActivity : AppCompatActivity() {
 
     /** Same confirm-before-switching gate [useLocally] has — see [logModelSwitch]'s own comment. */
     private fun useForTranslationLocal(seed: LocalModelSeed) {
-        if (needsRamWarning(seed.approxSizeBytes)) {
+        val need = container.admissionBytes(seed)
+        if (needsRamWarning(need)) {
             AlertDialog.Builder(this)
                 .setTitle(seed.title)
-                .setMessage(ramWarningMessage(seed.approxSizeBytes))
+                .setMessage(ramWarningMessage(need))
                 .setPositiveButton(R.string.model_ram_warning_continue) { _, _ ->
                     useForTranslation(seed.id, seed.title, seed.approxSizeBytes)
                 }
