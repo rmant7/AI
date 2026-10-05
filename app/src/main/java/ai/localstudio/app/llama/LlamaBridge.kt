@@ -178,8 +178,9 @@ class LlamaBridge {
          * Part of [ai.localstudio.model.install.VerificationContext]: a
          * device check run before such a change is STALE after it.
          * 1: before tracking. 2: seq_rm fallback, NDEBUG, several images per turn.
+         * 3: positions after a text chunk between images (a second image was decoded over the first).
          */
-        const val JNI_REVISION = 2
+        const val JNI_REVISION = 3
 
         /**
          * Whether the native library is present and loadable on this device.

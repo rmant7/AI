@@ -654,7 +654,13 @@ private class LlamaTextModel(
             completed.set(true)
             val elapsedMs = System.currentTimeMillis() - start
             if (produced < 0) {
-                log("LOCAL_GENERATE", "$modelId: FAILED code=$produced after ${elapsedMs}ms, $tokenCount tokens")
+                // An image turn's native cause (what llama.cpp/mtmd logged, and which chunk failed) -- logcat is out of reach on a phone.
+                val cause = if (image != null && produced != IMAGE_NOT_SEEN) {
+                    runCatching { bridge.nativeLastLoadError() }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }?.replace('\n', ' ')?.takeLast(600)
+                } else {
+                    null
+                }
+                log("LOCAL_GENERATE", "$modelId: FAILED code=$produced after ${elapsedMs}ms, $tokenCount tokens" + (cause?.let { " -- native: $it" } ?: ""))
                 close(
                     if (produced == IMAGE_NOT_SEEN) {
                         ImageNotSeenException(notSeen ?: "unknown")

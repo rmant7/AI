@@ -766,10 +766,15 @@ class AppContainer private constructor(private val context: Context) {
         candidateDownloadCancels[candidate.identity]?.set(true)
     }
 
-    /** Bytes a paused or interrupted download of [candidate] kept in staging; null when there are none. */
+    /**
+     * Bytes a paused or interrupted download of [candidate] kept in staging --
+     * finished files as well as the one in progress (a real report: paused at
+     * 3.6 GB of 4.3, shown as "333 MB": the finished 3.3 GB main file was not
+     * counted, only the projector's part). Null when there are none.
+     */
     fun candidatePartialBytes(candidate: DiscoveredCandidate): Long? =
         modelInstallation.layout.stagingDir(candidateVariantId(candidate)).walkTopDown()
-            .filter { it.isFile && it.name.endsWith(".part") }
+            .filter { it.isFile && !it.name.endsWith(".json") }
             .sumOf { it.length() }
             .takeIf { it > 0 }
 
@@ -816,6 +821,12 @@ class AppContainer private constructor(private val context: Context) {
             )
             candidateTrialMarker.write(running)
             logChatTemplate(name, weights)
+            // A test is the measurement: what an earlier, possibly disturbed run recorded (merged by maximum,
+            // so one bad sample would stay forever -- #479: +7996 MB for a 4.7 GB model measured while another
+            // model downloaded) is dropped, and this run's own measurement replaces it.
+            if (measuredRam.forget(weights.absolutePath, SMALL_CONTEXT_TOKENS)) {
+                appLog.record(tag, "$name: earlier RAM measurement dropped; this test measures again")
+            }
             val suites = FunctionalProbe.suitesFor(candidate.artifact())
             val total = suites.values.sumOf { it.size }
             val runtime = candidateRuntime(candidate, weights, projector)

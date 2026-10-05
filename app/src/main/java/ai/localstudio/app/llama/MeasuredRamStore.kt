@@ -28,6 +28,15 @@ class MeasuredRamStore(context: Context) {
         return merged
     }
 
+    /** Drops what was measured for this file and context size; the next run measures from scratch. True when there was something. */
+    @Synchronized
+    fun forget(artifactPath: String, contextTokens: Int): Boolean {
+        val key = keyFor(artifactPath, contextTokens) ?: return false
+        if (!prefs.contains(key)) return false
+        prefs.edit().remove(key).apply()
+        return true
+    }
+
     private fun keyFor(artifactPath: String, contextTokens: Int): String? {
         val file = File(artifactPath)
         if (!file.isFile) return null

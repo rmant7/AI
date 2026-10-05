@@ -1249,6 +1249,8 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoadMmproj(
     if (session->mctx != nullptr) return JNI_TRUE; // already loaded for this session
   try {
     const std::string path = toStdString(env, mmprojPath);
+    // mtmd logs through its own logger: route it like llama.cpp's, so its errors reach the app log too.
+    mtmd_log_set(logCallback, nullptr);
     mtmd_context_params params = mtmd_context_params_default();
     // Matches nativeLoad's n_gpu_layers = 0: this build is CPU-only, no
     // per-vendor Android GPU backend to offload the vision encoder to either.
@@ -1309,6 +1311,8 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImages(
     if (session->mctx == nullptr) return -6; // no projector loaded for this model
     session->cancelled.store(false);
     raiseThreadPriority();
+    // What llama.cpp/mtmd log as errors during this turn is what nativeLastLoadError reports if it fails.
+    setLastError("");
   try {
     jclass callbackClass = env->GetObjectClass(callback);
     jmethodID onToken = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
@@ -1398,11 +1402,27 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeGenerateWithImages(
             return 0;
         }
         const mtmd_input_chunk *chunk = mtmd_input_chunks_get(chunks.ptr.get(), i);
-        llama_pos chunkNPast = 0;
+        // In, not just out: for a text chunk the helper ADDS that chunk's tokens to
+        // *new_n_past (only an image chunk sets it). Starting it at 0 made every text
+        // chunk reset the position to its own length -- harmless with one image (the
+        // decode loop that follows takes positions from the KV cache), fatal with two:
+        // the "\n" between the images put the second image back at position 1, over
+        // cells already in use, and llama_decode refused it (-9, #479, two models).
+        llama_pos chunkNPast = nPast;
         evalResult = mtmd_helper_eval_chunk_single(
             session->mctx, session->ctx, chunk, nPast, /*seq_id=*/0,
             BATCH_SIZE, /*logits_last=*/(i + 1 == chunkCount), &chunkNPast);
-        if (evalResult != 0) break;
+        if (evalResult != 0) {
+            LOGE("chunk %zu of %zu (%s, %zu tokens) failed at position %d: %d", i + 1, chunkCount,
+                 mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT ? "text" : "image",
+                 mtmd_input_chunk_get_n_tokens(chunk), (int) nPast, evalResult);
+            char where[160];
+            snprintf(where, sizeof(where), "chunk %zu of %zu (%s, %zu tokens) at position %d: %d", i + 1, chunkCount,
+                     mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT ? "text" : "image",
+                     mtmd_input_chunk_get_n_tokens(chunk), (int) nPast, evalResult);
+            appendLastError(where);
+            break;
+        }
         nPast = chunkNPast;
     }
     session->prefillMs = nowMs() - prefillStart;
