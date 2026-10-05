@@ -212,8 +212,7 @@ class LlamaBridge {
                 ?: Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
 
         /**
-         * Counts cores sharing this SoC's highest per-core max frequency —
-         * the performance ("big") cluster in a big.LITTLE layout — via the
+         * Counts this SoC's performance cores (see [CpuClusters]) via the
          * same per-core `/sys/devices/system/cpu/cpuN/cpufreq/cpuinfo_max_freq`
          * read [ai.localstudio.whisper.CpuVariant.detect] already relies on
          * for ISA features, just grouped by clock speed instead of
@@ -232,11 +231,7 @@ class LlamaBridge {
                     File("/sys/devices/system/cpu/cpu$core/cpufreq/cpuinfo_max_freq").readText().trim().toLong()
                 }.getOrNull()
             }
-            if (maxFreqs.size < totalCores) return null
-            val topFrequency = maxFreqs.max()
-            val bigCoreCount = maxFreqs.count { it == topFrequency }
-            if (bigCoreCount == totalCores) return null
-            return bigCoreCount.coerceIn(1, totalCores)
+            return CpuClusters.performanceCoreCount(maxFreqs, totalCores)
         }
 
         /**
