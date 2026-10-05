@@ -18,8 +18,16 @@ data class FunctionalProbe(
     val expectAnyOf: List<String>,
     val match: Match = Match.WORD,
     val title: String = prompt.lineSequence().first(),
-    /** Shown to the model with [prompt]; null for a text-only question. */
-    val image: ProbeImage? = null,
+    /** Shown to the model with [prompt], in this order; empty for a text-only question. */
+    val images: List<ProbeImage> = emptyList(),
+    /** Each must also be in the answer (whole word), on top of one of [expectAnyOf] -- a question about two images is answered for both. */
+    val alsoExpect: List<String> = emptyList(),
+    /**
+     * Unload the model (weights and projector, whatever is resident) before
+     * asking: the question is then answered by a fresh load -- what proves a
+     * model comes back whole after eviction, not just once.
+     */
+    val reloadBefore: Boolean = false,
 ) {
     /**
      * WORD: the expectation as a whole word or number ("12" is not in "120").
@@ -31,13 +39,14 @@ data class FunctionalProbe(
     enum class Match { WORD, LETTERS }
 
     /** [answer] is the final answer only (see [finalAnswer]). */
-    fun passes(answer: String): Boolean = expectAnyOf.any { expected ->
-        when (match) {
-            // Not inside a longer word or number: "3.12" and "12.5" do not contain the answer 12; "12." ending a sentence does.
-            Match.WORD -> Regex("(?<![\\p{L}\\p{N}])(?<!\\p{N}[.,])" + Regex.escape(expected) + "(?![\\p{L}\\p{N}])(?![.,]\\p{N})", RegexOption.IGNORE_CASE)
-                .containsMatchIn(answer)
-            Match.LETTERS -> lettersOnly(answer).contains(lettersOnly(expected))
-        }
+    fun passes(answer: String): Boolean =
+        expectAnyOf.any { contains(answer, it, match) } && alsoExpect.all { contains(answer, it, Match.WORD) }
+
+    private fun contains(answer: String, expected: String, match: Match): Boolean = when (match) {
+        // Not inside a longer word or number: "3.12" and "12.5" do not contain the answer 12; "12." ending a sentence does.
+        Match.WORD -> Regex("(?<![\\p{L}\\p{N}])(?<!\\p{N}[.,])" + Regex.escape(expected) + "(?![\\p{L}\\p{N}])(?![.,]\\p{N})", RegexOption.IGNORE_CASE)
+            .containsMatchIn(answer)
+        Match.LETTERS -> lettersOnly(answer).contains(lettersOnly(expected))
     }
 
     companion object {
@@ -58,30 +67,47 @@ data class FunctionalProbe(
         )
 
         /**
-         * Two built-in images whose answers are not a matter of opinion, then a
-         * plain text question on the same loaded model: run after [TEXT], the
-         * whole trial goes text -> image -> image -> text. VISION passes only
-         * when the model sees both images and still answers text correctly
-         * afterwards -- an image turn that leaves the model's memory in a state
-         * where the next text answer is wrong is not working vision.
+         * The whole life of a vision model on one device, in order, each step
+         * with an answer that is not a matter of opinion. Run after [TEXT]
+         * on the same loaded model:
+         * text -> one image -> another image -> two images in one turn ->
+         * text -> unload everything -> reload -> one image again.
+         * VISION passes only when every step does: an image turn that leaves
+         * the model's memory so the next text answer is wrong, a second image
+         * that never reaches the model, or a projector that does not come
+         * back after a reload is not working vision.
          */
         val VISION: List<FunctionalProbe> = listOf(
             FunctionalProbe(
                 "What digit is shown in this image? Answer with the digit only.",
                 listOf("7", "seven"),
                 title = "image: the digit 7",
-                image = ProbeImage.Digit(7),
+                images = listOf(ProbeImage.Digit(7)),
             ),
             FunctionalProbe(
                 "What color is the circle in this image? Answer with one word.",
                 listOf("red"),
                 title = "image: a red circle",
-                image = ProbeImage.Disc(ProbeImage.Disc.RED),
+                images = listOf(ProbeImage.Disc(ProbeImage.Disc.RED)),
+            ),
+            FunctionalProbe(
+                "There are two images. What digit is in the first image, and what color is the circle in the second? Answer briefly.",
+                listOf("4", "four"),
+                alsoExpect = listOf("blue"),
+                title = "two images in one turn: the digit 4, a blue circle",
+                images = listOf(ProbeImage.Digit(4), ProbeImage.Disc(ProbeImage.Disc.BLUE)),
             ),
             FunctionalProbe(
                 "What is 7 + 5? Answer with the number only.",
                 listOf("12", "twelve"),
                 title = "text after the images: 7 + 5",
+            ),
+            FunctionalProbe(
+                "What digit is shown in this image? Answer with the digit only.",
+                listOf("3", "three"),
+                title = "image after unloading and reloading the model: the digit 3",
+                images = listOf(ProbeImage.Digit(3)),
+                reloadBefore = true,
             ),
         )
 
@@ -134,6 +160,7 @@ sealed interface ProbeImage {
     data class Disc(val rgb: Int) : ProbeImage {
         companion object {
             const val RED = 0xE00000
+            const val BLUE = 0x0030E0
         }
     }
 }
@@ -141,7 +168,8 @@ sealed interface ProbeImage {
 /** What [CandidateTrial.run] needs from the real runtime: load (once) and answer one probe. */
 fun interface TrialRuntime {
     /**
-     * Answers [probe] -- its prompt, with its image when it has one --
+     * Answers [probe] -- its prompt, with its images when it has any, after
+     * unloading the model first when it asks for a reload --
      * streaming text to [onChunk]. Calls [onLoaded] once the weights are
      * actually loaded -- the only evidence of a load the trial accepts
      * besides text itself; a throw before either means the model never

@@ -1127,6 +1127,17 @@ class AppContainer private constructor(private val context: Context) {
         )
         val binding = descriptor.bindings.single()
         return TrialRuntime { probe, onLoaded, onChunk ->
+            if (probe.reloadBefore) {
+                // What is resident (weights + any reserved projector, one figure each), then all of it goes:
+                // the next answer comes from a fresh load, projector included.
+                val resident = sharedRuntimeManager.residentModels()
+                appLog.record(
+                    "CANDIDATE_TEST",
+                    "${candidate.repoId}: unloading to check a reload -- resident: " +
+                        resident.joinToString { "${it.modelId} ${it.ramBytes / 1_000_000} MB" }.ifEmpty { "nothing" },
+                )
+                sharedRuntimeManager.evictIdle()
+            }
             try {
                 withTimeout(CANDIDATE_PROBE_TIMEOUT_MS) {
                     deviceMemoryGate.withLock {
@@ -1136,7 +1147,7 @@ class AppContainer private constructor(private val context: Context) {
                                 ?: throw IllegalStateException("${descriptor.id} did not load as a text model")
                             val input = ai.localstudio.sdk.LocalAiInput(
                                 text = probe.prompt,
-                                images = listOfNotNull(probe.image?.let { ai.localstudio.sdk.LocalImage(ai.localstudio.app.vision.ProbeImageRenderer.png(it), "image/png") }),
+                                images = probe.images.map { ai.localstudio.sdk.LocalImage(ai.localstudio.app.vision.ProbeImageRenderer.png(it), "image/png") },
                             )
                             val options = ai.localstudio.sdk.GenerationOptions(maxTokens = CANDIDATE_MAX_TOKENS, temperature = 0.0)
                             handle.generate(ai.localstudio.app.localai.SdkMapping.request(input, options, repeatPenalty = 1.0))

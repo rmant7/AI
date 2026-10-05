@@ -254,11 +254,19 @@ class CandidateTrialTest {
     )
 
     /** What a model that sees: the digit, the colour, and text as before. */
-    private fun seeing(probe: FunctionalProbe): List<String> = when (val image = probe.image) {
-        is ProbeImage.Digit -> listOf(image.digit.toString())
-        is ProbeImage.Disc -> listOf("Red.")
-        null -> correctChat(probe.prompt)
-    }
+    private fun seeing(probe: FunctionalProbe): List<String> =
+        if (probe.images.isEmpty()) {
+            correctChat(probe.prompt)
+        } else {
+            listOf(
+                probe.images.joinToString(", ") { image ->
+                    when (image) {
+                        is ProbeImage.Digit -> image.digit.toString()
+                        is ProbeImage.Disc -> if (image.rgb == ProbeImage.Disc.RED) "Red" else "Blue"
+                    }
+                },
+            )
+        }
 
     @Test
     fun vision_is_checked_only_on_a_model_with_a_projector() {
@@ -274,18 +282,30 @@ class CandidateTrialTest {
 
     @Test
     fun seeing_both_images_and_answering_text_afterwards_passes_vision_in_order_text_image_image_text() {
-        val asked = mutableListOf<ProbeImage?>()
+        val asked = mutableListOf<List<ProbeImage>>()
+        val reloads = mutableListOf<Int>()
         val result = run(
             mapOf(VerifiedCapability.TEXT to FunctionalProbe.TEXT, VerifiedCapability.VISION to FunctionalProbe.VISION),
             TrialRuntime { probe, onLoaded, onChunk ->
-                asked += probe.image
+                if (probe.reloadBefore) reloads += asked.size
+                asked += probe.images
                 onLoaded()
                 seeing(probe).forEach(onChunk)
             },
         )
         assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT, here))
         assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.VISION, here))
-        assertEquals(listOf(null, null, ProbeImage.Digit(7), ProbeImage.Disc(ProbeImage.Disc.RED), null), asked)
+        assertEquals(
+            listOf(
+                emptyList(), emptyList(),
+                listOf(ProbeImage.Digit(7)), listOf(ProbeImage.Disc(ProbeImage.Disc.RED)),
+                listOf(ProbeImage.Digit(4), ProbeImage.Disc(ProbeImage.Disc.BLUE)),
+                emptyList(),
+                listOf(ProbeImage.Digit(3)),
+            ),
+            asked,
+        )
+        assertEquals("the model is unloaded once, right before the last image", listOf(6), reloads)
     }
 
     @Test
@@ -295,9 +315,9 @@ class CandidateTrialTest {
             mapOf(VerifiedCapability.TEXT to FunctionalProbe.TEXT, VerifiedCapability.VISION to FunctionalProbe.VISION),
             TrialRuntime { probe, onLoaded, onChunk ->
                 onLoaded()
-                if (probe.image != null) imagesSeen++
+                if (probe.images.isNotEmpty()) imagesSeen++
                 // Memory left over from the image turn: the next text answer is about the image.
-                (if (probe.image == null && imagesSeen > 0) listOf("7") else seeing(probe)).forEach(onChunk)
+                (if (probe.images.isEmpty() && imagesSeen > 0) listOf("7") else seeing(probe)).forEach(onChunk)
             },
         )
         assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT, here))
@@ -311,7 +331,7 @@ class CandidateTrialTest {
             mapOf(VerifiedCapability.TEXT to FunctionalProbe.TEXT, VerifiedCapability.VISION to FunctionalProbe.VISION),
             TrialRuntime { probe, onLoaded, onChunk ->
                 onLoaded()
-                if (probe.image != null) throw IllegalStateException("the image was not seen: no vision projector loaded for this model")
+                if (probe.images.isNotEmpty()) throw IllegalStateException("the image was not seen: no vision projector loaded for this model")
                 seeing(probe).forEach(onChunk)
             },
         )
@@ -326,7 +346,7 @@ class CandidateTrialTest {
             mapOf(VerifiedCapability.VISION to FunctionalProbe.VISION),
             TrialRuntime { probe, onLoaded, onChunk ->
                 onLoaded()
-                (if (probe.image is ProbeImage.Digit) listOf("1") else seeing(probe)).forEach(onChunk)
+                (if (probe.images.singleOrNull() == ProbeImage.Digit(7)) listOf("1") else seeing(probe)).forEach(onChunk)
             },
         )
         assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION, here))
@@ -339,5 +359,35 @@ class CandidateTrialTest {
         assertEquals(here, result.context)
         assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT, here))
         assertEquals(CheckStatus.STALE, result.status(VerifiedCapability.TEXT, here.copy(runtimeVersion = "llama.cpp b11000 / jni 2")))
+    }
+
+    @Test
+    fun two_images_in_one_turn_pass_only_when_both_are_answered() {
+        fun result(twoImageAnswer: String) = run(
+            mapOf(VerifiedCapability.VISION to FunctionalProbe.VISION),
+            TrialRuntime { probe, onLoaded, onChunk ->
+                onLoaded()
+                (if (probe.images.size == 2) listOf(twoImageAnswer) else seeing(probe)).forEach(onChunk)
+            },
+        )
+        assertEquals(CheckStatus.PASS, result("The digit is 4 and the circle is blue.").status(VerifiedCapability.VISION, here))
+        val onlyFirst = result("The digit is 4.")
+        assertEquals("the second image never reached the model", CheckStatus.FAIL, onlyFirst.status(VerifiedCapability.VISION, here))
+        assertTrue(onlyFirst.checks.getValue(VerifiedCapability.VISION).detail!!.contains("two images"))
+        assertEquals(CheckStatus.FAIL, result("The circle is blue.").status(VerifiedCapability.VISION, here))
+    }
+
+    @Test
+    fun an_image_lost_after_the_reload_fails_vision() {
+        val result = run(
+            mapOf(VerifiedCapability.VISION to FunctionalProbe.VISION),
+            TrialRuntime { probe, onLoaded, onChunk ->
+                onLoaded()
+                if (probe.reloadBefore) throw IllegalStateException("the image was not seen: its projector did not load")
+                seeing(probe).forEach(onChunk)
+            },
+        )
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION, here))
+        assertTrue(result.checks.getValue(VerifiedCapability.VISION).detail!!.contains("generation failed"))
     }
 }

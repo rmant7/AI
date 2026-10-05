@@ -106,7 +106,8 @@ data class DeviceVerification(
     }
 
     companion object {
-        const val CURRENT_CHECK = 3
+        /** 4: VISION also asks two images in one turn and one after an unload and reload. */
+        const val CURRENT_CHECK = 4
     }
 }
 
