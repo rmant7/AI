@@ -4,6 +4,7 @@ import ai.localstudio.app.databinding.ActivityCandidatesBinding
 import ai.localstudio.app.databinding.ItemFilesHeaderBinding
 import ai.localstudio.app.databinding.ItemLocalModelBinding
 import ai.localstudio.app.modelinstall.CandidateFacts
+import ai.localstudio.app.modelinstall.CandidateFilter
 import ai.localstudio.app.modelinstall.CandidatePurpose
 import ai.localstudio.app.modelinstall.CandidateWork
 import ai.localstudio.app.modelinstall.DiscoveredCandidate
@@ -46,6 +47,18 @@ class CandidatesActivity : AppCompatActivity() {
         binding.root.applySystemBarInsets()
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         container = AppContainer.get(this)
+        filter = loadFilter()
+        binding.candidatesSearch.setText(filter.text)
+        binding.candidatesSearch.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                // Typing re-filters a beat after the last key, not on every key.
+                binding.candidatesSearch.removeCallbacks(applySearch)
+                binding.candidatesSearch.postDelayed(applySearch, SEARCH_DELAY_MS)
+            }
+        })
+        buildFilterChips()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -82,8 +95,12 @@ class CandidatesActivity : AppCompatActivity() {
         return true
     }
 
-    /** The list as last built: rebuilt only when the stored runs change, never on a progress tick (see [render]). */
-    private var shownRuns: List<DiscoveryRun>? = null
+    /** The list as last built: rebuilt only when the stored runs or the filter change, never on a progress tick (see [render]). */
+    private var shownRuns: Pair<List<DiscoveryRun>, CandidateFilter>? = null
+
+    private var filter = CandidateFilter()
+
+    private val applySearch = Runnable { setFilter(filter.copy(text = binding.candidatesSearch.text.toString().trim())) }
     private val cards = mutableListOf<Triple<String, DiscoveredCandidate, ItemLocalModelBinding>>()
 
     /**
@@ -101,25 +118,148 @@ class CandidatesActivity : AppCompatActivity() {
             compareBy<DiscoveryRun> { DiscoveryLabels.isTranslation(it.label) }
                 .thenBy { order.indexOf(it.label).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE },
         )
-        if (runs != shownRuns) {
-            shownRuns = runs
+        if (runs to filter != shownRuns) {
+            shownRuns = runs to filter
             cards.clear()
             binding.candidatesList.removeAllViews()
             if (runs.isEmpty()) addHeader(getString(R.string.candidates_none))
+            var total = 0
+            var shown = 0
             for (run in runs) {
-                addHeader(sectionTitle(run))
-                run.candidates.forEach { c ->
+                total += run.candidates.size
+                val matching = filter.sorted(run.candidates.filter { c -> matches(run.label, c) }) { it }
+                shown += matching.size
+                // A filtered-out section is left out whole, unless its search itself failed (worth seeing either way).
+                if (matching.isEmpty() && !filter.isDefault && run.failure == null) continue
+                addHeader(sectionTitle(run, if (filter.isDefault) null else matching.size))
+                matching.forEach { c ->
                     val card = ItemLocalModelBinding.inflate(layoutInflater, binding.candidatesList, false)
                     card.root.setOnClickListener { showDetails(run.label, c) }
+                    card.root.setOnLongClickListener {
+                        copyDetails(run.label, c)
+                        true
+                    }
                     binding.candidatesList.addView(card.root)
                     cards += Triple(run.label, c, card)
                 }
             }
+            binding.candidatesCount.text = getString(R.string.candidates_shown, shown, total)
+            binding.candidatesCount.visibility = if (runs.isEmpty()) View.GONE else View.VISIBLE
         }
         cards.forEach { (label, c, card) -> bind(card, label, c, work) }
     }
 
-    private fun sectionTitle(run: DiscoveryRun): String {
+    private fun matches(label: String, c: DiscoveredCandidate): Boolean {
+        val now = container.verificationContext(c)
+        val v = c.verification
+        return filter.matches(label, c, passesNow = v?.passed(now)?.toSet().orEmpty(), testedNow = v?.isValidFor(now) == true)
+    }
+
+    private fun setFilter(new: CandidateFilter) {
+        if (new == filter) return
+        filter = new
+        saveFilter(new)
+        buildFilterChips()
+        render()
+    }
+
+    /** One chip per filter, showing its current value; a tap offers the choices. */
+    private fun buildFilterChips() {
+        val group = binding.candidatesFilters
+        group.removeAllViews()
+        fun chip(text: String, onClick: () -> Unit) {
+            group.addView(
+                com.google.android.material.chip.Chip(this).apply {
+                    this.text = text
+                    setOnClickListener { onClick() }
+                },
+            )
+        }
+        val purposes = listOf(
+            CandidateFilter.Purpose.ANY to R.string.candidates_filter_all,
+            CandidateFilter.Purpose.CHAT to R.string.candidates_filter_chat,
+            CandidateFilter.Purpose.TRANSLATION to R.string.candidates_filter_translation,
+            CandidateFilter.Purpose.VISION to R.string.candidates_filter_vision,
+        ).map { (value, res) -> value to getString(res) }
+        val sizes = listOf<Pair<Long?, String>>(null to getString(R.string.candidates_filter_any)) +
+            SIZE_LIMITS_GB.map { gb -> gb * 1_000_000_000L to "≤ $gb GB" }
+        val downloads = listOf(0L to getString(R.string.candidates_filter_any)) +
+            DOWNLOAD_MINIMUMS.map { n -> n to "≥ ${compact(n)}" }
+        val statuses = listOf(
+            CandidateFilter.Status.ANY to R.string.candidates_filter_all,
+            CandidateFilter.Status.NOT_TESTED to R.string.candidates_filter_not_tested,
+            CandidateFilter.Status.WORKS to R.string.candidates_filter_works,
+            CandidateFilter.Status.FAILED to R.string.candidates_filter_failed,
+        ).map { (value, res) -> value to getString(res) }
+        val sorts = listOf(
+            CandidateFilter.Sort.SEARCH to R.string.candidates_sort_search,
+            CandidateFilter.Sort.DOWNLOADS to R.string.candidates_sort_downloads,
+            CandidateFilter.Sort.NEWEST to R.string.candidates_sort_newest,
+            CandidateFilter.Sort.SMALLEST to R.string.candidates_sort_smallest,
+        ).map { (value, res) -> value to getString(res) }
+
+        fun <T> choose(title: String, options: List<Pair<T, String>>, current: T, apply: (T) -> CandidateFilter) {
+            AlertDialog.Builder(this)
+                .setTitle(title)
+                .setSingleChoiceItems(options.map { it.second }.toTypedArray(), options.indexOfFirst { it.first == current }) { dialog, which ->
+                    dialog.dismiss()
+                    setFilter(apply(options[which].first))
+                }
+                .show()
+        }
+        fun <T> label(options: List<Pair<T, String>>, current: T) = options.firstOrNull { it.first == current }?.second ?: current.toString()
+
+        chip(getString(R.string.candidates_filter_purpose, label(purposes, filter.purpose))) {
+            choose(getString(R.string.candidates_filter_purpose, ""), purposes, filter.purpose) { filter.copy(purpose = it) }
+        }
+        chip(getString(R.string.candidates_filter_size, label(sizes, filter.maxBytes))) {
+            choose(getString(R.string.candidates_filter_size, ""), sizes, filter.maxBytes) { filter.copy(maxBytes = it) }
+        }
+        chip(getString(R.string.candidates_filter_downloads, label(downloads, filter.minDownloads))) {
+            choose(getString(R.string.candidates_filter_downloads, ""), downloads, filter.minDownloads) { filter.copy(minDownloads = it) }
+        }
+        chip(getString(R.string.candidates_filter_status, label(statuses, filter.status))) {
+            choose(getString(R.string.candidates_filter_status, ""), statuses, filter.status) { filter.copy(status = it) }
+        }
+        chip(getString(R.string.candidates_filter_sort, label(sorts, filter.sort))) {
+            choose(getString(R.string.candidates_filter_sort, ""), sorts, filter.sort) { filter.copy(sort = it) }
+        }
+        if (!filter.isDefault) {
+            chip(getString(R.string.candidates_filter_reset)) {
+                binding.candidatesSearch.removeCallbacks(applySearch)
+                binding.candidatesSearch.setText("")
+                setFilter(CandidateFilter())
+            }
+        }
+    }
+
+    /** Remembered on this phone only, a convenience: a filter that cannot be read back is the default one. */
+    private fun loadFilter(): CandidateFilter = runCatching {
+        val prefs = getSharedPreferences(FILTER_PREFS, MODE_PRIVATE)
+        CandidateFilter(
+            text = prefs.getString("text", "").orEmpty(),
+            purpose = CandidateFilter.Purpose.valueOf(prefs.getString("purpose", null) ?: CandidateFilter.Purpose.ANY.name),
+            maxBytes = prefs.getLong("maxBytes", -1L).takeIf { it > 0 },
+            minDownloads = prefs.getLong("minDownloads", 0L),
+            status = CandidateFilter.Status.valueOf(prefs.getString("status", null) ?: CandidateFilter.Status.ANY.name),
+            sort = CandidateFilter.Sort.valueOf(prefs.getString("sort", null) ?: CandidateFilter.Sort.SEARCH.name),
+        )
+    }.getOrDefault(CandidateFilter())
+
+    private fun saveFilter(f: CandidateFilter) {
+        runCatching {
+            getSharedPreferences(FILTER_PREFS, MODE_PRIVATE).edit()
+                .putString("text", f.text)
+                .putString("purpose", f.purpose.name)
+                .putLong("maxBytes", f.maxBytes ?: -1L)
+                .putLong("minDownloads", f.minDownloads)
+                .putString("status", f.status.name)
+                .putString("sort", f.sort.name)
+                .apply()
+        }
+    }
+
+    private fun sectionTitle(run: DiscoveryRun, matching: Int? = null): String {
         val purpose = getString(if (DiscoveryLabels.isTranslation(run.label)) R.string.candidates_purpose_translation else R.string.candidates_purpose_chat)
         val group = DiscoveryLabels.lineage(run.label)?.let { "${it.displayName} · $purpose" }
             ?: getString(if (DiscoveryLabels.isTranslation(run.label)) R.string.candidates_group_translation else R.string.candidates_group_chat)
@@ -128,7 +268,8 @@ class CandidatesActivity : AppCompatActivity() {
         } else {
             getString(R.string.candidates_section_count, run.candidates.size, run.checked)
         }
-        return "$group\n$count"
+        val shown = matching?.let { " · " + getString(R.string.candidates_shown, it, run.candidates.size) }.orEmpty()
+        return "$group\n$count$shown"
     }
 
     private fun addHeader(text: String) {
@@ -336,9 +477,17 @@ class CandidatesActivity : AppCompatActivity() {
         },
     )
 
-    private fun showDetails(label: String, c: DiscoveredCandidate) {
+    /**
+     * Everything known about [c] as plain text: what it is (repository, file,
+     * size, architecture, what its tags say it is for), where it came from,
+     * and what this phone observed -- what "Copy" hands to the clipboard, so
+     * a person can paste it into any AI chat and ask whether it fits.
+     */
+    private fun detailsText(label: String, c: DiscoveredCandidate): String {
         val dash = "—"
-        val details = buildString {
+        return buildString {
+            append("https://huggingface.co/").append(c.repoId).append(" · ").append(label).append("\n")
+            append(subtitle(c, CandidateFacts.of(c.tags))).append("\n\n")
             append(
                 getString(
                     R.string.candidate_details,
@@ -368,14 +517,25 @@ class CandidatesActivity : AppCompatActivity() {
                 check.sample?.let { append("\n  ").append(getString(R.string.candidate_check_said, it)) }
             }
             if (c.tags.isNotEmpty()) append("\n\n").append(getString(R.string.candidate_all_tags, c.tags.joinToString(", ")))
+            container.verificationContext(c).let { now -> c.verification?.staleReason(now)?.let { append("\n\n").append(getString(R.string.candidate_stale_reason, it)) } }
         }
+    }
+
+    private fun copyDetails(label: String, c: DiscoveredCandidate) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText(c.repoId, detailsText(label, c)))
+        Toast.makeText(this, R.string.candidate_copied, Toast.LENGTH_LONG).show()
+    }
+
+    private fun showDetails(label: String, c: DiscoveredCandidate) {
+        val details = detailsText(label, c)
         val busy = container.candidateWork.value.isBusy(c.identity)
         val canRetest = container.candidateTestable(c) && !busy
         val installedBytes = container.candidateInstalledBytes(c)
         AlertDialog.Builder(this)
             .setTitle(c.repoId)
             .setMessage(details)
-            .setPositiveButton(android.R.string.ok, null)
+            .setPositiveButton(R.string.candidate_copy) { _, _ -> copyDetails(label, c) }
             .apply { if (canRetest) setNeutralButton(R.string.candidate_retest) { _, _ -> test(label, c) } }
             .apply {
                 if (installedBytes != null && !busy) {
@@ -383,6 +543,8 @@ class CandidatesActivity : AppCompatActivity() {
                 }
             }
             .show()
+            // Selectable, so any part of it can be copied too, not only all of it.
+            .findViewById<android.widget.TextView>(android.R.id.message)?.setTextIsSelectable(true)
     }
 
     private fun download(label: String, c: DiscoveredCandidate) {
@@ -437,6 +599,10 @@ class CandidatesActivity : AppCompatActivity() {
 
     private companion object {
         const val MENU_DISCOVER = 9100
+        const val FILTER_PREFS = "candidate_filter"
+        const val SEARCH_DELAY_MS = 300L
+        val SIZE_LIMITS_GB = listOf(2L, 4L, 6L, 8L)
+        val DOWNLOAD_MINIMUMS = listOf(1_000L, 10_000L, 100_000L)
 
         /** The capabilities a model can be put to use for from here; vision joins once it is checked. */
         val USABLE = listOf(VerifiedCapability.TEXT, VerifiedCapability.TRANSLATION)

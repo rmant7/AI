@@ -79,6 +79,7 @@ import ai.localstudio.app.modelinstall.RunningTrial
 import ai.localstudio.app.modelinstall.DiscoveredCandidate
 import ai.localstudio.app.modelinstall.DiscoveryLabels
 import ai.localstudio.app.modelinstall.DiscoveryRun
+import ai.localstudio.app.modelinstall.DiscoveryLogLines
 import ai.localstudio.app.modelinstall.FunctionalProbe
 import ai.localstudio.app.modelinstall.TrialRuntime
 import ai.localstudio.app.modelinstall.DiscoveryStore
@@ -620,23 +621,18 @@ class AppContainer private constructor(private val context: Context) {
                         maxModelBytes,
                         claimed.toSet(),
                         onOutcome = { outcome ->
-                            appLog.record(
-                                "DISCOVERY",
-                                when (outcome) {
-                                    is ModelDiscovery.Outcome.Candidate ->
-                                        "$label CANDIDATE ${outcome.repo.id}: ${outcome.file.name} (${outcome.file.sizeBytes / 1_000_000} MB, " +
-                                            "${outcome.architecture}, context ${outcome.contextLength ?: "?"}${outcome.notes.joinToString("") { "; $it" }}) " +
-                                            "@${outcome.commit.take(8)}, ${outcome.repo.downloads} downloads, created ${outcome.repo.createdAt ?: "?"}"
-                                    is ModelDiscovery.Outcome.Dropped -> "$label dropped ${outcome.repo.id}: ${outcome.reason}"
-                                },
-                            )
+                            // Candidates as they are found (each takes seconds); drops summed up once the family is done.
+                            if (outcome is ModelDiscovery.Outcome.Candidate) appLog.record("DISCOVERY", DiscoveryLogLines.candidate(label, outcome))
                         },
                     )
                 }.getOrElse { e -> ai.localstudio.model.install.LineageDiscovery.Result(lineage, 0, emptyList(), "${e.javaClass.simpleName}: ${e.message}") }
-                (modelInstallation.hub as? HuggingFaceApiClient)?.lastSearchShape?.let { appLog.record("DISCOVERY", "$label last search: $it") }
+                DiscoveryLogLines.dropped(label, result.outcomes.filterIsInstance<ModelDiscovery.Outcome.Dropped>())
+                    ?.let { appLog.record("DISCOVERY", it) }
                 result.failure?.let {
                     complete = false
                     appLog.record("DISCOVERY", "$label search FAILED: $it")
+                    // The search's own shape only matters when it failed.
+                    (modelInstallation.hub as? HuggingFaceApiClient)?.lastSearchShape?.let { shape -> appLog.record("DISCOVERY", "$label last search: $shape") }
                 }
                 claimed += result.outcomes.map { it.repo.id }
                 labels += label
@@ -652,7 +648,11 @@ class AppContainer private constructor(private val context: Context) {
             }
             // Only a sweep that heard from every family may forget runs it did not produce.
             if (complete) discoveryStore.retainLabels(labels)
-            appLog.record("DISCOVERY", "sweep finished ($trigger): ${discoveryStore.runs().sumOf { it.candidates.size }} candidates")
+            val found = discoveryStore.runs().flatMap { it.candidates }
+            appLog.record(
+                "DISCOVERY",
+                "sweep finished ($trigger): ${found.size} candidates, ${found.count { it.projector != null }} with vision",
+            )
         } finally {
             discoveryRunning.value = false
             discoverySweepLock.unlock()
