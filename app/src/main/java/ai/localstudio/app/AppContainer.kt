@@ -187,39 +187,32 @@ class AppContainer private constructor(private val context: Context) {
      * tens of milliseconds later, never throwing) is untouched — this is
      * only the outer gate deciding whether to attempt the load at all.
      */
-    /** Real per-model RAM costs measured on this device — see [RamMeasuringRuntime]. */
-    private val measuredRam: MeasuredRamStore = MeasuredRamStore(
-        context,
-        weightsMapped = { path -> weightsLoadDecision(File(path)).mapped },
-        runtimeVersion = { verificationRuntime },
+    /**
+     * The on-device model engine (:llama-runtime, shared with IntelliVerse):
+     * one RuntimeManager admitting every load against live free RAM and what
+     * each model was measured to cost here, the weights load mode per file,
+     * llama.cpp runtimes that measure every load. Budget: [device]'s live RAM
+     * (free + this app's own resident models); before a load, auxiliary
+     * models (the embedder) are freed.
+     */
+    private val localEngine = ai.localstudio.app.llama.LocalModelEngine(
+        context = context,
+        runtimeVersion = verificationRuntime,
+        log = appLog::record,
+        weightsLoading = { settings.weightsLoading },
+        beforeAdmission = { requiredBytes -> freeAuxiliaryModelsForLocalLoad(requiredBytes) },
+        budgetBytes = { device.liveRamBytes },
+        memoryDiagnostics = { currentMemoryDiagnostics(context) },
+        deviceConditions = { currentThermalConditions(context) },
     )
+
+    /** Real per-model RAM costs measured on this device — see [RamMeasuringRuntime]. */
+    private val measuredRam: MeasuredRamStore get() = localEngine.measuredRam
 
     /** How [file]'s weights load: the setting, and for AUTO this file's own measured profile. */
-    private fun weightsLoadDecision(file: File): ai.localstudio.core.runtime.WeightsLoadDecision =
-        ai.localstudio.core.runtime.WeightsLoadPolicy.decide(settings.weightsLoading, measuredRam.mappedAnonymousBytes(file.path), file.length())
+    private fun weightsLoadDecision(file: File): ai.localstudio.core.runtime.WeightsLoadDecision = localEngine.weightsLoadDecision(file)
 
-    private val sharedRuntimeManager = RuntimeManager(
-        budgetBytes = { device.liveRamBytes },
-        runtimes = emptyMap(),
-        exclusive = true,
-        log = { appLog.record("RAM_MANAGER", it) },
-        // A cancelled load keeps running on its detached native worker (see
-        // LlamaCppRuntime.load) — the next model's budget must not be read
-        // while that one still physically holds memory.
-        beforeAdmission = { requiredBytes ->
-            if (LlamaCppRuntime.hasPendingNativeWork()) {
-                appLog.record("RAM_MANAGER", "waiting for an abandoned native load/free to finish before admitting the next model")
-                LlamaCppRuntime.awaitPendingNativeWork()
-            }
-            freeAuxiliaryModelsForLocalLoad(requiredBytes)
-        },
-        // Admission against what this model actually cost on this device
-        // (variant = the context size it's loaded with), once measured;
-        // the file-size × 1.3 guess only until the first real run.
-        requiredBytesFor = { binding, variant ->
-            measuredRam.measurementFor(binding.artifact, variant as? Int)?.requiredBytes ?: binding.effectiveRequiredRamBytes
-        },
-    )
+    private val sharedRuntimeManager: RuntimeManager get() = localEngine.manager
 
     /**
      * Shared between [sharedLlamaRuntime] and [aicoreCandidate] via
@@ -1385,20 +1378,7 @@ class AppContainer private constructor(private val context: Context) {
         val weights = files.weights
         val projector = files.projector
         val contextTokens = files.contextTokens
-        val runtime = RamMeasuringRuntime(
-            inner = LlamaCppRuntime(
-                contextTokens = contextTokens,
-                log = appLog::record,
-                availableRamBytes = { currentAvailableRamBytes(context) },
-                memoryDiagnostics = { currentMemoryDiagnostics(context) },
-                memory = sharedRuntimeManager,
-                weightsLoading = ::weightsLoadDecision,
-                deviceConditions = { currentThermalConditions(context) },
-            ),
-            contextTokens = contextTokens,
-            store = measuredRam,
-            log = appLog::record,
-        )
+        val runtime = localEngine.llamaRuntime(contextTokens)
         val descriptor = ModelDescriptor(
             // Its own id, never the model's: a copy already resident for chat (a larger context) is
             // evicted like any idle model, and the check loads the files fresh, the way it measures them.
@@ -3076,20 +3056,7 @@ class AppContainer private constructor(private val context: Context) {
         val contextTokens = effectiveContextTokens()
         return DeviceMemoryGatedRuntime(
             inner = SharedRuntime(
-                inner = RamMeasuringRuntime(
-                    inner = LlamaCppRuntime(
-                        contextTokens = contextTokens,
-                        log = appLog::record,
-                        availableRamBytes = { currentAvailableRamBytes(context) },
-                        memoryDiagnostics = { currentMemoryDiagnostics(context) },
-                        memory = sharedRuntimeManager,
-                        weightsLoading = ::weightsLoadDecision,
-                        deviceConditions = { currentThermalConditions(context) },
-                    ),
-                    contextTokens = contextTokens,
-                    store = measuredRam,
-                    log = appLog::record,
-                ),
+                inner = localEngine.llamaRuntime(contextTokens),
                 manager = sharedRuntimeManager,
                 variant = contextTokens,
             ),
