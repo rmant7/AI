@@ -31,6 +31,27 @@ data class ArtifactId(
     val projectorFile: String? = null,
 ) {
     val key: String get() = listOfNotNull(repository, revision, mainFile, projectorFile).joinToString("|")
+
+    /** False for an [unpinned] id: no repository commit stands behind it, only the files' sizes. */
+    val isPinned: Boolean get() = !repository.startsWith(UNPINNED_PREFIX)
+
+    companion object {
+        private const val UNPINNED_PREFIX = "local/"
+
+        /**
+         * An installed model with no recorded source (a download from before
+         * install manifests): named by the app's model id and its files'
+         * exact sizes. A check of it holds while those files stay as they are;
+         * a different file under the same name is a different id, and its
+         * old check is STALE. Never offered to anyone as a repository.
+         */
+        fun unpinned(modelId: String, mainBytes: Long, projectorBytes: Long?): ArtifactId = ArtifactId(
+            repository = UNPINNED_PREFIX + modelId,
+            revision = "bytes-$mainBytes" + (projectorBytes?.let { "-$it" } ?: ""),
+            mainFile = "model.gguf",
+            projectorFile = projectorBytes?.let { "projector.gguf" },
+        )
+    }
 }
 
 /** A vision projector (mmproj): the file, and the `clip.projector_type` its own header declares. */

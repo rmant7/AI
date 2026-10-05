@@ -590,4 +590,14 @@
     <string name="purpose_vision">изображения</string>
     <string name="purpose_vision_blind">изображения (нет рабочего проектора)</string>
     <string name="purpose_medical">медицина</string>
+    <string name="model_check">Проверить</string>
+    <string name="model_check_again">Проверить снова</string>
+    <string name="model_check_queued">Проверка в очереди…</string>
+    <string name="model_check_loading">Проверка: загрузка…</string>
+    <string name="model_check_answering">Проверка: вопрос %1$d из %2$d…</string>
+    <string name="model_check_none">На этом телефоне ещё не проверялась</string>
+    <string name="model_check_unpinned">Установлена без записи источника: проверка действует, пока эти файлы не меняются</string>
+    <string name="model_check_busy">Модель сейчас проверяется; повторите после проверки</string>
+    <string name="model_check_started">%1$s: проверка в очереди. Проверки идут по одной; модель для неё загружается заново.</string>
+    <string name="model_check_title">Проверка на этом телефоне: %1$s</string>
 </resources>

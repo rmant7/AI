@@ -115,9 +115,46 @@ data class DeviceVerification(
 @Serializable
 enum class CheckStatus { PASS, FAIL, NOT_TESTED, STALE }
 
-/** One capability's check: [detail] says why it failed (or what was noted), [sample] what the model actually said. */
+/**
+ * One capability's check: [detail] says why it failed (or what was noted),
+ * [sample] what the model actually said. [steps] is each question's own
+ * outcome (VISION: one image, another, two at once, text after, after a
+ * reload) and [failureKind] what kind of failure the first failed step was --
+ * evidence for a person, never part of what the check publicly answers.
+ */
 @Serializable
-data class CapabilityCheck(val status: CheckStatus, val detail: String? = null, val sample: String? = null)
+data class CapabilityCheck(
+    val status: CheckStatus,
+    val detail: String? = null,
+    val sample: String? = null,
+    val steps: List<ProbeStep> = emptyList(),
+    val failureKind: FailureKind? = null,
+)
+
+/**
+ * What one question of a check observed. [firstTokenMs] is from asking to
+ * the first piece of the answer (a load or a reload included, when the
+ * question caused one); [tokensPerSecond] the generation after it. Both are
+ * performance, a separate axis from [passed].
+ */
+@Serializable
+data class ProbeStep(
+    val title: String,
+    val passed: Boolean,
+    val answer: String? = null,
+    val error: String? = null,
+    val firstTokenMs: Long? = null,
+    val tokensPerSecond: Double? = null,
+)
+
+/**
+ * Why a step failed. MODEL_ANSWER: the model answered, wrongly (or not at
+ * all, still reasoning). RUNTIME: the runtime failed the request (an image
+ * that never reached the model, a native error). RESOURCE: this device ran
+ * out of memory or time for it -- says as much about the phone as the model.
+ */
+@Serializable
+enum class FailureKind { MODEL_ANSWER, RUNTIME, RESOURCE }
 
 /** What a local model can be verified for -- the names [DeviceVerification.checks] uses, and what a model is offered for. */
 object VerifiedCapability {

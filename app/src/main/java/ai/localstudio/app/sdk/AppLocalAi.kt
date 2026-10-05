@@ -51,12 +51,15 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
             .distinctBy { it.model.id }
             .map { selected ->
                 val id = selected.model.id
+                val seed = container.localSeed(id)
                 val artifact = container.installedArtifact(id)
+                // Checked as the files that load -- pinned or not; only a pinned id is offered as an artifact ref.
+                val checked = seed?.let(container::installedCheck)
                 LocalModel(
                     id = id,
-                    displayName = container.localSeed(id)?.title ?: id,
+                    displayName = seed?.title ?: id,
                     capabilities = capabilitiesOf(selected),
-                    verified = artifact?.let { SdkMapping.checks(container.recordedVerification(it), container.verificationContext(it)) }.orEmpty(),
+                    verified = checked?.let { (record, now) -> SdkMapping.checks(record, now) }.orEmpty(),
                     sizeBytes = selected.binding.fileSizeBytes + (selected.binding.mmprojArtifact?.let { File(it).length() } ?: 0L),
                     artifact = artifact?.let(SdkMapping::artifactRef),
                     source = sourceOf(id, artifact),
@@ -89,6 +92,15 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
         val reply = answer(selected, GenerationRequest(prompt = prompt, temperature = 0.0), GenerationOptions(temperature = 0.0)).toList().joinToString("")
         return finalAnswer(reply)?.trim()?.takeIf { it.isNotEmpty() }
             ?: throw LocalAiException.Failed("${selected.model.id} gave no translation" + if (finalAnswer(reply) == null) " (still reasoning when the reply ended)" else "")
+    }
+
+    override suspend fun verify(modelId: String): Map<LocalCapability, CheckResult> {
+        val seed = container.localSeed(modelId) ?: throw LocalAiException.UnknownModel(modelId)
+        val key = container.checkIdentity(seed)?.key ?: throw LocalAiException.UnknownModel(modelId)
+        container.checkInstalledModel(modelId)
+        container.candidateWork.first { key !in it.queued && it.trial?.key != key }
+        val (record, now) = container.installedCheck(seed) ?: throw LocalAiException.Failed("$modelId is not installed any more")
+        return SdkMapping.checks(record, now)
     }
 
     override val discovery: LocalModelDiscovery = object : LocalModelDiscovery {

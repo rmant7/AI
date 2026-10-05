@@ -32,6 +32,14 @@ interface LocalAi {
     /** Translates with [modelId], or the model the user chose for translation when null; the answer only, no reasoning. */
     suspend fun translate(request: TranslationRequest, modelId: String? = null): String
 
+    /**
+     * Checks the installed [modelId] on this device now -- the same questions
+     * a discovered model is asked -- and returns what was observed; also
+     * what refreshes a STALE result. Afterwards [models] reports the same.
+     * One check runs at a time: this waits its turn.
+     */
+    suspend fun verify(modelId: String): Map<LocalCapability, CheckResult>
+
     /** New models on the Hub and what this device made of them. */
     val discovery: LocalModelDiscovery
 }

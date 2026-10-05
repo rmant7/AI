@@ -594,4 +594,14 @@
     <string name="purpose_vision">images</string>
     <string name="purpose_vision_blind">images (no usable projector found)</string>
     <string name="purpose_medical">medical</string>
+    <string name="model_check">Check</string>
+    <string name="model_check_again">Check again</string>
+    <string name="model_check_queued">Check queued…</string>
+    <string name="model_check_loading">Checking: loading…</string>
+    <string name="model_check_answering">Checking: question %1$d of %2$d…</string>
+    <string name="model_check_none">Not checked on this phone yet</string>
+    <string name="model_check_unpinned">Installed with no recorded source: the check holds while these files stay the same</string>
+    <string name="model_check_busy">This model is being checked; try again after the check</string>
+    <string name="model_check_started">%1$s: check queued. One check at a time; the model is loaded fresh for it.</string>
+    <string name="model_check_title">Check on this phone: %1$s</string>
 </resources>

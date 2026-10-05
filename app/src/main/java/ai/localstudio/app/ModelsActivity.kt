@@ -10,6 +10,8 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -146,6 +148,10 @@ class ModelsActivity : AppCompatActivity() {
         lifecycleScope.launch { container.voskDownloads.state.collect { render() } }
         lifecycleScope.launch { container.experimentalEmbeddingDownloads.state.collect { render() } }
         lifecycleScope.launch { container.aicoreStatus.collect { render() } }
+        // A check's progress and its result, on the row of the model being checked.
+        lifecycleScope.launch {
+            container.candidateWork.map { it.trial to it.queued }.distinctUntilChanged().collect { render() }
+        }
         render()
     }
 
@@ -205,6 +211,7 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun onTextSecondary(seed: LocalModelSeed) {
+        if (refuseWhileChecking(seed)) return
         if (seed.isCustom) {
             removeCustomSeed(seed, ModelPurpose.CHAT)
             return
@@ -388,6 +395,7 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     private fun onTranslationSecondary(seed: LocalModelSeed) {
+        if (refuseWhileChecking(seed)) return
         if (seed.isCustom) {
             removeCustomSeed(seed, ModelPurpose.TRANSLATION)
             return
@@ -499,6 +507,63 @@ class ModelsActivity : AppCompatActivity() {
         container.settings.activeSttEngine = AsrEngineType.VOSK
         Toast.makeText(this, getString(R.string.models_switched_voice, seed.title), Toast.LENGTH_SHORT).show()
         render()
+    }
+
+    // ── Device check ───────────────────────────────────────────────────────
+
+    /**
+     * An installed llama.cpp model's check line: what its last check on this
+     * phone found for these exact files, and "Check" -- the questions a
+     * discovery candidate is asked, for any installed model, built-in ones
+     * included, so two models are compared on the same images and sentences.
+     */
+    private fun checkLine(seed: LocalModelSeed, state: DownloadState): Row.CheckLine? {
+        if (state !is DownloadState.Installed || !LlamaBridge.isAvailable) return null
+        val check = container.installedCheck(seed) ?: return null
+        val record = check.record
+        val now = check.now
+        val running = check.running
+        val text = when {
+            running != null ->
+                if (running.phase == ai.localstudio.app.modelinstall.CandidateTrialState.Phase.LOADING) getString(R.string.model_check_loading)
+                else getString(R.string.model_check_answering, running.probe, running.probes)
+            check.queued -> getString(R.string.model_check_queued)
+            record == null -> getString(R.string.model_check_none)
+            else -> VerificationText.summary(this, record, now)
+        }
+        return Row.CheckLine(
+            text = text,
+            buttonLabel = getString(if (record == null) R.string.model_check else R.string.model_check_again),
+            buttonEnabled = !check.busy,
+            onButton = {
+                if (container.checkInstalledModel(seed)) {
+                    container.appLog.record("CANDIDATE_TEST", "${seed.id}: check of the installed model queued")
+                    Toast.makeText(this, getString(R.string.model_check_started, seed.title), Toast.LENGTH_SHORT).show()
+                }
+                render()
+            },
+            onDetails = record?.let { r -> { showCheckDetails(seed.title, VerificationText.details(this, r, now)) } },
+        )
+    }
+
+    private fun showCheckDetails(title: String, text: String) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.model_check_title, title))
+            .setMessage(text)
+            .setPositiveButton(R.string.candidate_copy) { _, _ ->
+                val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText(title, "$title\n$text"))
+            }
+            .setNegativeButton(R.string.dialog_ok, null)
+            .show()
+            .findViewById<android.widget.TextView>(android.R.id.message)?.setTextIsSelectable(true)
+    }
+
+    /** Files under a running or queued check are not deleted out from under it. */
+    private fun refuseWhileChecking(seed: LocalModelSeed): Boolean {
+        if (container.installedCheck(seed)?.busy != true) return false
+        Toast.makeText(this, R.string.model_check_busy, Toast.LENGTH_SHORT).show()
+        return true
     }
 
     private fun showDetails(title: String, message: String) {
@@ -629,6 +694,7 @@ class ModelsActivity : AppCompatActivity() {
                     onSecondary = { onTextSecondary(seed) },
                     warnsOverBudget = !fitsBudget,
                     loadedNow = isLoadedNow,
+                    check = checkLine(seed, state),
                 ),
             )
         }
@@ -781,6 +847,7 @@ class ModelsActivity : AppCompatActivity() {
             onSecondary = { onTranslationSecondary(seed) },
             warnsOverBudget = !fitsBudget,
             loadedNow = isLoadedNow,
+            check = checkLine(seed, state),
         )
     }
 
@@ -1180,7 +1247,18 @@ class ModelsActivity : AppCompatActivity() {
             val warnsOverBudget: Boolean = false,
             /** Whether [AppContainer.isModelResident] says this model is actually in RAM right now — see [ModelHolder.bind]. */
             val loadedNow: Boolean = false,
+            /** The device check line of an installed local model; null for anything else. */
+            val check: CheckLine? = null,
         ) : Row
+
+        /** What the last check found ([text], tap for [onDetails]) and the button that starts one. */
+        data class CheckLine(
+            val text: String,
+            val buttonLabel: String,
+            val buttonEnabled: Boolean,
+            val onButton: () -> Unit,
+            val onDetails: (() -> Unit)?,
+        )
     }
 
     private inner class RowAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
@@ -1220,6 +1298,7 @@ class ModelsActivity : AppCompatActivity() {
                 row.title, row.subtitle, row.selected, row.status, row.progress,
                 row.indeterminate, row.primaryLabel, row.primaryEnabled, row.secondaryLabel,
                 row.warnsOverBudget, row.loadedNow,
+                row.check?.let { listOf(it.text, it.buttonLabel, it.buttonEnabled) },
             )
             else -> row
         }
@@ -1276,6 +1355,7 @@ class ModelsActivity : AppCompatActivity() {
             binding.localStatus.visibility = View.GONE
             binding.localProgress.visibility = View.GONE
             binding.localSecondaryButton.visibility = View.GONE
+            binding.localCheckRow.visibility = View.GONE
             binding.localPrimaryButton.text = context.getString(R.string.models_custom_add)
             binding.localPrimaryButton.isEnabled = true
             binding.localPrimaryButton.setOnClickListener { onClick() }
@@ -1325,6 +1405,15 @@ class ModelsActivity : AppCompatActivity() {
             binding.localSecondaryButton.visibility = if (row.secondaryLabel == null) View.GONE else View.VISIBLE
             binding.localSecondaryButton.text = row.secondaryLabel.orEmpty()
             binding.localSecondaryButton.setOnClickListener { row.onSecondary() }
+
+            val check = row.check
+            binding.localCheckRow.visibility = if (check == null) View.GONE else View.VISIBLE
+            binding.localCheckText.text = check?.text.orEmpty()
+            binding.localCheckText.isClickable = check?.onDetails != null
+            binding.localCheckText.setOnClickListener(check?.onDetails?.let { details -> View.OnClickListener { details() } })
+            binding.localCheckButton.text = check?.buttonLabel.orEmpty()
+            binding.localCheckButton.isEnabled = check?.buttonEnabled == true
+            binding.localCheckButton.setOnClickListener { check?.onButton?.invoke() }
         }
     }
 

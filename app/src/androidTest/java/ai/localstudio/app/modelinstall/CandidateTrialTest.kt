@@ -390,4 +390,75 @@ class CandidateTrialTest {
         assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION, here))
         assertTrue(result.checks.getValue(VerifiedCapability.VISION).detail!!.contains("generation failed"))
     }
+
+    @Test
+    fun a_wrong_vision_step_does_not_hide_the_later_ones_and_each_step_is_recorded() {
+        // Index-Translate-2B, build #483: one image right, two images in one turn wrong.
+        val result = run(
+            mapOf(VerifiedCapability.VISION to FunctionalProbe.VISION),
+            TrialRuntime { probe, onLoaded, onChunk ->
+                onLoaded()
+                (if (probe.images.size == 2) listOf("The digit is 4.") else seeing(probe)).forEach(onChunk)
+            },
+        )
+        val vision = result.checks.getValue(VerifiedCapability.VISION)
+        assertEquals(CheckStatus.FAIL, vision.status)
+        assertEquals(ai.localstudio.model.install.FailureKind.MODEL_ANSWER, vision.failureKind)
+        assertEquals(FunctionalProbe.VISION.map { it.title }, vision.steps.map { it.title })
+        assertEquals(listOf(true, true, false, true, true), vision.steps.map { it.passed })
+        assertEquals("The digit is 4.", vision.steps[2].answer)
+        assertTrue(vision.detail!!, vision.detail!!.contains("two images"))
+    }
+
+    @Test
+    fun a_step_records_time_to_first_token_and_its_own_speed() {
+        val result = run(runtime = answering(::correctChat))
+        val steps = result.checks.getValue(VerifiedCapability.TEXT).steps
+        assertEquals(2, steps.size)
+        // Stepping clock: asked at t, first chunk at t+100, three chunks 100 ms apart.
+        assertEquals(100L, steps[0].firstTokenMs)
+        assertEquals(10.0, steps[0].tokensPerSecond!!, 0.001)
+    }
+
+    @Test
+    fun text_still_stops_at_its_first_wrong_answer() {
+        var asked = 0
+        val result = run(runtime = TrialRuntime { _, onLoaded, onChunk ->
+            asked++
+            onLoaded()
+            onChunk("Lyon")
+        })
+        assertEquals(1, asked)
+        assertEquals(1, result.checks.getValue(VerifiedCapability.TEXT).steps.size)
+    }
+
+    @Test
+    fun running_out_of_time_or_memory_is_a_resource_failure_anything_else_a_runtime_one() {
+        fun kind(t: Throwable) = run(
+            mapOf(VerifiedCapability.TEXT to FunctionalProbe.TEXT, VerifiedCapability.VISION to FunctionalProbe.VISION),
+            TrialRuntime { probe, onLoaded, onChunk ->
+                onLoaded()
+                if (probe.images.isNotEmpty()) throw t
+                seeing(probe).forEach(onChunk)
+            },
+        ).checks.getValue(VerifiedCapability.VISION).failureKind
+        assertEquals(ai.localstudio.model.install.FailureKind.RESOURCE, kind(ProbeTimeoutException("no complete answer within 10 min")))
+        assertEquals(ai.localstudio.model.install.FailureKind.RESOURCE, kind(ai.localstudio.core.runtime.InsufficientMemoryException(2_000_000_000, 1_000_000_000, 0)))
+        assertEquals(ai.localstudio.model.install.FailureKind.RUNTIME, kind(IllegalStateException("the image was not seen")))
+    }
+
+    @Test
+    fun an_installed_model_is_asked_in_its_own_translation_format() {
+        val chat = FunctionalProbe.suitesFor(hasProjector = true)
+        assertEquals(listOf(VerifiedCapability.TEXT, VerifiedCapability.TRANSLATION, VerifiedCapability.VISION), chat.keys.toList())
+        assertEquals(FunctionalProbe.TRANSLATION, chat[VerifiedCapability.TRANSLATION])
+
+        // MADLAD (T5): translates only, in its own tag format; never asked to chat or to see.
+        val t5 = FunctionalProbe.suitesFor(hasProjector = false, translationFormat = TranslationPrompts.Format.TARGET_TAG)
+        assertEquals(listOf(VerifiedCapability.TRANSLATION), t5.keys.toList())
+        assertEquals("<2fr> Good morning, my friend.", t5.getValue(VerifiedCapability.TRANSLATION).first().prompt)
+
+        val omni = FunctionalProbe.suitesFor(false, TranslationPrompts.Format.OMNI_TRANSLATE) { if (it == "fr") "fra_Latn" else null }
+        assertEquals("Translate to fra_Latn: Thank you very much.", omni.getValue(VerifiedCapability.TRANSLATION)[1].prompt)
+    }
 }

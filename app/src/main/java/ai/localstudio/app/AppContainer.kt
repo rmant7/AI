@@ -670,28 +670,64 @@ class AppContainer private constructor(private val context: Context) {
     val candidateWork = MutableStateFlow(CandidateWork())
 
     private val candidateDownloadCancels = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
-    private val candidateTrialQueue = kotlinx.coroutines.channels.Channel<Pair<String, DiscoveredCandidate>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    private val candidateTrialQueue = kotlinx.coroutines.channels.Channel<TrialSubject>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+
+    /** Every model's latest device check, by its bytes -- candidates and installed models alike (see [VerificationStore]). */
+    val verificationStore = ai.localstudio.model.install.VerificationStore(File(context.filesDir, "verifications.json"))
+
+    /**
+     * One model whose turn in the check queue is coming: [key] is its
+     * [ai.localstudio.model.install.ArtifactId.key] (what [CandidateWork]
+     * tracks), [label] its discovery label for a candidate (null for an
+     * installed model), and [files] where its files are when its turn comes
+     * -- null by then means it was deleted meanwhile.
+     */
+    private class TrialSubject(
+        val key: String,
+        val name: String,
+        val label: String?,
+        val files: () -> TrialFiles?,
+    )
+
+    /** What a check loads and asks: the files, the bytes they are, and the questions for them. */
+    private class TrialFiles(
+        val weights: File,
+        val projector: File?,
+        val artifact: ai.localstudio.model.install.ArtifactId,
+        val suites: Map<String, List<FunctionalProbe>>,
+        val contextLength: Int,
+        val sourceUrl: String?,
+    )
+
+    private fun candidateSubject(label: String, candidate: DiscoveredCandidate) = TrialSubject(candidate.identity, candidate.repoId, label) {
+        candidateFiles(candidate)?.let { (weights, projector) ->
+            TrialFiles(
+                weights, projector, candidate.artifact().id, FunctionalProbe.suitesFor(candidate.artifact()),
+                candidate.contextLength?.toInt() ?: 0, "https://huggingface.co/${candidate.repoId}",
+            )
+        }
+    }
     private val candidateTrialMarker = CandidateTrialMarker(File(context.filesDir, "candidate_trial.json"))
 
     init {
         // One test at a time, in the order asked: each loads a whole model into RAM.
         discoveryScope.launch {
-            for ((label, candidate) in candidateTrialQueue) {
+            for (subject in candidateTrialQueue) {
                 // A test measures the model, not the phone's other work: downloads writing and hashing
                 // gigabytes push the model's own pages out of memory (a real run: a 7B model at
                 // 0.1 tok/s while two others downloaded). It waits, queued, until they are done.
                 if (candidateWork.value.downloads.isNotEmpty()) {
                     appLog.record(
                         "CANDIDATE_TEST",
-                        "${candidate.repoId}: waiting for ${candidateWork.value.downloads.size} download(s) to finish before testing",
+                        "${subject.name}: waiting for ${candidateWork.value.downloads.size} download(s) to finish before testing",
                     )
                     candidateWork.first { it.downloads.isEmpty() }
                 }
                 // Out of the queue and into the test in one step: work is never idle in between, so the foreground service stays up.
                 candidateWork.update {
-                    it.copy(queued = it.queued - candidate.identity, trial = CandidateTrialState(candidate.identity, CandidateTrialState.Phase.LOADING))
+                    it.copy(queued = it.queued - subject.key, trial = CandidateTrialState(subject.key, CandidateTrialState.Phase.LOADING, name = subject.name))
                 }
-                runCandidateTrial(label, candidate)
+                runTrial(subject)
             }
         }
     }
@@ -762,7 +798,7 @@ class AppContainer private constructor(private val context: Context) {
                         failures = failure?.let { w.failures + (key to it) } ?: w.failures,
                     )
                 }
-                if (installed) candidateTrialQueue.trySend(label to candidate)
+                if (installed) candidateTrialQueue.trySend(candidateSubject(label, candidate))
             }
         }
         return true
@@ -791,12 +827,88 @@ class AppContainer private constructor(private val context: Context) {
         fun waiting(w: CandidateWork) = candidate.identity in w.queued || w.trial?.key == candidate.identity
         val before = candidateWork.getAndUpdate { if (waiting(it)) it else it.copy(queued = it.queued + candidate.identity) }
         if (waiting(before)) return false
-        candidateTrialQueue.trySend(label to candidate)
+        candidateTrialQueue.trySend(candidateSubject(label, candidate))
         return true
     }
 
     /**
-     * Loads the installed [candidate] through [sharedRuntimeManager] like any
+     * Queues a check of the installed local model [modelId] -- built in,
+     * added by the user or moved in from discovery: the same questions a
+     * candidate is asked (translation in the prompt the Translation screen
+     * sends this model; vision when its projector is installed), recorded in
+     * [verificationStore] for its bytes. False when it is not installed or
+     * its check is already queued or running.
+     */
+    fun checkInstalledModel(modelId: String): Boolean = localSeed(modelId)?.let { checkInstalledModel(it) } ?: false
+
+    fun checkInstalledModel(seed: LocalModelSeed): Boolean {
+        val artifact = checkIdentity(seed) ?: return false
+        val key = artifact.key
+        fun waiting(w: CandidateWork) = key in w.queued || w.trial?.key == key
+        val before = candidateWork.getAndUpdate { if (waiting(it)) it else it.copy(queued = it.queued + key) }
+        if (waiting(before)) return false
+        candidateTrialQueue.trySend(
+            TrialSubject(key, seed.id, label = null) files@{
+                val weights = modelStore.fileFor(seed).takeIf { modelStore.isInstalled(seed) && it.isFile } ?: return@files null
+                val projector = modelStore.mmprojFileFor(seed).takeIf { modelStore.hasMmproj(seed) }
+                // The bytes may have changed while it waited (deleted and downloaded again): checked as what is there now.
+                val now = checkIdentity(seed) ?: return@files null
+                TrialFiles(
+                    weights, projector, now,
+                    FunctionalProbe.suitesFor(
+                        hasProjector = projector != null,
+                        translationFormat = ai.localstudio.app.localai.TranslationPrompts.Format.of(seed.isT5EncoderDecoder, "${seed.id} ${seed.title}"),
+                        isoScriptCode = IsoScriptCodes::of,
+                    ),
+                    seed.contextTokens,
+                    seed.repoIds.firstOrNull()?.let { "https://huggingface.co/$it" },
+                )
+            },
+        )
+        return true
+    }
+
+    /**
+     * Which bytes the installed [seed] is, for a check: its install's pinned
+     * id when that covers exactly what loads (weights, and the projector
+     * when one is installed); otherwise -- a legacy download, a projector
+     * added outside the install -- an unpinned id from its files' sizes.
+     */
+    internal fun checkIdentity(seed: LocalModelSeed): ai.localstudio.model.install.ArtifactId? {
+        if (!modelStore.isInstalled(seed)) return null
+        val projector = modelStore.mmprojFileFor(seed).takeIf { modelStore.hasMmproj(seed) }
+        modelStore.installedArtifact(seed)?.takeIf { (it.projectorFile != null) == (projector != null) }?.let { return it }
+        val weights = modelStore.fileFor(seed).takeIf { it.isFile } ?: return null
+        return ai.localstudio.model.install.ArtifactId.unpinned(seed.id, weights.length(), projector?.length())
+    }
+
+    /**
+     * Where installed [seed]'s check stands: its last [record] (null when
+     * never checked), what that is compared against [now], and whether a
+     * check of it is [queued] or [running] right now. Null when not installed.
+     */
+    fun installedCheck(seed: LocalModelSeed): InstalledCheck? {
+        val artifact = checkIdentity(seed) ?: return null
+        val work = candidateWork.value
+        return InstalledCheck(
+            record = recordedVerification(artifact),
+            now = verificationContext(artifact),
+            queued = artifact.key in work.queued,
+            running = work.trial?.takeIf { it.key == artifact.key },
+        )
+    }
+
+    data class InstalledCheck(
+        val record: ai.localstudio.model.install.DeviceVerification?,
+        val now: ai.localstudio.model.install.VerificationContext,
+        val queued: Boolean,
+        val running: CandidateTrialState?,
+    ) {
+        val busy: Boolean get() = queued || running != null
+    }
+
+    /**
+     * Loads [subject]'s files through [sharedRuntimeManager] like any
      * local model (the resident chat model is evicted first, the RAM
      * admission applies), asks it the [FunctionalProbe]s for its label and
      * records the [DeviceVerification] that run produced. [candidateTrialMarker]
@@ -804,15 +916,16 @@ class AppContainer private constructor(private val context: Context) {
      * down with it is still recorded on the next launch (see
      * [recoverInterruptedCandidateTrial]).
      */
-    private suspend fun runCandidateTrial(label: String, candidate: DiscoveredCandidate) {
+    private suspend fun runTrial(subject: TrialSubject) {
         val tag = "CANDIDATE_TEST"
-        val name = candidate.repoId
+        val name = subject.name
         try {
-            val (weights, projector) = candidateFiles(candidate) ?: run {
+            val files = subject.files() ?: run {
                 appLog.record(tag, "$name: not installed any more; test skipped")
                 return
             }
-            appLog.record(tag, "$name: loading with llama.cpp")
+            val weights = files.weights
+            appLog.record(tag, "$name: loading with llama.cpp" + if (!files.artifact.isPinned) " (an install with no recorded source: checked as these files, ${files.artifact.revision})" else "")
             val profile = "${Build.MANUFACTURER} ${Build.MODEL} / API ${Build.VERSION.SDK_INT} / " +
                 String.format(
                     java.util.Locale.ROOT,
@@ -821,10 +934,10 @@ class AppContainer private constructor(private val context: Context) {
                     ai.localstudio.model.install.LlamaCppArchitectures.LLAMA_CPP_TAG,
                     LlamaBridge.loadedLibrary ?: "unavailable",
                 )
-            val checkContext = verificationContext(candidate)
+            val checkContext = verificationContext(files.artifact)
             val running = RunningTrial(
-                label, name, profile, RuntimeKind.LLAMA_CPP.id, System.currentTimeMillis(),
-                identity = candidate.identity, context = checkContext,
+                subject.label.orEmpty(), name, profile, RuntimeKind.LLAMA_CPP.id, System.currentTimeMillis(),
+                identity = subject.key, context = checkContext,
             )
             candidateTrialMarker.write(running)
             logChatTemplate(name, weights)
@@ -834,9 +947,9 @@ class AppContainer private constructor(private val context: Context) {
             if (measuredRam.forget(weights.absolutePath, SMALL_CONTEXT_TOKENS)) {
                 appLog.record(tag, "$name: earlier RAM measurement dropped; this test measures again")
             }
-            val suites = FunctionalProbe.suitesFor(candidate.artifact())
+            val suites = files.suites
             val total = suites.values.sumOf { it.size }
-            val runtime = candidateRuntime(candidate, weights, projector)
+            val runtime = trialRuntime(name, files)
             var asked = 0
             var loadReported = false
             val verification = CandidateTrial().run(
@@ -855,13 +968,13 @@ class AppContainer private constructor(private val context: Context) {
                                 candidateTrialMarker.write(running.copy(loaded = true))
                                 appLog.record(tag, "$name: loaded; asking $total question(s): ${suites.entries.joinToString { "${it.value.size} ${it.key}" }}")
                             }
-                            candidateWork.update { it.copy(trial = CandidateTrialState(candidate.identity, CandidateTrialState.Phase.ANSWERING, number, total)) }
+                            candidateWork.update { it.copy(trial = CandidateTrialState(subject.key, CandidateTrialState.Phase.ANSWERING, number, total, name)) }
                         },
                         onChunk = onChunk,
                     )
                 },
             )
-            recordCandidateVerification(label, name, verification, candidate.identity)
+            recordVerification(subject.label, name, verification, subject.key)
         } catch (e: kotlinx.coroutines.CancellationException) {
             appLog.record(tag, "$name: test cancelled")
             throw e
@@ -869,13 +982,13 @@ class AppContainer private constructor(private val context: Context) {
             appLog.record(tag, "$name: test FAILED: ${e.javaClass.simpleName}: ${e.message}")
         } finally {
             candidateTrialMarker.clear()
-            // The candidate is not a model anything else uses: free its RAM now rather than when the next load evicts it.
+            // What was checked is not what anything else uses: free its RAM now rather than when the next load evicts it.
             runCatching { withContext(kotlinx.coroutines.NonCancellable) { sharedRuntimeManager.evictIdle() } }
             candidateWork.update { it.copy(trial = null) }
         }
     }
 
-    private fun recordCandidateVerification(label: String, name: String, verification: ai.localstudio.model.install.DeviceVerification, identity: String?) {
+    private fun recordVerification(label: String?, name: String, verification: ai.localstudio.model.install.DeviceVerification, identity: String?) {
         val tag = "CANDIDATE_TEST"
         appLog.record(
             tag,
@@ -886,8 +999,23 @@ class AppContainer private constructor(private val context: Context) {
                 (verification.error?.let { ", $it" } ?: "") +
                 (verification.sampleOutput?.let { " -- said: $it" } ?: ""),
         )
-        if (!discoveryStore.recordVerification(label, name, verification, identity)) {
-            appLog.record(tag, "$name: no longer in the last $label sweep; result logged only")
+        verification.checks.forEach { (cap, check) ->
+            if (check.steps.size > 1 || check.failureKind != null) {
+                appLog.record(
+                    tag,
+                    "$name: $cap steps -- " + check.steps.joinToString("; ") { step ->
+                        (if (step.passed) "ok " else "FAILED ") + step.title +
+                            (step.firstTokenMs?.let { " (first token ${it} ms" + (step.tokensPerSecond?.let { t -> String.format(java.util.Locale.ROOT, ", %.1f tok/s", t) } ?: "") + ")" } ?: "")
+                    } + (check.failureKind?.let { " -- failure kind $it" } ?: ""),
+                )
+            }
+        }
+        // The check belongs to the bytes: kept by their id whatever screen started it.
+        if (!verificationStore.record(verification)) {
+            appLog.record(tag, "$name: the check records no files it was about (an interrupted check from an older version); logged only")
+        }
+        if (label != null && label.isNotEmpty() && !discoveryStore.recordVerification(label, name, verification, identity)) {
+            appLog.record(tag, "$name: no longer in the last $label sweep; kept with its files only")
         }
     }
 
@@ -903,7 +1031,7 @@ class AppContainer private constructor(private val context: Context) {
         if (verdict == null) {
             appLog.record("CANDIDATE_TEST", "${running.repoId}: the previous test did not finish and the app did not crash; nothing recorded")
         } else {
-            recordCandidateVerification(running.label, running.repoId, verdict, running.identity)
+            recordVerification(running.label, running.repoId, verdict, running.identity)
         }
     }
 
@@ -1169,7 +1297,9 @@ class AppContainer private constructor(private val context: Context) {
      * does not finish within [CANDIDATE_PROBE_TIMEOUT_MS] -- the first one
      * includes the load -- fails as a timeout instead of hanging the trial.
      */
-    private fun candidateRuntime(candidate: DiscoveredCandidate, weights: File, projector: File?): TrialRuntime {
+    private fun trialRuntime(name: String, files: TrialFiles): TrialRuntime {
+        val weights = files.weights
+        val projector = files.projector
         val contextTokens = SMALL_CONTEXT_TOKENS
         val runtime = RamMeasuringRuntime(
             inner = LlamaCppRuntime(
@@ -1185,13 +1315,15 @@ class AppContainer private constructor(private val context: Context) {
             log = appLog::record,
         )
         val descriptor = ModelDescriptor(
-            id = "candidate:${candidate.repoId}@${candidate.commit.take(12)}",
-            family = "discovered",
-            version = candidate.commit,
+            // Its own id, never the model's: a copy already resident for chat (a larger context) is
+            // evicted like any idle model, and the check loads the files fresh, the way it measures them.
+            id = "check:${files.artifact.repository}@${files.artifact.revision.take(12)}",
+            family = "check",
+            version = files.artifact.revision,
             parameterCount = 0,
-            contextLength = candidate.contextLength?.toInt() ?: 0,
+            contextLength = files.contextLength,
             capabilities = if (projector != null) setOf(Capability.TEXT_GENERATION, Capability.VISION) else setOf(Capability.TEXT_GENERATION),
-            sourceUrl = "https://huggingface.co/${candidate.repoId}",
+            sourceUrl = files.sourceUrl ?: "",
             bindings = listOf(RuntimeBinding(RuntimeKind.LLAMA_CPP, weights.absolutePath, weights.length(), mmprojArtifact = projector?.absolutePath)),
         )
         val binding = descriptor.bindings.single()
@@ -1202,7 +1334,7 @@ class AppContainer private constructor(private val context: Context) {
                 val resident = sharedRuntimeManager.residentModels()
                 appLog.record(
                     "CANDIDATE_TEST",
-                    "${candidate.repoId}: unloading to check a reload -- resident: " +
+                    "$name: unloading to check a reload -- resident: " +
                         resident.joinToString { "${it.modelId} ${it.ramBytes / 1_000_000} MB" }.ifEmpty { "nothing" },
                 )
                 sharedRuntimeManager.evictIdle()
@@ -1226,7 +1358,7 @@ class AppContainer private constructor(private val context: Context) {
                 }
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                 // Not a cancellation of the trial itself: a probe that never finished is an observed failure.
-                throw IllegalStateException("no complete answer within ${CANDIDATE_PROBE_TIMEOUT_MS / 60_000} min")
+                throw ai.localstudio.app.modelinstall.ProbeTimeoutException("no complete answer within ${CANDIDATE_PROBE_TIMEOUT_MS / 60_000} min")
             }
         }
     }
@@ -2828,16 +2960,19 @@ class AppContainer private constructor(private val context: Context) {
         localSeed(modelId)?.let { modelStore.installedArtifact(it) }
 
     /**
-     * The latest device check recorded for exactly [artifact]'s bytes. For
-     * now these live with discovery's candidates (a model moved in by "Use"
-     * keeps the identity it was checked under); a check of any installed
-     * model, built-in ones included, comes with the verification store.
+     * The latest device check recorded for exactly [artifact]'s bytes:
+     * [verificationStore], whatever started the check, or -- for a check
+     * from before the store -- the candidate it was recorded with (a model
+     * moved in by "Use" keeps the identity it was checked under).
      */
     internal fun recordedVerification(artifact: ai.localstudio.model.install.ArtifactId): ai.localstudio.model.install.DeviceVerification? =
-        discoveryStore.runs().asSequence().flatMap { it.candidates.asSequence() }
-            .filter { it.identity == artifact.key }
-            .mapNotNull { it.verification }
-            .maxByOrNull { it.verifiedAtEpochMs }
+        (
+            listOfNotNull(verificationStore.latest(artifact)) +
+                // Checks recorded before the store existed live only with their candidates.
+                discoveryStore.runs().asSequence().flatMap { it.candidates.asSequence() }
+                    .filter { it.identity == artifact.key }
+                    .mapNotNull { it.verification }
+            ).maxByOrNull { it.verifiedAtEpochMs }
 
     /** Every candidate of the last sweep with the label it was found under. */
     internal fun discoveredCandidates(): List<Pair<String, DiscoveredCandidate>> =

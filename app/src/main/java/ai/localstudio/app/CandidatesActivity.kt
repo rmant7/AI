@@ -543,8 +543,15 @@ class CandidatesActivity : AppCompatActivity() {
             }
             c.verification?.checks?.forEach { (cap, check) ->
                 append("\n\n• ").append(cap).append(": ").append(check.status.name)
+                check.failureKind?.let { append(" (").append(it.name).append(")") }
                 check.detail?.let { append(" — ").append(it) }
-                check.sample?.let { append("\n  ").append(getString(R.string.candidate_check_said, it)) }
+                if (check.steps.isEmpty()) check.sample?.let { append("\n  ").append(getString(R.string.candidate_check_said, it)) }
+                check.steps.forEach { step ->
+                    append("\n  ").append(if (step.passed) "✓ " else "✗ ").append(step.title)
+                    step.answer?.let { append(" — «").append(it).append("»") }
+                    step.error?.let { append(" — ").append(it) }
+                    step.firstTokenMs?.let { append(String.format(Locale.ROOT, " [%.1f s", it / 1000.0)).append(step.tokensPerSecond?.let { t -> String.format(Locale.ROOT, ", %.1f tok/s", t) } ?: "").append("]") }
+                }
             }
             if (c.tags.isNotEmpty()) append("\n\n").append(getString(R.string.candidate_all_tags, c.tags.joinToString(", ")))
             container.verificationContext(c).let { now -> c.verification?.staleReason(now)?.let { append("\n\n").append(getString(R.string.candidate_stale_reason, it)) } }

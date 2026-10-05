@@ -62,6 +62,15 @@ class LocalAiContractTest {
     }
 
     @Test
+    fun `verify is for an installed model, by its id`() = runBlocking {
+        val checked = visionModel.copy(verified = mapOf(LocalCapability.VISION to CheckResult.PASS))
+        val ai = FakeLocalAi(listOf(checked))
+        assertEquals(mapOf(LocalCapability.VISION to CheckResult.PASS), ai.verify(checked.id))
+        assertFailsWith<LocalAiException.UnknownModel> { ai.verify("nope") }
+        Unit
+    }
+
+    @Test
     fun `options reject what no model can do`() {
         assertFailsWith<IllegalArgumentException> { GenerationOptions(maxTokens = 0) }
         assertFailsWith<IllegalArgumentException> { GenerationOptions(temperature = -1.0) }

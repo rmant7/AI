@@ -4,6 +4,8 @@ import ai.localstudio.app.localai.TranslationPrompts
 import ai.localstudio.model.install.CapabilityCheck
 import ai.localstudio.model.install.CheckStatus
 import ai.localstudio.model.install.DeviceVerification
+import ai.localstudio.model.install.FailureKind
+import ai.localstudio.model.install.ProbeStep
 import ai.localstudio.model.install.VerifiedCapability
 import java.text.Normalizer
 import kotlin.coroutines.cancellation.CancellationException
@@ -119,7 +121,44 @@ data class FunctionalProbe(
 
         /** [SUITES], plus [VISION] for a model that has the parts to see (see [ai.localstudio.model.install.ModelArtifact.canCheck]); without them VISION stays NOT_TESTED. */
         fun suitesFor(artifact: ai.localstudio.model.install.ModelArtifact): Map<String, List<FunctionalProbe>> =
-            if (artifact.canCheck(VerifiedCapability.VISION)) SUITES + (VerifiedCapability.VISION to VISION) else SUITES
+            suitesFor(hasProjector = artifact.canCheck(VerifiedCapability.VISION))
+
+        /**
+         * The questions for an installed model: [TEXT] unless it only
+         * translates (a T5 model is never asked to chat), [TRANSLATION]
+         * through the very prompt the Translation screen sends it
+         * ([translationFormat]), and [VISION] when its projector is installed.
+         */
+        fun suitesFor(
+            hasProjector: Boolean,
+            translationFormat: TranslationPrompts.Format = TranslationPrompts.Format.CHAT_INSTRUCTION,
+            isoScriptCode: (String) -> String? = { null },
+        ): Map<String, List<FunctionalProbe>> = buildMap {
+            val chats = translationFormat != TranslationPrompts.Format.TARGET_TAG
+            if (chats) put(VerifiedCapability.TEXT, TEXT)
+            put(
+                VerifiedCapability.TRANSLATION,
+                if (translationFormat == TranslationPrompts.Format.CHAT_INSTRUCTION) TRANSLATION else translation(translationFormat, isoScriptCode),
+            )
+            if (hasProjector && chats) put(VerifiedCapability.VISION, VISION)
+        }
+
+        /** [TRANSLATION]'s sentences, asked in [format]. */
+        fun translation(format: TranslationPrompts.Format, isoScriptCode: (String) -> String?): List<FunctionalProbe> =
+            TRANSLATION_PAIRS.map { (text, expected) ->
+                FunctionalProbe(
+                    prompt = TranslationPrompts.forLocalModel(format, "English", "French", "fr", text, isoScriptCode),
+                    expectAnyOf = listOf(expected),
+                    match = Match.LETTERS,
+                    title = "EN→FR \"$text\"",
+                )
+            }
+
+        private val TRANSLATION_PAIRS = listOf(
+            "Good morning, my friend." to "bonjour",
+            "Thank you very much." to "merci",
+            "Where is the train station?" to "gare",
+        )
 
         private fun translation(text: String, vararg expected: String) = FunctionalProbe(
             prompt = TranslationPrompts.chatInstruction("English", "French", text),
@@ -165,6 +204,9 @@ sealed interface ProbeImage {
     }
 }
 
+/** A question that got no complete answer in the time a check allows it -- the device's limit, not a wrong answer. */
+class ProbeTimeoutException(message: String) : Exception(message)
+
 /** What [CandidateTrial.run] needs from the real runtime: load (once) and answer one probe. */
 fun interface TrialRuntime {
     /**
@@ -188,6 +230,8 @@ fun interface TrialRuntime {
  */
 class CandidateTrial(
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Capabilities whose questions are all asked even after a wrong answer -- see [FunctionalProbe.VISION]. */
+    private val askEveryStep: Set<String> = setOf(VerifiedCapability.VISION),
 ) {
     suspend fun run(
         deviceProfile: String,
@@ -223,12 +267,30 @@ class CandidateTrial(
         for ((capability, probes) in suites) {
             if (probes.isEmpty()) continue
             val suiteAnswers = mutableListOf<String>()
+            val steps = mutableListOf<ProbeStep>()
             var failure: String? = null
+            var failureKind: FailureKind? = null
+            fun failed(step: ProbeStep, why: String, kind: FailureKind) {
+                steps += step
+                if (failure == null) {
+                    failure = why
+                    failureKind = kind
+                }
+            }
             for (probe in probes) {
                 val answer = StringBuilder()
+                val askedAt = clock()
                 var firstAt = 0L
                 var lastAt = 0L
                 var chunks = 0
+                fun step(passed: Boolean, said: String?, error: String? = null) = ProbeStep(
+                    title = probe.title,
+                    passed = passed,
+                    answer = said?.trim()?.replace('\n', ' ')?.take(STEP_ANSWER_CHARS)?.ifBlank { null },
+                    error = error,
+                    firstTokenMs = if (chunks > 0) firstAt - askedAt else null,
+                    tokensPerSecond = if (chunks >= 2 && lastAt > firstAt) (chunks - 1) * 1000.0 / (lastAt - firstAt) else null,
+                )
                 try {
                     runtime.answer(
                         probe,
@@ -250,7 +312,8 @@ class CandidateTrial(
                         answers += suiteAnswers
                         return verdict(error = "load failed: ${describe(t)}")
                     }
-                    failure = "generation failed: ${describe(t)}"
+                    // The runtime's own state is unknown after a throw: this capability's remaining questions are not asked.
+                    failed(step(false, answer.toString(), describe(t)), "generation failed: ${describe(t)}", kindOf(t))
                     break
                 }
                 // Between the first and the last chunk of each answer: excludes the
@@ -262,24 +325,29 @@ class CandidateTrial(
                 }
                 val reply = answer.toString()
                 val final = finalAnswer(reply)
-                if (final == null) {
-                    suiteAnswers += reply
-                    failure = "no answer to: ${probe.title} -- still reasoning (<think> not closed) when the reply ended"
-                    break
+                val wrong = when {
+                    final == null -> "no answer to: ${probe.title} -- still reasoning (<think> not closed) when the reply ended"
+                    final.isBlank() -> "empty answer to: ${probe.title}"
+                    !probe.passes(final) -> "wrong answer to: ${probe.title} (expected ${probe.expectAnyOf.joinToString(" or ")})"
+                    else -> null
                 }
-                suiteAnswers += final
-                if (final.isBlank()) {
-                    failure = "empty answer to: ${probe.title}"
-                    break
+                suiteAnswers += final ?: reply
+                if (wrong == null) {
+                    steps += step(true, final)
+                    continue
                 }
-                if (!probe.passes(final)) {
-                    failure = "wrong answer to: ${probe.title} (expected ${probe.expectAnyOf.joinToString(" or ")})"
-                    break
-                }
+                failed(step(false, final ?: reply), wrong, FailureKind.MODEL_ANSWER)
+                // A wrong answer leaves the runtime working: where the rest of the questions are
+                // steps of one lifecycle (VISION), they are still asked, so the record says which step broke.
+                if (capability !in askEveryStep) break
             }
             answers += suiteAnswers
             val sample = suiteAnswers.joinToString(" | ") { it.trim().replace('\n', ' ') }.take(SAMPLE_CHARS).ifBlank { null }
-            checks[capability] = if (failure == null) CapabilityCheck(CheckStatus.PASS, sample = sample) else CapabilityCheck(CheckStatus.FAIL, failure, sample)
+            checks[capability] = if (failure == null) {
+                CapabilityCheck(CheckStatus.PASS, sample = sample, steps = steps)
+            } else {
+                CapabilityCheck(CheckStatus.FAIL, failure, sample, steps, failureKind)
+            }
         }
         val failed = checks.filterValues { it.status == CheckStatus.FAIL }
         return verdict(error = failed.entries.joinToString("; ") { (cap, check) -> "$cap: ${check.detail}" }.ifBlank { null })
@@ -287,19 +355,28 @@ class CandidateTrial(
 
     private fun describe(t: Throwable) = "${t.javaClass.simpleName}: ${t.message.orEmpty()}".trimEnd(' ', ':')
 
+    /** Out of memory or out of time is the device's limit; anything else the runtime failed at. */
+    private fun kindOf(t: Throwable): FailureKind = when (t) {
+        is ai.localstudio.core.runtime.InsufficientMemoryException, is OutOfMemoryError, is ProbeTimeoutException -> FailureKind.RESOURCE
+        else -> FailureKind.RUNTIME
+    }
+
     companion object {
         const val SAMPLE_CHARS = 300
+        const val STEP_ANSWER_CHARS = 120
     }
 }
 
 /** Where the one running test is: loading the weights, then asking question [probe] of [probes]. */
 data class CandidateTrialState(
-    /** The candidate's [DiscoveredCandidate.identity]. */
+    /** The checked model's [ai.localstudio.model.install.ArtifactId.key] -- a candidate's [DiscoveredCandidate.identity]. */
     val key: String,
     val phase: Phase,
     /** 1-based, while [phase] is [Phase.ANSWERING]. */
     val probe: Int = 0,
     val probes: Int = 0,
+    /** For a person: the repository or the installed model's id. */
+    val name: String = key.substringBefore('|').substringAfter('/'),
 ) {
     enum class Phase { LOADING, ANSWERING }
 }

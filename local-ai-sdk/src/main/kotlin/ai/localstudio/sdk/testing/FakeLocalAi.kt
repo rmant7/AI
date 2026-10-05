@@ -50,6 +50,8 @@ class FakeLocalAi(
         return answer(model, input)
     }
 
+    override suspend fun verify(modelId: String): Map<LocalCapability, CheckResult> = resolveAny(modelId).verified
+
     override val discovery: LocalModelDiscovery = object : LocalModelDiscovery {
         override suspend fun candidates(): List<ModelCandidate> = candidates
 
@@ -69,6 +71,8 @@ class FakeLocalAi(
 
     private fun resolve(id: String?, capability: LocalCapability): LocalModel {
         if (id == null) throw LocalAiException.NoModel(capability)
-        return installed.firstOrNull { it.id == id } ?: throw LocalAiException.UnknownModel(id)
+        return resolveAny(id)
     }
+
+    private fun resolveAny(id: String): LocalModel = installed.firstOrNull { it.id == id } ?: throw LocalAiException.UnknownModel(id)
 }
