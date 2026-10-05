@@ -483,9 +483,6 @@
     <string name="candidate_tier_functional">работает на этом устройстве</string>
     <string name="candidate_details">%1$s\nФайл: %2$s (%3$d МБ)\nАрхитектура: %4$s, контекст %5$s\nКоммит: %6$s\nСтатус: %7$s</string>
     <string name="candidate_verification">Проверено на: %1$s\nЗагрузилась: %2$s · Правильные ответы: %3$s\nСкорость: %4$s\nОтвет: %5$s\nПроблема: %6$s</string>
-    <string name="candidate_test">Скачать и проверить</string>
-    <string name="candidate_test_busy">Сейчас уже проверяется другой кандидат</string>
-    <string name="candidate_test_started">Скачивание и проверка %1$s — продолжится в фоне; прогресс — на её карточке</string>
     <string name="candidate_delete">Удалить скачанное (%1$d МБ)</string>
     <string name="candidate_deleted">Удалено</string>
     <string name="candidate_delete_failed">Не удалено — идёт проверка, или ничего не установлено</string>
@@ -495,6 +492,13 @@
     <string name="candidates_section_count">кандидатов %1$d из %2$d просмотренных</string>
     <string name="candidates_section_failed">поиск не удался — %1$s</string>
     <string name="candidate_retest">Проверить снова</string>
+    <string name="candidate_test">Проверить</string>
+    <string name="candidate_download">Скачать и проверить (%1$d МБ)</string>
+    <string name="candidate_cancel">Отмена</string>
+    <string name="candidate_downloading">Скачано %1$d из %2$d МБ</string>
+    <string name="candidate_queued">В очереди на проверку — модели проверяются по одной</string>
+    <string name="candidate_download_failed">Скачивание не удалось: %1$s</string>
+    <string name="candidate_busy">Уже скачивается, ждёт проверки или проверяется</string>
     <string name="candidate_context">контекст %1$s</string>
     <string name="candidate_downloads">%1$s загрузок</string>
     <string name="candidate_no_tags">Назначение неизвестно: результат сохранён до того, как теги начали сохраняться — запустите «Найти новые модели» ещё раз</string>
@@ -504,7 +508,6 @@
     <string name="candidate_languages">Языки: %1$s</string>
     <string name="candidate_license">Лицензия: %1$s</string>
     <string name="candidate_all_tags">Все теги Hugging Face: %1$s</string>
-    <string name="candidate_phase_downloading">%1$s: скачано %2$d из %3$d МБ</string>
     <string name="candidate_phase_loading">%1$s: загрузка модели…</string>
     <string name="candidate_phase_answering">%1$s: тестовый вопрос %2$d из %3$d…</string>
     <string name="purpose_chat">чат</string>

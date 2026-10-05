@@ -64,15 +64,15 @@ class ModelDownloadService : Service() {
             container.downloads.state,
             container.whisperDownloads.state,
             container.discoveryRunning,
-            container.candidateTrialStatus,
-        ) { ggufStates, whisperStates, discovering, trial -> Watched(ggufStates, whisperStates, discovering, trial) }
-            .onEach { (ggufStates, whisperStates, discovering, trial) ->
+            container.candidateWork,
+        ) { ggufStates, whisperStates, discovering, candidates -> Watched(ggufStates, whisperStates, discovering, candidates) }
+            .onEach { (ggufStates, whisperStates, discovering, candidates) ->
                 val ggufRunning = ggufStates.values.filterIsInstance<DownloadState.Running>()
                 val ggufResolving = ggufStates.values.any { it is DownloadState.Resolving }
                 val whisperRunning = whisperStates.values.filterIsInstance<WhisperDownloadState.Running>()
                 val activeCount = ggufRunning.size + whisperRunning.size
 
-                if (activeCount == 0 && !ggufResolving && !discovering && trial == null) {
+                if (activeCount == 0 && !ggufResolving && !discovering && candidates.isIdle) {
                     ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return@onEach
@@ -84,7 +84,8 @@ class ModelDownloadService : Service() {
                         add(getString(R.string.download_notification_whisper_progress, (it.progress.fraction * 100).toInt()))
                     }
                     if (discovering) add(getString(R.string.download_notification_discovery))
-                    if (trial != null) add(trial.describe(this@ModelDownloadService))
+                    candidates.downloads.forEach { (repo, d) -> add("${repo.substringAfter('/')} ${d.percent ?: 0}%") }
+                    candidates.trial?.let { add(it.describe(this@ModelDownloadService)) }
                     if (isEmpty() && ggufResolving) add(getString(R.string.download_notification_searching))
                 }
                 // Discovery alone (activeCount 0) must not say "Downloading
@@ -92,7 +93,7 @@ class ModelDownloadService : Service() {
                 // just be wrong for however long the sweep runs on its own.
                 val title = when {
                     activeCount > 0 -> null
-                    trial != null -> getString(R.string.download_notification_title_candidate_test)
+                    candidates.trial != null -> getString(R.string.download_notification_title_candidate_test)
                     discovering -> getString(R.string.download_notification_title_discovery)
                     else -> null
                 }
@@ -165,5 +166,5 @@ private data class Watched(
     val gguf: Map<String, DownloadState>,
     val whisper: Map<String, WhisperDownloadState>,
     val discovering: Boolean,
-    val trial: ai.localstudio.app.modelinstall.CandidateTrialState?,
+    val candidates: ai.localstudio.app.modelinstall.CandidateWork,
 )

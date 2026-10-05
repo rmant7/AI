@@ -72,6 +72,10 @@ import ai.localstudio.app.llama.readMemAvailableBytes
 import ai.localstudio.app.modelinstall.ModelInstallation
 import ai.localstudio.app.modelinstall.CandidateTrial
 import ai.localstudio.app.modelinstall.CandidateTrialState
+import ai.localstudio.app.modelinstall.CandidateDownload
+import ai.localstudio.app.modelinstall.CandidateTrialMarker
+import ai.localstudio.app.modelinstall.CandidateWork
+import ai.localstudio.app.modelinstall.RunningTrial
 import ai.localstudio.app.modelinstall.DiscoveredCandidate
 import ai.localstudio.app.modelinstall.DiscoveryRun
 import ai.localstudio.app.modelinstall.FunctionalProbe
@@ -129,6 +133,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -628,115 +634,220 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
-    /** What [startCandidateTrial] is doing right now, for the notification and the candidates screen; null when idle. */
-    val candidateTrialStatus = MutableStateFlow<CandidateTrialState?>(null)
+    /** Every candidate download, test and queued test in flight -- the candidates screen and the notification watch this. */
+    val candidateWork = MutableStateFlow(CandidateWork())
 
-    private var candidateTrialJob: Job? = null
+    private val candidateDownloadCancels = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
+    private val candidateTrialQueue = kotlinx.coroutines.channels.Channel<Pair<String, DiscoveredCandidate>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    private val candidateTrialMarker = CandidateTrialMarker(File(context.filesDir, "candidate_trial.json"))
+
+    init {
+        // One test at a time, in the order asked: each loads a whole model into RAM.
+        discoveryScope.launch {
+            for ((label, candidate) in candidateTrialQueue) {
+                // Out of the queue and into the test in one step: work is never idle in between, so the foreground service stays up.
+                candidateWork.update {
+                    it.copy(queued = it.queued - candidate.repoId, trial = CandidateTrialState(candidate.repoId, CandidateTrialState.Phase.LOADING))
+                }
+                runCandidateTrial(label, candidate)
+            }
+        }
+    }
 
     /**
-     * Download & Test for one discovered candidate: installs the exact file
-     * discovery probed (see [CandidateModel]), loads it through
-     * [sharedRuntimeManager] like any local model (so the resident chat
-     * model is evicted first, and the RAM admission applies), asks it the
-     * [FunctionalProbe]s for its label and records the [DeviceVerification]
-     * that run produced. An install that fails records nothing -- no load
-     * was attempted, so there is nothing to say about this device -- and the
-     * candidate stays UNVERIFIED either way unless the runtime itself
-     * answered. False when a trial is already running.
+     * Downloads [candidate]'s exact file (see [CandidateModel]) alongside any
+     * other download, then queues its test. False when it is already
+     * downloading, queued or being tested.
      */
-    fun startCandidateTrial(label: String, candidate: DiscoveredCandidate): Boolean {
-        if (candidateTrialJob?.isActive == true) return false
-        candidateTrialJob = discoveryScope.launch {
+    fun downloadCandidate(label: String, candidate: DiscoveredCandidate): Boolean {
+        val name = candidate.repoId
+        val cancel = java.util.concurrent.atomic.AtomicBoolean(false)
+        val before = candidateWork.getAndUpdate {
+            if (it.isBusy(name)) it else it.copy(downloads = it.downloads + (name to CandidateDownload(0, candidate.sizeBytes)), failures = it.failures - name)
+        }
+        if (before.isBusy(name)) return false
+        candidateDownloadCancels[name] = cancel
+        discoveryScope.launch {
             val tag = "CANDIDATE_TEST"
-            val name = candidate.repoId
+            var failure: String? = null
+            var installed = false
             try {
-                candidateTrialStatus.value = CandidateTrialState(name, CandidateTrialState.Phase.DOWNLOADING, 0, candidate.sizeBytes)
-                appLog.record(tag, "$name: installing ${candidate.filePath}@${candidate.commit.take(8)} (${candidate.sizeBytes / 1_000_000} MB)")
+                appLog.record(tag, "$name: downloading ${candidate.filePath}@${candidate.commit.take(8)} (${candidate.sizeBytes / 1_000_000} MB)")
                 var loggedQuarter = 0
-                val weights = installCandidate(candidate) { done, total ->
-                    val state = CandidateTrialState(name, CandidateTrialState.Phase.DOWNLOADING, done, total)
-                    candidateTrialStatus.value = state
-                    val quarter = (state.percent ?: 0) / 25
+                val outcome = installCandidate(candidate, cancel) { done, total ->
+                    if (cancel.get()) return@installCandidate
+                    val progress = CandidateDownload(done, total)
+                    candidateWork.update { w -> if (name in w.downloads) w.copy(downloads = w.downloads + (name to progress)) else w }
+                    val quarter = (progress.percent ?: 0) / 25
                     if (quarter > loggedQuarter && quarter < 4) {
                         loggedQuarter = quarter
                         appLog.record(tag, "$name: downloaded ${done / 1_000_000}/${total / 1_000_000} MB")
                     }
-                } ?: return@launch
-
-                candidateTrialStatus.value = CandidateTrialState(name, CandidateTrialState.Phase.LOADING)
-                appLog.record(tag, "$name: loading with llama.cpp")
-                val profile = "${Build.MANUFACTURER} ${Build.MODEL} / API ${Build.VERSION.SDK_INT} / " +
-                    String.format(
-                        java.util.Locale.ROOT,
-                        "%.1f GB / llama.cpp %s (%s)",
-                        device.totalRamBytes / 1e9,
-                        ai.localstudio.model.install.LlamaCppArchitectures.LLAMA_CPP_TAG,
-                        LlamaBridge.loadedLibrary ?: "unavailable",
-                    )
-                val probes = FunctionalProbe.forLabel(label)
-                val runtime = candidateRuntime(candidate, weights)
-                var asked = 0
-                val verification = CandidateTrial().run(
-                    deviceProfile = profile,
-                    runtimeId = RuntimeKind.LLAMA_CPP.id,
-                    probes = probes,
-                    runtime = TrialRuntime { prompt, onLoaded, onChunk ->
-                        val probe = ++asked
-                        runtime.answer(
-                            prompt,
-                            onLoaded = {
-                                onLoaded()
-                                if (candidateTrialStatus.value?.phase != CandidateTrialState.Phase.ANSWERING) {
-                                    appLog.record(tag, "$name: loaded; asking ${probes.size} question(s)")
-                                }
-                                candidateTrialStatus.value = CandidateTrialState(name, CandidateTrialState.Phase.ANSWERING, probe = probe, probes = probes.size)
-                            },
-                            onChunk = onChunk,
-                        )
-                    },
-                )
-                val tier = verification.tier()
-                appLog.record(
-                    tag,
-                    "$name: $tier -- loaded=${verification.loaded}, answered=${verification.inferenceOk}" +
-                        (verification.tokensPerSecond?.let { String.format(java.util.Locale.ROOT, ", %.1f tok/s", it) } ?: "") +
-                        (verification.error?.let { ", $it" } ?: "") +
-                        (verification.sampleOutput?.let { " -- said: $it" } ?: ""),
-                )
-                if (!discoveryStore.recordVerification(label, name, verification)) {
-                    appLog.record(tag, "$name: no longer in the last $label sweep; result logged only")
+                }
+                when {
+                    cancel.get() -> appLog.record(tag, "$name: download cancelled")
+                    outcome.isSuccess -> installed = true
+                    else -> failure = outcome.exceptionOrNull()?.message
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                appLog.record(tag, "$name: cancelled")
                 throw e
             } catch (e: Exception) {
-                appLog.record(tag, "$name: FAILED: ${e.javaClass.simpleName}: ${e.message}")
+                failure = "${e.javaClass.simpleName}: ${e.message}"
+                appLog.record(tag, "$name: download FAILED: $failure")
             } finally {
-                // The candidate is not a model anything else uses: free its RAM now rather than when the next load evicts it.
-                runCatching { withContext(kotlinx.coroutines.NonCancellable) { sharedRuntimeManager.evictIdle() } }
-                candidateTrialStatus.value = null
+                candidateDownloadCancels.remove(name)
+                // From downloading straight into the test queue in one step, for the same reason as the queue worker's.
+                candidateWork.update { w ->
+                    w.copy(
+                        downloads = w.downloads - name,
+                        queued = if (installed && name !in w.queued) w.queued + name else w.queued,
+                        failures = failure?.let { w.failures + (name to it) } ?: w.failures,
+                    )
+                }
+                if (installed) candidateTrialQueue.trySend(label to candidate)
             }
         }
         return true
     }
 
+    fun cancelCandidateDownload(candidate: DiscoveredCandidate) {
+        candidateDownloadCancels[candidate.repoId]?.set(true)
+    }
+
+    /** Queues a test of an installed [candidate]; false when it is not installed or already downloading, queued or being tested. */
+    fun testCandidate(label: String, candidate: DiscoveredCandidate): Boolean {
+        if (candidateInstalledBytes(candidate) == null) return false
+        fun waiting(w: CandidateWork) = candidate.repoId in w.queued || w.trial?.repoId == candidate.repoId
+        val before = candidateWork.getAndUpdate { if (waiting(it)) it else it.copy(queued = it.queued + candidate.repoId) }
+        if (waiting(before)) return false
+        candidateTrialQueue.trySend(label to candidate)
+        return true
+    }
+
+    /**
+     * Loads the installed [candidate] through [sharedRuntimeManager] like any
+     * local model (the resident chat model is evicted first, the RAM
+     * admission applies), asks it the [FunctionalProbe]s for its label and
+     * records the [DeviceVerification] that run produced. [candidateTrialMarker]
+     * is on disk for the whole run, so a native crash that takes the process
+     * down with it is still recorded on the next launch (see
+     * [recoverInterruptedCandidateTrial]).
+     */
+    private suspend fun runCandidateTrial(label: String, candidate: DiscoveredCandidate) {
+        val tag = "CANDIDATE_TEST"
+        val name = candidate.repoId
+        try {
+            val weights = candidateWeights(candidate) ?: run {
+                appLog.record(tag, "$name: not installed any more; test skipped")
+                return
+            }
+            appLog.record(tag, "$name: loading with llama.cpp")
+            val profile = "${Build.MANUFACTURER} ${Build.MODEL} / API ${Build.VERSION.SDK_INT} / " +
+                String.format(
+                    java.util.Locale.ROOT,
+                    "%.1f GB / llama.cpp %s (%s)",
+                    device.totalRamBytes / 1e9,
+                    ai.localstudio.model.install.LlamaCppArchitectures.LLAMA_CPP_TAG,
+                    LlamaBridge.loadedLibrary ?: "unavailable",
+                )
+            val running = RunningTrial(label, name, profile, RuntimeKind.LLAMA_CPP.id, System.currentTimeMillis())
+            candidateTrialMarker.write(running)
+            val probes = FunctionalProbe.forLabel(label)
+            val runtime = candidateRuntime(candidate, weights)
+            var asked = 0
+            var loadReported = false
+            val verification = CandidateTrial().run(
+                deviceProfile = profile,
+                runtimeId = RuntimeKind.LLAMA_CPP.id,
+                probes = probes,
+                runtime = TrialRuntime { prompt, onLoaded, onChunk ->
+                    val probe = ++asked
+                    runtime.answer(
+                        prompt,
+                        onLoaded = {
+                            onLoaded()
+                            if (!loadReported) {
+                                loadReported = true
+                                candidateTrialMarker.write(running.copy(loaded = true))
+                                appLog.record(tag, "$name: loaded; asking ${probes.size} question(s)")
+                            }
+                            candidateWork.update { it.copy(trial = CandidateTrialState(name, CandidateTrialState.Phase.ANSWERING, probe, probes.size)) }
+                        },
+                        onChunk = onChunk,
+                    )
+                },
+            )
+            recordCandidateVerification(label, name, verification)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            appLog.record(tag, "$name: test cancelled")
+            throw e
+        } catch (e: Exception) {
+            appLog.record(tag, "$name: test FAILED: ${e.javaClass.simpleName}: ${e.message}")
+        } finally {
+            candidateTrialMarker.clear()
+            // The candidate is not a model anything else uses: free its RAM now rather than when the next load evicts it.
+            runCatching { withContext(kotlinx.coroutines.NonCancellable) { sharedRuntimeManager.evictIdle() } }
+            candidateWork.update { it.copy(trial = null) }
+        }
+    }
+
+    private fun recordCandidateVerification(label: String, name: String, verification: ai.localstudio.model.install.DeviceVerification) {
+        val tag = "CANDIDATE_TEST"
+        appLog.record(
+            tag,
+            "$name: ${verification.tier()} -- loaded=${verification.loaded}, answered=${verification.inferenceOk}" +
+                (verification.tokensPerSecond?.let { String.format(java.util.Locale.ROOT, ", %.1f tok/s", it) } ?: "") +
+                (verification.error?.let { ", $it" } ?: "") +
+                (verification.sampleOutput?.let { " -- said: $it" } ?: ""),
+        )
+        if (!discoveryStore.recordVerification(label, name, verification)) {
+            appLog.record(tag, "$name: no longer in the last $label sweep; result logged only")
+        }
+    }
+
+    /**
+     * A test the previous process did not finish: recorded as what it proves
+     * when that process crashed or was killed for memory after the test
+     * started (see [CandidateTrialMarker.verdict]); otherwise only logged.
+     */
+    private fun recoverInterruptedCandidateTrial(death: ai.localstudio.app.modelinstall.ProcessDeath?) {
+        val running = candidateTrialMarker.read() ?: return
+        candidateTrialMarker.clear()
+        val verdict = CandidateTrialMarker.verdict(running, death)
+        if (verdict == null) {
+            appLog.record("CANDIDATE_TEST", "${running.repoId}: the previous test did not finish and the app did not crash; nothing recorded")
+        } else {
+            recordCandidateVerification(running.label, running.repoId, verdict)
+        }
+    }
+
     private fun candidateVariantId(candidate: DiscoveredCandidate) =
         ai.localstudio.model.VariantId("discovered-" + candidate.repoId.replace('/', '_').lowercase() + "-" + candidate.commit.take(12))
 
-    /** Bytes a Download & Test left on disk for [candidate]; null when nothing is installed for it. */
+    /** Bytes a download left on disk for [candidate]; null when nothing is installed for it. */
     fun candidateInstalledBytes(candidate: DiscoveredCandidate): Long? =
         modelInstallation.installed.manifest(candidateVariantId(candidate))?.let { m -> m.artifacts.sumOf { it.unpackedBytes ?: it.sizeBytes } }
 
-    /** Removes what Download & Test installed for [candidate]; its recorded verification stays, it is still what was observed. */
+    private fun candidateWeights(candidate: DiscoveredCandidate): File? {
+        val manifest = modelInstallation.installed.manifest(candidateVariantId(candidate)) ?: return null
+        val artifact = manifest.artifacts.firstOrNull { it.role == ai.localstudio.model.ArtifactRoles.WEIGHTS } ?: return null
+        return modelInstallation.installed.pathOf(manifest, artifact).takeIf { it.isFile }
+    }
+
+    /** Removes [candidate]'s installed file; its recorded verification stays, it is still what was observed. False while it is busy. */
     fun deleteCandidateInstall(candidate: DiscoveredCandidate): Boolean {
-        if (candidateTrialJob?.isActive == true) return false
+        if (candidateWork.value.isBusy(candidate.repoId)) return false
         val removed = modelInstallation.installed.uninstall(candidateVariantId(candidate))
         appLog.record("CANDIDATE_TEST", "${candidate.repoId}: install ${if (removed) "deleted" else "not found"}")
         return removed
     }
 
-    /** The installed weights file, or null (logged) when the install did not complete. */
-    private fun installCandidate(candidate: DiscoveredCandidate, progress: (done: Long, total: Long) -> Unit): File? {
+    /** Installs the exact file discovery probed; a failure carries the reason, already logged. */
+    private fun installCandidate(
+        candidate: DiscoveredCandidate,
+        cancel: java.util.concurrent.atomic.AtomicBoolean,
+        progress: (done: Long, total: Long) -> Unit,
+    ): Result<Unit> {
         val model = CandidateModel.of(
             repoId = candidate.repoId,
             commit = candidate.commit,
@@ -748,14 +859,14 @@ class AppContainer private constructor(private val context: Context) {
             capabilityFacet = ai.localstudio.model.GenericFacet(),
             runtime = ai.localstudio.model.Runtimes.LLAMA_CPP,
         )
-        val variant = model.variants.single()
         var lastReportedMb = -1L
         val result = modelInstallation.installer.install(
             CANDIDATE_CATALOG_ID,
             candidate.commit,
             model,
-            variant,
+            model.variants.single(),
             modelInstallation::freeBytes,
+            cancel = { cancel.get() },
         ) { p ->
             val mb = p.transfer.bytesDone / 1_000_000
             if (mb / 10 != lastReportedMb / 10) {
@@ -764,25 +875,19 @@ class AppContainer private constructor(private val context: Context) {
             }
         }
         val tag = "CANDIDATE_TEST"
-        val manifest = when (result) {
-            is InstallResult.Installed -> result.manifest
-            is InstallResult.AlreadyInstalled -> result.manifest.also { appLog.record(tag, "${candidate.repoId}: already installed, testing it as is") }
-            is InstallResult.InsufficientStorage -> {
-                appLog.record(tag, "${candidate.repoId}: not installed -- need ${result.neededBytes / 1_000_000} MB, ${result.freeBytes / 1_000_000} MB free")
-                return null
+        val name = candidate.repoId
+        val failure = when (result) {
+            is InstallResult.Installed -> {
+                result.manifest.artifacts.forEach { appLog.record(tag, "$name: installed (${it.sizeBytes / 1_000_000} MB, ${it.integrity})") }
+                null
             }
-            is InstallResult.Refused -> {
-                appLog.record(tag, "${candidate.repoId}: not installed -- refused (${result.status})")
-                return null
-            }
-            is InstallResult.Failed -> {
-                appLog.record(tag, "${candidate.repoId}: not installed -- ${result.fileName}: ${result.failures.joinToString("; ")}")
-                return null
-            }
+            is InstallResult.AlreadyInstalled -> null
+            is InstallResult.InsufficientStorage -> "not enough space: need ${result.neededBytes / 1_000_000} MB, ${result.freeBytes / 1_000_000} MB free"
+            is InstallResult.Refused -> "refused (${result.status})"
+            is InstallResult.Failed -> "${result.fileName}: ${result.failures.joinToString("; ")}"
         }
-        val artifact = manifest.artifacts.single { it.role == ai.localstudio.model.ArtifactRoles.WEIGHTS }
-        appLog.record(tag, "${candidate.repoId}: installed (${artifact.sizeBytes / 1_000_000} MB, ${artifact.integrity})")
-        return modelInstallation.installed.pathOf(manifest, artifact)
+        if (failure != null && !cancel.get()) appLog.record(tag, "$name: not installed -- $failure")
+        return if (failure == null) Result.success(Unit) else Result.failure(IllegalStateException(failure))
     }
 
     /**
@@ -885,7 +990,7 @@ class AppContainer private constructor(private val context: Context) {
         // llama.cpp, say) becomes visible after the fact at all — the crash
         // itself kills the process before any of our own code can write
         // anything, but Android remembers why the previous instance died.
-        appLog.recordProcessExitIfNotable()
+        recoverInterruptedCandidateTrial(appLog.recordProcessExitIfNotable())
 
         // Any exception that reaches here slipped past every runCatching in
         // the app — logging it before Android's own crash handling takes

@@ -119,18 +119,35 @@ class CandidateTrial(
     }
 }
 
-/** Where a running Download & Test is, for the candidates screen and the notification. */
+/** Where the one running test is: loading the weights, then asking question [probe] of [probes]. */
 data class CandidateTrialState(
     val repoId: String,
     val phase: Phase,
-    val bytesDone: Long = 0,
-    val bytesTotal: Long = 0,
     /** 1-based, while [phase] is [Phase.ANSWERING]. */
     val probe: Int = 0,
     val probes: Int = 0,
 ) {
-    enum class Phase { DOWNLOADING, LOADING, ANSWERING }
+    enum class Phase { LOADING, ANSWERING }
+}
 
-    /** Download progress 0..100, or null when there is nothing to measure it against. */
-    val percent: Int? get() = if (phase == Phase.DOWNLOADING && bytesTotal > 0) (bytesDone * 100 / bytesTotal).toInt().coerceIn(0, 100) else null
+data class CandidateDownload(val bytesDone: Long, val bytesTotal: Long) {
+    val percent: Int? get() = if (bytesTotal > 0) (bytesDone * 100 / bytesTotal).toInt().coerceIn(0, 100) else null
+}
+
+/**
+ * Everything candidate-related in flight, keyed by repository id: downloads
+ * run side by side like any model's; tests run one at a time (each loads a
+ * whole model into RAM), the rest wait in [queued].
+ */
+data class CandidateWork(
+    val downloads: Map<String, CandidateDownload> = emptyMap(),
+    val trial: CandidateTrialState? = null,
+    val queued: List<String> = emptyList(),
+    /** The last download failure per repository, until it is retried. */
+    val failures: Map<String, String> = emptyMap(),
+) {
+    val isIdle: Boolean get() = downloads.isEmpty() && trial == null && queued.isEmpty()
+
+    /** Downloading, waiting for a test or being tested -- not a moment to delete its files or start it again. */
+    fun isBusy(repoId: String): Boolean = repoId in downloads || repoId in queued || trial?.repoId == repoId
 }

@@ -5,7 +5,7 @@ import ai.localstudio.app.databinding.ItemFilesHeaderBinding
 import ai.localstudio.app.databinding.ItemLocalModelBinding
 import ai.localstudio.app.modelinstall.CandidateFacts
 import ai.localstudio.app.modelinstall.CandidatePurpose
-import ai.localstudio.app.modelinstall.CandidateTrialState
+import ai.localstudio.app.modelinstall.CandidateWork
 import ai.localstudio.app.modelinstall.DiscoveredCandidate
 import ai.localstudio.app.modelinstall.DiscoveryRun
 import ai.localstudio.app.models.ModelDownloadService
@@ -48,7 +48,7 @@ class CandidatesActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 // Every change of the running test re-renders: its progress,
                 // and -- when it turns null -- the verification it just stored.
-                container.candidateTrialStatus.collect { render(it) }
+                container.candidateWork.collect { render(it) }
             }
         }
     }
@@ -63,7 +63,7 @@ class CandidatesActivity : AppCompatActivity() {
         return true
     }
 
-    private fun render(trial: CandidateTrialState? = container.candidateTrialStatus.value) {
+    private fun render(work: CandidateWork = container.candidateWork.value) {
         val list = binding.candidatesList
         list.removeAllViews()
         val runs = container.discoveryStore.runs().sortedBy { if (it.label == "chat") 0 else 1 }
@@ -73,7 +73,7 @@ class CandidatesActivity : AppCompatActivity() {
         }
         for (run in runs) {
             addHeader(sectionTitle(run))
-            run.candidates.forEach { addCard(run.label, it, trial) }
+            run.candidates.forEach { addCard(run.label, it, work) }
         }
     }
 
@@ -93,45 +93,69 @@ class CandidatesActivity : AppCompatActivity() {
         binding.candidatesList.addView(header.root)
     }
 
-    private fun addCard(label: String, c: DiscoveredCandidate, trial: CandidateTrialState?) {
+    private fun addCard(label: String, c: DiscoveredCandidate, work: CandidateWork) {
         val card = ItemLocalModelBinding.inflate(layoutInflater, binding.candidatesList, false)
         val facts = CandidateFacts.of(c.tags)
-        val testing = trial?.repoId == c.repoId
-        val anyTesting = trial != null
-        val installedBytes = container.candidateInstalledBytes(c)
+        val name = c.repoId
+        val download = work.downloads[name]
+        val trial = work.trial?.takeIf { it.repoId == name }
+        val queued = name in work.queued
+        val installedBytes = if (download == null) container.candidateInstalledBytes(c) else null
 
-        card.localTitle.text = c.repoId.substringAfter('/')
+        card.localTitle.text = name.substringAfter('/')
         card.localSubtitle.text = subtitle(c, facts)
 
         val verification = c.verification
-        card.localStatus.text = when {
-            testing -> trial!!.describe(this)
-            verification == null -> tierLabel(CandidateTier.UNVERIFIED)
-            else -> buildString {
+        val result = if (verification == null) {
+            tierLabel(CandidateTier.UNVERIFIED)
+        } else {
+            buildString {
                 append(tierLabel(verification.tier()))
                 verification.tokensPerSecond?.let { append(String.format(Locale.ROOT, " · %.1f tok/s", it)) }
                 verification.error?.let { append("\n").append(it) }
             }
         }
-
-        card.localProgress.visibility = if (testing) View.VISIBLE else View.GONE
-        if (testing) {
-            val percent = trial!!.percent
-            card.localProgress.isIndeterminate = percent == null
-            if (percent != null) card.localProgress.progress = percent
+        card.localStatus.text = when {
+            download != null -> getString(R.string.candidate_downloading, (download.bytesDone / 1_000_000).toInt(), (download.bytesTotal / 1_000_000).toInt())
+            trial != null -> trial.describe(this)
+            queued -> getString(R.string.candidate_queued)
+            else -> listOfNotNull(
+                result,
+                work.failures[name]?.let { getString(R.string.candidate_download_failed, it) },
+            ).joinToString("\n")
         }
 
-        card.localPrimaryButton.text = getString(if (verification == null) R.string.candidate_test else R.string.candidate_retest)
-        card.localPrimaryButton.isEnabled = !anyTesting
-        card.localPrimaryButton.setOnClickListener { testCandidate(label, c) }
+        card.localProgress.visibility = if (download != null || trial != null) View.VISIBLE else View.GONE
+        val percent = download?.percent
+        card.localProgress.isIndeterminate = percent == null
+        if (percent != null) card.localProgress.progress = percent
 
-        if (installedBytes != null) {
-            card.localSecondaryButton.visibility = View.VISIBLE
-            card.localSecondaryButton.text = getString(R.string.candidate_delete, (installedBytes / 1_000_000).toInt())
-            card.localSecondaryButton.isEnabled = !anyTesting
-            card.localSecondaryButton.setOnClickListener { deleteInstall(c) }
-        } else {
-            card.localSecondaryButton.visibility = View.GONE
+        val primary = card.localPrimaryButton
+        val secondary = card.localSecondaryButton
+        secondary.visibility = View.GONE
+        when {
+            download != null -> {
+                primary.text = getString(R.string.candidate_cancel)
+                primary.isEnabled = true
+                primary.setOnClickListener { container.cancelCandidateDownload(c) }
+            }
+            trial != null || queued -> {
+                primary.text = getString(R.string.candidate_test)
+                primary.isEnabled = false
+            }
+            installedBytes != null -> {
+                primary.text = getString(if (verification == null) R.string.candidate_test else R.string.candidate_retest)
+                primary.isEnabled = true
+                primary.setOnClickListener { test(label, c) }
+                secondary.visibility = View.VISIBLE
+                secondary.text = getString(R.string.candidate_delete, (installedBytes / 1_000_000).toInt())
+                secondary.setOnClickListener { deleteInstall(c) }
+            }
+            else -> {
+                primary.text = getString(R.string.candidate_download, (c.sizeBytes / 1_000_000).toInt())
+                primary.isEnabled = true
+                primary.setOnClickListener { download(label, c) }
+            }
         }
 
         card.root.setOnClickListener { showDetails(c) }
@@ -222,16 +246,16 @@ class CandidatesActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun testCandidate(label: String, c: DiscoveredCandidate) {
+    private fun download(label: String, c: DiscoveredCandidate) {
         NetworkPolicy.confirmIfNeeded(this, container.settings) {
             ModelDownloadService.ensureStarted(this)
-            val started = container.startCandidateTrial(label, c)
-            Toast.makeText(
-                this,
-                if (started) getString(R.string.candidate_test_started, c.repoId) else getString(R.string.candidate_test_busy),
-                Toast.LENGTH_LONG,
-            ).show()
+            if (!container.downloadCandidate(label, c)) Toast.makeText(this, R.string.candidate_busy, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun test(label: String, c: DiscoveredCandidate) {
+        ModelDownloadService.ensureStarted(this)
+        if (!container.testCandidate(label, c)) Toast.makeText(this, R.string.candidate_busy, Toast.LENGTH_SHORT).show()
     }
 
     private fun deleteInstall(c: DiscoveredCandidate) {

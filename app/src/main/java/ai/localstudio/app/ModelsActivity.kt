@@ -222,7 +222,7 @@ class ModelsActivity : AppCompatActivity() {
     /**
      * Opens the candidates screen once for whatever finished since it was
      * last shown -- a sweep from [AppContainer.startDiscovery] or a test from
-     * [AppContainer.startCandidateTrial] -- however long ago; see
+     * [AppContainer.testCandidate] -- however long ago; see
      * [runDiscovery]'s own doc comment.
      */
     private fun showDiscoveryResultsIfUnseen() {

@@ -50,21 +50,27 @@ class AppLog(private val context: Context) {
      * what turns "sent a message, got nothing back, no error, no idea why"
      * into a log line naming the real cause.
      */
-    fun recordProcessExitIfNotable() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return
+    /**
+     * Logs why the previous process ended, once, and returns it -- null for
+     * an ordinary exit, one already reported, or an Android version that
+     * cannot say. The caller uses it to attribute a crash to whatever was
+     * running at the time (see [ai.localstudio.app.modelinstall.CandidateTrialMarker]).
+     */
+    fun recordProcessExitIfNotable(): ai.localstudio.app.modelinstall.ProcessDeath? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
         val last = runCatching {
             activityManager.getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull()
-        }.getOrNull() ?: return
+        }.getOrNull() ?: return null
 
         // Android keeps this history around across many launches — without
         // remembering which one was already reported, every single cold
         // start would re-log the same old crash forever.
         val lastSeen = prefs.getLong(KEY_LAST_EXIT_TIMESTAMP, 0L)
-        if (last.timestamp <= lastSeen) return
+        if (last.timestamp <= lastSeen) return null
         prefs.edit().putLong(KEY_LAST_EXIT_TIMESTAMP, last.timestamp).apply()
 
-        val reason = describeExitReason(last.reason) ?: return // ordinary exits aren't worth logging
+        val reason = describeExitReason(last.reason) ?: return null // ordinary exits aren't worth logging
         val description = last.description?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
         record("PROCESS_EXIT", context.getString(R.string.log_process_exit, reason, description))
 
@@ -100,14 +106,18 @@ class AppLog(private val context: Context) {
         // the tid the tombstone names); the strings scan stays as the
         // fallback for anything that isn't a tombstone it understands (an
         // ANR's plain-text trace, a format change).
+        var detail: String? = last.description?.takeIf { it.isNotBlank() }
         runCatching {
             last.traceInputStream?.use { it.readBytes() }
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { bytes ->
                     val decoded = TombstoneDecoder.decode(bytes)?.takeIf { it.frames.isNotEmpty() }
                     record("PROCESS_EXIT_TRACE", decoded?.let(TombstoneDecoder::format) ?: relevantTraceLines(extractPrintableStrings(bytes)))
+                    decoded?.let { crash -> crash.abortMessage ?: listOfNotNull(crash.signal, crash.signalCode).joinToString(" ").ifBlank { null } }
+                        ?.let { detail = it }
                 }
         }
+        return ai.localstudio.app.modelinstall.ProcessDeath(last.timestamp, reason, detail)
     }
 
     private fun extractPrintableStrings(bytes: ByteArray, minLength: Int = 4): List<String> {

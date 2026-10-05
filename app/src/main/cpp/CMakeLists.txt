@@ -19,6 +19,13 @@ foreach(cfg DEBUG RELWITHDEBINFO MINSIZEREL RELEASE)
     set(CMAKE_CXX_FLAGS_${cfg} "-O3 -DNDEBUG" CACHE STRING "" FORCE)
 endforeach()
 add_compile_options(-O3)
+# The CMAKE_<LANG>_FLAGS_<CONFIG> overrides above do not reach the compile
+# lines (a device crash showed ggml's plain assert() in vec.cpp still compiled
+# in: "assertion !isnan(sumf) && !isinf(sumf) failed", SIGABRT on a model whose
+# fp16 attention overflowed). Defined directly so it applies to every target,
+# llama.cpp/ggml included: an overflowing model then gives a wrong answer
+# instead of killing the app, as in any release build of llama.cpp.
+add_compile_definitions(NDEBUG)
 message(STATUS "llama_jni: CMAKE_BUILD_TYPE='${CMAKE_BUILD_TYPE}' -> forcing -O3")
 
 include(FetchContent)
