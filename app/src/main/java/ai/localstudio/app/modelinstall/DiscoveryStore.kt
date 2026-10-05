@@ -130,7 +130,14 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
                 )
             },
         )
-        write(current.copy(runs = current.runs.filterNot { it.label == run.label } + carried))
+        // One repository, one card: a sweep never lists a repository under two families (each family
+        // skips what an earlier one claimed), so a copy left in another family's older run is stale --
+        // a real case: Qwen2.5-VL-HyperClick listed twice, once from before its projector was found,
+        // and both downloaded.
+        val found = run.candidates.map { it.repoId }.toSet()
+        val others = current.runs.filterNot { it.label == run.label }
+            .map { other -> other.copy(candidates = other.candidates.filterNot { it.repoId in found }) }
+        write(current.copy(runs = others + carried))
     }
 
     /** Marks a new sweep's start: candidates first found from here on are [isNew]. */

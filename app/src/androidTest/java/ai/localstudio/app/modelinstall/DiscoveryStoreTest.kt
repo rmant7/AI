@@ -335,4 +335,18 @@ class DiscoveryStoreTest {
         assertTrue(news.sweepFinished)
         assertEquals(later, store.lastSweepAtEpochMs())
     }
+
+    @Test
+    fun a_repository_is_listed_once_the_latest_family_that_found_it_wins() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 2, listOf(candidate("acme/a-GGUF"), candidate("acme/other-GGUF"))))
+
+        // Found again by another family, now with its projector.
+        store.record(DiscoveryRun("chat:qwen", 2_000L, 1, listOf(candidate("acme/a-GGUF").copy(projector = projector(path = "mmproj-F16.gguf")))))
+
+        val byLabel = store.runs().associate { it.label to it.candidates.map { c -> c.repoId } }
+        assertEquals(listOf("acme/other-GGUF"), byLabel.getValue("chat"))
+        assertEquals(listOf("acme/a-GGUF"), byLabel.getValue("chat:qwen"))
+        assertEquals(1, store.runs().flatMap { it.candidates }.count { it.repoId == "acme/a-GGUF" })
+    }
 }

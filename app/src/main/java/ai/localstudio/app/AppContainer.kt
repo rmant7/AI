@@ -670,6 +670,16 @@ class AppContainer private constructor(private val context: Context) {
         // One test at a time, in the order asked: each loads a whole model into RAM.
         discoveryScope.launch {
             for ((label, candidate) in candidateTrialQueue) {
+                // A test measures the model, not the phone's other work: downloads writing and hashing
+                // gigabytes push the model's own pages out of memory (a real run: a 7B model at
+                // 0.1 tok/s while two others downloaded). It waits, queued, until they are done.
+                if (candidateWork.value.downloads.isNotEmpty()) {
+                    appLog.record(
+                        "CANDIDATE_TEST",
+                        "${candidate.repoId}: waiting for ${candidateWork.value.downloads.size} download(s) to finish before testing",
+                    )
+                    candidateWork.first { it.downloads.isEmpty() }
+                }
                 // Out of the queue and into the test in one step: work is never idle in between, so the foreground service stays up.
                 candidateWork.update {
                     it.copy(queued = it.queued - candidate.identity, trial = CandidateTrialState(candidate.identity, CandidateTrialState.Phase.LOADING))
