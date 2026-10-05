@@ -129,6 +129,9 @@ class ChatActivity : AppCompatActivity() {
         setContentView(binding.root)
         container = AppContainer.get(this)
         history = ChatHistoryStore(this)
+        // Weekly model discovery on start (Wi-Fi only), and its findings -- or a finished test -- shown as soon as they are in.
+        if (container.startWeeklyDiscoveryIfDue()) ai.localstudio.app.models.ModelDownloadService.ensureStarted(this)
+        DiscoveryNotice.watch(this)
         binding.root.applySystemBarInsets(applyImeInset = true)
 
         binding.messages.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }

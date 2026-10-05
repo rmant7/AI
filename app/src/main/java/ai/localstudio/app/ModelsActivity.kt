@@ -90,6 +90,7 @@ class ModelsActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         container = AppContainer.get(this)
+        DiscoveryNotice.watch(this)
         binding.models.layoutManager = LinearLayoutManager(this)
         binding.models.adapter = adapter
 
@@ -151,7 +152,6 @@ class ModelsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         render()
-        showDiscoveryResultsIfUnseen()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -188,28 +188,11 @@ class ModelsActivity : AppCompatActivity() {
      * minutes -- a real device report showed the tap logged and then
      * nothing, because the dialog that used to show the result was tied to
      * this screen, and by the time the sweep finished the screen (or the
-     * app) was already gone, silently along with it. [showDiscoveryResultsIfUnseen],
-     * called from [onResume], is what picks the result back up whenever this
-     * screen (re)opens, whether that's seconds or days later.
+     * app) was already gone, silently along with it. [DiscoveryNotice],
+     * watching from here and from Chat, is what tells the person the result
+     * whenever it lands, whether that's minutes or days later.
      */
     private fun runDiscovery() = DiscoveryLauncher.start(this)
-
-    /**
-     * Opens the candidates screen once for whatever finished since it was
-     * last shown -- a sweep from [AppContainer.startDiscovery] or a test from
-     * [AppContainer.testCandidate] -- however long ago; see
-     * [runDiscovery]'s own doc comment.
-     */
-    private fun showDiscoveryResultsIfUnseen() {
-        if (!container.discoveryStore.hasUnseen()) return
-        if (container.discoveryStore.runs().isEmpty()) return
-        container.discoveryStore.markSeen()
-        showCandidates()
-    }
-
-    private fun showCandidates() {
-        startActivity(android.content.Intent(this, CandidatesActivity::class.java))
-    }
 
     // ── Text models ────────────────────────────────────────────────────────
 

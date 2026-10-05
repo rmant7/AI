@@ -134,6 +134,25 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
         write(current.copy(runs = current.runs.filter { it.label in labels }))
     }
 
+    /** When the last sweep started (or, for runs stored before that was kept, finished); 0 when there never was one. */
+    fun lastSweepAtEpochMs(): Long = read().let { f -> f.sweepStartedAtEpochMs.takeIf { it > 0 } ?: f.runs.maxOfOrNull { it.finishedAtEpochMs } ?: 0L }
+
+    /** What happened since [markSeen] was last called -- what the "new models" notice tells the person. Pairs are (label, candidate). */
+    data class News(
+        val newCandidates: List<Pair<String, DiscoveredCandidate>>,
+        val tested: List<Pair<String, DiscoveredCandidate>>,
+        val sweepFinished: Boolean,
+    )
+
+    fun news(): News = read().let { f ->
+        val all = f.runs.flatMap { run -> run.candidates.map { run.label to it } }
+        News(
+            newCandidates = all.filter { (_, c) -> isNew(c) && c.firstSeenAtEpochMs > f.lastSeenAtEpochMs },
+            tested = all.filter { (_, c) -> (c.verification?.verifiedAtEpochMs ?: 0L) > f.lastSeenAtEpochMs },
+            sweepFinished = f.runs.any { it.finishedAtEpochMs > f.lastSeenAtEpochMs },
+        )
+    }
+
     /** First found by the latest sweep, when there was an earlier one to compare with -- on the very first sweep nothing is "new". */
     fun isNew(candidate: DiscoveredCandidate): Boolean = read().let { f ->
         f.previousSweepStartedAtEpochMs > 0 && candidate.firstSeenAtEpochMs >= f.sweepStartedAtEpochMs

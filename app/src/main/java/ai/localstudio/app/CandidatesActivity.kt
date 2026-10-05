@@ -57,6 +57,8 @@ class CandidatesActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         container.discoveryStore.markSeen()
+        // Which model is selected may have changed on another screen.
+        render()
     }
 
     override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
@@ -139,7 +141,9 @@ class CandidatesActivity : AppCompatActivity() {
         val download = work.downloads[name]
         val trial = work.trial?.takeIf { it.repoId == name }
         val queued = name in work.queued
-        val inUse = download == null && container.candidateInUse(label, c)
+        val usage = if (download == null) container.candidateUsage(label, c) else CandidateUsage.NONE
+        val inUse = usage != CandidateUsage.NONE
+        val translation = DiscoveryLabels.isTranslation(label)
         val installedBytes = if (download == null) container.candidateInstalledBytes(c) else null
         val partialBytes = if (download == null && installedBytes == null) container.candidatePartialBytes(c) else null
 
@@ -162,7 +166,11 @@ class CandidatesActivity : AppCompatActivity() {
             trial != null -> trial.describe(this)
             queued -> getString(R.string.candidate_queued)
             else -> listOfNotNull(
-                getString(if (DiscoveryLabels.isTranslation(label)) R.string.candidate_in_use_translation else R.string.candidate_in_use_chat).takeIf { inUse },
+                when (usage) {
+                    CandidateUsage.SELECTED -> getString(if (translation) R.string.candidate_selected_translation else R.string.candidate_selected_chat)
+                    CandidateUsage.IN_MODELS -> getString(if (translation) R.string.candidate_in_use_translation else R.string.candidate_in_use_chat)
+                    CandidateUsage.NONE -> null
+                },
                 partialBytes?.let { getString(R.string.candidate_paused, mb(it), mb(c.sizeBytes)) },
                 result,
                 work.failures[name]?.let { getString(R.string.candidate_download_failed, it) },
@@ -188,12 +196,16 @@ class CandidatesActivity : AppCompatActivity() {
                 primary.isEnabled = false
                 primary.setOnClickListener(null)
             }
+            usage == CandidateUsage.SELECTED -> {
+                primary.text = getString(if (translation) R.string.candidate_open_translation else R.string.candidate_open_chat)
+                primary.setOnClickListener { openWhereUsed(translation) }
+            }
             inUse -> {
-                primary.text = getString(R.string.candidate_use)
+                primary.text = getString(if (translation) R.string.candidate_use_translation else R.string.candidate_use_chat)
                 primary.setOnClickListener { use(label, c) }
             }
             installedBytes != null && verification.tier() == CandidateTier.FUNCTIONAL -> {
-                primary.text = getString(R.string.candidate_use)
+                primary.text = getString(if (translation) R.string.candidate_use_translation else R.string.candidate_use_chat)
                 primary.setOnClickListener { use(label, c) }
                 secondary.visibility = View.VISIBLE
                 secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
@@ -314,15 +326,30 @@ class CandidatesActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * "Use", with where the model went said in full -- a short toast was
+     * gone before it was read, and a translation model ending up under
+     * Translation (not Chat) was a surprise nothing had announced.
+     */
     private fun use(label: String, c: DiscoveredCandidate) {
         val seed = container.useCandidate(label, c)
-        val message = when {
-            seed == null -> getString(R.string.candidate_use_failed)
-            DiscoveryLabels.isTranslation(label) -> getString(R.string.models_switched_translation, seed.title)
-            else -> getString(R.string.models_switched_chat, seed.title)
-        }
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         render()
+        if (seed == null) {
+            Toast.makeText(this, R.string.candidate_use_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+        val translation = DiscoveryLabels.isTranslation(label)
+        AlertDialog.Builder(this)
+            .setTitle(getString(if (translation) R.string.candidate_used_title_translation else R.string.candidate_used_title_chat, seed.title))
+            .setMessage(if (translation) R.string.candidate_used_translation else R.string.candidate_used_chat)
+            .setPositiveButton(if (translation) R.string.candidate_open_translation else R.string.candidate_open_chat) { _, _ -> openWhereUsed(translation) }
+            .setNegativeButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun openWhereUsed(translation: Boolean) {
+        val target = if (translation) TranslationActivity::class.java else ChatActivity::class.java
+        startActivity(android.content.Intent(this, target).addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
     }
 
     private fun test(label: String, c: DiscoveredCandidate) {

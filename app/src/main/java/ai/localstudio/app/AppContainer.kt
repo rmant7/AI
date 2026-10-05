@@ -564,10 +564,27 @@ class AppContainer private constructor(private val context: Context) {
      * A no-op while a sweep is already running (checked via [discoveryJob],
      * not [discoveryRunning] — the latter is for outside observers).
      */
-    fun startDiscovery() {
+    fun startDiscovery(trigger: String = "manual") {
         if (discoveryJob?.isActive == true) return
         if (modelInstallation.lineageDiscovery == null) return
-        discoveryJob = discoveryScope.launch { runDiscoverySweep("manual") }
+        discoveryJob = discoveryScope.launch { runDiscoverySweep(trigger) }
+    }
+
+    /**
+     * The weekly sweep, from the app's own start: when the last one is a
+     * week old (or there never was one) and the network is unmetered. The
+     * same as [DiscoveryWorker], for whoever opens the app more often than
+     * WorkManager gets around to it; whichever runs first, the other finds
+     * the sweep fresh (or running) and does nothing. True when it started one.
+     */
+    fun startWeeklyDiscoveryIfDue(): Boolean {
+        val ageMs = System.currentTimeMillis() - discoveryStore.lastSweepAtEpochMs()
+        if (ageMs < WEEKLY_DISCOVERY_MS) return false
+        if (!NetworkPolicy.isUnmetered(context)) return false
+        val last = discoveryStore.lastSweepAtEpochMs()
+        appLog.record("DISCOVERY", "weekly sweep due (${if (last == 0L) "never searched" else "last ${ageMs / 86_400_000} days ago"})")
+        startDiscovery("weekly, on start")
+        return true
     }
 
     private val discoverySweepLock = Mutex()
@@ -853,6 +870,18 @@ class AppContainer private constructor(private val context: Context) {
         if (DiscoveryLabels.isTranslation(label)) LocalModels.customTranslation(candidate.repoId) else LocalModels.custom(candidate.repoId)
 
     private fun candidatePurpose(label: String) = if (DiscoveryLabels.isTranslation(label)) ModelPurpose.TRANSLATION else ModelPurpose.CHAT
+
+    /** Where a candidate stands after "Use": not one of the user's models, one of them, or the one selected right now. */
+    fun candidateUsage(label: String, candidate: DiscoveredCandidate): CandidateUsage {
+        if (!candidateInUse(label, candidate)) return CandidateUsage.NONE
+        val seed = candidateSeed(label, candidate)
+        val selected = if (DiscoveryLabels.isTranslation(label)) {
+            settings.translationModel == seed.id
+        } else {
+            settings.providerId == CloudProviders.LOCAL.id && settings.chatModelFor(CloudProviders.LOCAL.id) == seed.id
+        }
+        return if (selected) CandidateUsage.SELECTED else CandidateUsage.IN_MODELS
+    }
 
     /** Whether [candidate] is already one of the user's own models for [label]'s purpose, installed. */
     fun candidateInUse(label: String, candidate: DiscoveredCandidate): Boolean {
@@ -3135,6 +3164,8 @@ class AppContainer private constructor(private val context: Context) {
         /** Install manifests of discovery candidates name this catalog; their catalog version is the commit. */
         private const val CANDIDATE_CATALOG_ID = "discovery"
 
+        private const val WEEKLY_DISCOVERY_MS = 7L * 24 * 60 * 60 * 1000
+
         /** Per probe; the first includes the load, which has taken minutes for a large model on this class of device. */
         private const val CANDIDATE_PROBE_TIMEOUT_MS = 10 * 60_000L
 
@@ -3360,3 +3391,6 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 }
+
+/** See [AppContainer.candidateUsage]. */
+enum class CandidateUsage { NONE, IN_MODELS, SELECTED }

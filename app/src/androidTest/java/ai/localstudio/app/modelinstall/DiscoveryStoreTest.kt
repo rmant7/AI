@@ -243,4 +243,24 @@ class DiscoveryStoreTest {
         assertEquals(qwen, DiscoveryLabels.lineage("chat:qwen"))
         assertNull(DiscoveryLabels.lineage("chat"))
     }
+
+    @Test
+    fun news_is_what_happened_since_the_last_look() {
+        val store = store()
+        store.beginSweep(nowMs = 1_000L)
+        store.record(DiscoveryRun("chat:qwen", 1_500L, 1, listOf(candidate("acme/a-GGUF", firstSeen = 0))), nowMs = 1_500L)
+        store.markSeen()
+        assertEquals(DiscoveryStore.News(emptyList(), emptyList(), sweepFinished = false), store.news())
+
+        val later = System.currentTimeMillis() + 60_000
+        store.beginSweep(nowMs = later)
+        store.record(DiscoveryRun("chat:qwen", later + 1, 2, listOf(candidate("acme/a-GGUF", firstSeen = 0), candidate("acme/b-GGUF", firstSeen = 0))), nowMs = later + 1)
+        store.recordVerification("chat:qwen", "acme/a-GGUF", verification(at = later + 2))
+
+        val news = store.news()
+        assertEquals(listOf("acme/b-GGUF"), news.newCandidates.map { it.second.repoId })
+        assertEquals(listOf("acme/a-GGUF"), news.tested.map { it.second.repoId })
+        assertTrue(news.sweepFinished)
+        assertEquals(later, store.lastSweepAtEpochMs())
+    }
 }
