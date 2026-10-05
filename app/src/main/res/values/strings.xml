@@ -584,6 +584,7 @@
     <string name="purpose_tools">tools/agents</string>
     <string name="purpose_roleplay">roleplay/creative writing</string>
     <string name="purpose_uncensored">uncensored</string>
-    <string name="purpose_vision">images (text-only here)</string>
+    <string name="purpose_vision">images</string>
+    <string name="purpose_vision_blind">images (no usable projector found)</string>
     <string name="purpose_medical">medical</string>
 </resources>

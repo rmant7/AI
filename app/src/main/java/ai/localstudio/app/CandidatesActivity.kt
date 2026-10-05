@@ -449,7 +449,10 @@ class CandidatesActivity : AppCompatActivity() {
         if (c.tags.isEmpty()) {
             append(getString(R.string.candidate_no_tags))
         } else {
-            val purposes = facts.purposes.joinToString(", ") { purposeLabel(it) }
+            // "Images" by its tags is only half the story: whether this phone can use them depends on the projector that came with it.
+            val purposes = facts.purposes.joinToString(", ") {
+                if (it == CandidatePurpose.VISION && c.projector == null) getString(R.string.purpose_vision_blind) else purposeLabel(it)
+            }
             append(getString(R.string.candidate_purpose, purposes.ifEmpty { getString(R.string.candidate_purpose_none) }))
             if (facts.baseModels.isNotEmpty()) append("\n").append(getString(R.string.candidate_base_model, facts.baseModels.joinToString(", ")))
             val extras = listOfNotNull(

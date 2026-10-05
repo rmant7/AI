@@ -127,6 +127,32 @@ private fun readProcMeminfo(): String? = runCatching {
  * every file-backed page actually paged in, so memory-mapped model weights
  * count as soon as they're touched. Null when /proc/self/status can't be read.
  */
+/**
+ * The resident set split by what backs it: anonymous memory (KV cache,
+ * compute buffers, weights llama.cpp copied out of the file, e.g. repacked
+ * for i8mm) versus pages of mapped files (the GGUF's own pages, which the
+ * kernel can drop and read back -- slower, not fatal). VmRSS alone is their
+ * sum; deciding whether a model fits needs to know which part grew.
+ */
+internal data class RssParts(val totalBytes: Long, val anonBytes: Long?, val fileBytes: Long?)
+
+internal fun readSelfRssParts(): RssParts? = runCatching {
+    var total: Long? = null
+    var anon: Long? = null
+    var file: Long? = null
+    File("/proc/self/status").useLines { lines ->
+        for (line in lines) {
+            fun kb(prefix: String) = line.removePrefix(prefix).trim().removeSuffix("kB").trim().toLongOrNull()?.times(1024)
+            when {
+                line.startsWith("VmRSS:") -> total = kb("VmRSS:")
+                line.startsWith("RssAnon:") -> anon = kb("RssAnon:")
+                line.startsWith("RssFile:") -> file = kb("RssFile:")
+            }
+        }
+    }
+    total?.let { RssParts(it, anon, file) }
+}.getOrNull()
+
 internal fun readSelfRssBytes(): Long? = runCatching {
     File("/proc/self/status").useLines { lines ->
         lines.firstOrNull { it.startsWith("VmRSS:") }

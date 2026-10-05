@@ -580,6 +580,7 @@
     <string name="purpose_tools">инструменты/агенты</string>
     <string name="purpose_roleplay">ролевые игры/творческие тексты</string>
     <string name="purpose_uncensored">без цензуры</string>
-    <string name="purpose_vision">изображения (здесь только текст)</string>
+    <string name="purpose_vision">изображения</string>
+    <string name="purpose_vision_blind">изображения (нет рабочего проектора)</string>
     <string name="purpose_medical">медицина</string>
 </resources>

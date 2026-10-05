@@ -93,6 +93,7 @@ class RamMeasuringRuntime(
 
         private fun finish(probe: PeakProbe, completed: Boolean, withImage: Boolean) {
             val deltaBytes = probe.stop()
+            val split = probe.split()
             val prefix = "$modelId ctx=$contextTokens"
             // The vision projector loads only on an image turn (see
             // LlamaCppRuntime.load), adding ~1 GB for Gemma's. Recording that
@@ -114,7 +115,7 @@ class RamMeasuringRuntime(
             measuredRequiredBytes = merged.requiredBytes
             log(
                 "RAM_MEASURE",
-                "$prefix: load + first generation peak +${mb(deltaBytes)} MB — stored peak ${mb(merged.peakBytes)} MB " +
+                "$prefix: load + first generation peak +${mb(deltaBytes)} MB$split — stored peak ${mb(merged.peakBytes)} MB " +
                     "over ${merged.sampleCount} run(s), admission now requires ${mb(merged.requiredBytes)} MB",
             )
         }
@@ -129,6 +130,12 @@ class RamMeasuringRuntime(
 
     private class PeakProbe(private val baselineBytes: Long) {
         private val peakBytes = AtomicLong(baselineBytes)
+        private val baselineParts = readSelfRssParts()
+
+        /** The split at the peak sample -- see [RssParts]: which part of the growth was anonymous, which file pages. */
+        @Volatile
+        private var peakParts: RssParts? = baselineParts
+
         private val sampler = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             while (isActive) {
                 sample()
@@ -137,7 +144,9 @@ class RamMeasuringRuntime(
         }
 
         private fun sample() {
-            readSelfRssBytes()?.let { rss -> peakBytes.accumulateAndGet(rss) { a, b -> maxOf(a, b) } }
+            val parts = readSelfRssParts() ?: return
+            if (parts.totalBytes > peakBytes.get()) peakParts = parts
+            peakBytes.accumulateAndGet(parts.totalBytes) { a, b -> maxOf(a, b) }
         }
 
         /** Stops sampling; returns the peak growth over the baseline taken just before the load. */
@@ -145,6 +154,15 @@ class RamMeasuringRuntime(
             sampler.cancel()
             sample()
             return peakBytes.get() - baselineBytes
+        }
+
+        /** " (anonymous +A MB, file pages +F MB)" at the peak, or "" when the kernel does not report the split. */
+        fun split(): String {
+            val base = baselineParts ?: return ""
+            val peak = peakParts ?: return ""
+            val anon = peak.anonBytes?.let { a -> base.anonBytes?.let { a - it } } ?: return ""
+            val file = peak.fileBytes?.let { f -> base.fileBytes?.let { f - it } } ?: return ""
+            return " (anonymous +${anon / (1024 * 1024)} MB, file pages +${file / (1024 * 1024)} MB)"
         }
     }
 
