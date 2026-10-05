@@ -8,6 +8,13 @@ enum class LocalCapability { TEXT, TRANSLATION, VISION }
  * was checked, but something it depended on has changed since (other
  * files, another device, another runtime build, other questions) -- not a
  * pass, and not "never checked" either.
+ *
+ * Capability, not performance: PASS means the model did the job -- gave the
+ * right answers to every question of the check -- however long it took. A
+ * 7B vision model at a few tokens per second passes VISION; speed is a
+ * separate measurement, never folded into this. FAIL is the answers, not
+ * the runtime: a model whose projector loads and runs but that answers an
+ * image question wrongly fails, and stays failed until a check passes.
  */
 enum class CheckResult { PASS, FAIL, NOT_TESTED, STALE }
 
