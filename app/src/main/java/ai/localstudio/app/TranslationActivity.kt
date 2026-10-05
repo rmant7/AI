@@ -594,10 +594,7 @@ class TranslationActivity : AppCompatActivity() {
     }.getOrNull()
 
     private fun buildChatPrompt(source: MadladLanguage, target: MadladLanguage, text: String): String =
-        "You are a translation engine. Translate the text between triple backticks " +
-            "from ${source.name} to ${target.name}. " +
-            "Reply with only the translation itself, nothing else — no quotes, no notes, no explanation.\n\n" +
-            "```\n$text\n```"
+        ai.localstudio.app.localai.TranslationPrompts.chatInstruction(source.name, target.name, text)
 
     /**
      * The same button doubles as Stop while busy rather than just disabling

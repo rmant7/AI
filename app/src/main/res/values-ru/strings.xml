@@ -496,6 +496,13 @@
     <string name="candidate_created">опубликована %1$s</string>
     <string name="candidate_new">НОВАЯ</string>
     <string name="candidate_retest">Проверить снова</string>
+    <string name="candidate_cap_text">Чат</string>
+    <string name="candidate_cap_translation">Перевод</string>
+    <string name="candidate_check_pass">работает</string>
+    <string name="candidate_check_fail">не прошла</string>
+    <string name="candidate_check_not_tested">не проверена</string>
+    <string name="candidate_old_check">Проверена старой версией теста — проверьте снова, чтобы получить актуальный результат</string>
+    <string name="candidate_check_said">ответ: %1$s</string>
     <string name="candidate_use_chat">Использовать в чате</string>
     <string name="candidate_use_translation">Использовать для перевода</string>
     <string name="candidate_selected_chat">Используется: чат отвечает этой моделью</string>
@@ -513,7 +520,6 @@
     <string name="notice_new_header">Найдено с прошлого поиска (%1$d):</string>
     <string name="notice_new_untested">Ещё не проверены: ни одна не является рекомендацией, пока её не скачают и не проверят на этом телефоне.</string>
     <string name="notice_tested_header">Проверено на этом телефоне:</string>
-    <string name="notice_tested_ok">%1$s — работает (%2$s tok/s)</string>
     <string name="notice_tested_failed">%1$s — не прошла: %2$s</string>
     <string name="notice_for_chat">для чата</string>
     <string name="notice_for_translation">для перевода</string>

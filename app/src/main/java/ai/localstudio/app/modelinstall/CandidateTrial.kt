@@ -1,6 +1,11 @@
 package ai.localstudio.app.modelinstall
 
+import ai.localstudio.app.localai.TranslationPrompts
+import ai.localstudio.model.install.CapabilityCheck
+import ai.localstudio.model.install.CheckStatus
 import ai.localstudio.model.install.DeviceVerification
+import ai.localstudio.model.install.VerifiedCapability
+import java.text.Normalizer
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -8,27 +13,60 @@ import kotlin.coroutines.cancellation.CancellationException
  * whose correct answer is known in advance, so "the model works" is judged
  * from what it actually said, never from it merely producing text.
  */
-data class FunctionalProbe(val prompt: String, val expectAnyOf: List<String>) {
-    /** [answer] is the final answer only (see [finalAnswer]); each expectation must appear as a whole word -- "12" is not in "120". */
+data class FunctionalProbe(
+    val prompt: String,
+    val expectAnyOf: List<String>,
+    val match: Match = Match.WORD,
+    val title: String = prompt.lineSequence().first(),
+) {
+    /**
+     * WORD: the expectation as a whole word or number ("12" is not in "120").
+     * LETTERS: letters and digits only, case, accents and spacing ignored --
+     * for translations, where "Bonjour," / "bonjour" / "Bon jour" all carry
+     * the word the check is about (the last is a spelling error, recorded in
+     * the sample, not a failed translation).
+     */
+    enum class Match { WORD, LETTERS }
+
+    /** [answer] is the final answer only (see [finalAnswer]). */
     fun passes(answer: String): Boolean = expectAnyOf.any { expected ->
-        // Not inside a longer word or number: "3.12" and "12.5" do not contain the answer 12; "12." ending a sentence does.
-        Regex("(?<![\\p{L}\\p{N}])(?<!\\p{N}[.,])" + Regex.escape(expected) + "(?![\\p{L}\\p{N}])(?![.,]\\p{N})", RegexOption.IGNORE_CASE)
-            .containsMatchIn(answer)
+        when (match) {
+            // Not inside a longer word or number: "3.12" and "12.5" do not contain the answer 12; "12." ending a sentence does.
+            Match.WORD -> Regex("(?<![\\p{L}\\p{N}])(?<!\\p{N}[.,])" + Regex.escape(expected) + "(?![\\p{L}\\p{N}])(?![.,]\\p{N})", RegexOption.IGNORE_CASE)
+                .containsMatchIn(answer)
+            Match.LETTERS -> lettersOnly(answer).contains(lettersOnly(expected))
+        }
     }
 
-    val title: String get() = prompt.lineSequence().first()
-
     companion object {
-        /** Per discovery label; anything unknown gets the chat probes. */
-        fun forLabel(label: String): List<FunctionalProbe> = when {
-            DiscoveryLabels.isTranslation(label) -> listOf(
-                FunctionalProbe("Translate into French. Reply with the translation only.\n\nGood morning, my friend.", listOf("bonjour")),
-            )
-            else -> listOf(
-                FunctionalProbe("What is the capital of France? Answer with one word.", listOf("Paris")),
-                FunctionalProbe("What is 7 + 5? Answer with the number only.", listOf("12", "twelve")),
-            )
-        }
+        /** Decomposed (NFD), accents become separate combining marks -- not letters, so the filter drops them with spaces and punctuation. */
+        fun lettersOnly(text: String): String =
+            Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD).filter { it.isLetterOrDigit() }
+
+        val TEXT: List<FunctionalProbe> = listOf(
+            FunctionalProbe("What is the capital of France? Answer with one word.", listOf("Paris")),
+            FunctionalProbe("What is 7 + 5? Answer with the number only.", listOf("12", "twelve")),
+        )
+
+        /** English to French through the very prompt the Translation screen sends a generic model (see [TranslationPrompts]). */
+        val TRANSLATION: List<FunctionalProbe> = listOf(
+            translation("Good morning, my friend.", "bonjour"),
+            translation("Thank you very much.", "merci"),
+            translation("Where is the train station?", "gare"),
+        )
+
+        /** Every capability is checked on every candidate: a translation model failing chat questions is a translation model, not a broken one. */
+        val SUITES: Map<String, List<FunctionalProbe>> = linkedMapOf(
+            VerifiedCapability.TEXT to TEXT,
+            VerifiedCapability.TRANSLATION to TRANSLATION,
+        )
+
+        private fun translation(text: String, vararg expected: String) = FunctionalProbe(
+            prompt = TranslationPrompts.chatInstruction("English", "French", text),
+            expectAnyOf = expected.toList(),
+            match = Match.LETTERS,
+            title = "EN→FR \"$text\"",
+        )
     }
 }
 
@@ -60,11 +98,12 @@ fun interface TrialRuntime {
 }
 
 /**
- * Runs [FunctionalProbe]s through a [TrialRuntime] and records what was
- * observed -- nothing more. inferenceOk is true only when every probe's
- * final answer (after any reasoning block) contains what it was expected
- * to: an answer that is fluent but wrong, or a reply that never got past
- * its reasoning, is LOADABLE, not FUNCTIONAL.
+ * Runs each capability's [FunctionalProbe]s through a [TrialRuntime] and
+ * records what was observed, per capability -- nothing more. A capability
+ * PASSes only when every one of its probes' final answers (after any
+ * reasoning block) contains what it was expected to; one capability
+ * failing does not stop the next from being checked. A model that never
+ * loaded has nothing checked at all.
  */
 class CandidateTrial(
     private val clock: () -> Long = System::currentTimeMillis,
@@ -72,72 +111,92 @@ class CandidateTrial(
     suspend fun run(
         deviceProfile: String,
         runtimeId: String,
-        probes: List<FunctionalProbe>,
+        suites: Map<String, List<FunctionalProbe>>,
         runtime: TrialRuntime,
     ): DeviceVerification {
-        require(probes.isNotEmpty()) { "a trial needs at least one probe" }
+        require(suites.values.any { it.isNotEmpty() }) { "a trial needs at least one probe" }
         val answers = mutableListOf<String>()
+        val checks = linkedMapOf<String, CapabilityCheck>()
         var intervals = 0
         var generatingMs = 0L
         var loaded = false
 
-        fun verdict(inferenceOk: Boolean, error: String?) = DeviceVerification(
+        fun verdict(error: String?) = DeviceVerification(
             deviceProfile = deviceProfile,
             runtimeId = runtimeId,
             loaded = loaded,
-            inferenceOk = inferenceOk,
+            inferenceOk = checks.values.any { it.status == CheckStatus.PASS },
             sampleOutput = answers.joinToString(" | ") { it.trim().replace('\n', ' ') }.take(SAMPLE_CHARS).ifBlank { null },
             tokensPerSecond = if (intervals > 0 && generatingMs > 0) intervals * 1000.0 / generatingMs else null,
             error = error,
             verifiedAtEpochMs = clock(),
             checkVersion = DeviceVerification.CURRENT_CHECK,
+            checks = checks,
         )
 
-        for (probe in probes) {
-            val answer = StringBuilder()
-            var firstAt = 0L
-            var lastAt = 0L
-            var chunks = 0
-            try {
-                runtime.answer(
-                    probe.prompt,
-                    onLoaded = { loaded = true },
-                    onChunk = { chunk ->
-                        val now = clock()
-                        if (chunks == 0) firstAt = now
-                        lastAt = now
-                        chunks++
-                        loaded = true
-                        answer.append(chunk)
-                    },
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (t: Throwable) {
-                if (answer.isNotEmpty()) answers += answer.toString()
-                val stage = if (loaded) "generation" else "load"
-                return verdict(inferenceOk = false, error = "$stage failed: ${describe(t)}")
+        for ((capability, probes) in suites) {
+            if (probes.isEmpty()) continue
+            val suiteAnswers = mutableListOf<String>()
+            var failure: String? = null
+            for (probe in probes) {
+                val answer = StringBuilder()
+                var firstAt = 0L
+                var lastAt = 0L
+                var chunks = 0
+                try {
+                    runtime.answer(
+                        probe.prompt,
+                        onLoaded = { loaded = true },
+                        onChunk = { chunk ->
+                            val now = clock()
+                            if (chunks == 0) firstAt = now
+                            lastAt = now
+                            chunks++
+                            loaded = true
+                            answer.append(chunk)
+                        },
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    if (answer.isNotEmpty()) suiteAnswers += answer.toString()
+                    if (!loaded) {
+                        answers += suiteAnswers
+                        return verdict(error = "load failed: ${describe(t)}")
+                    }
+                    failure = "generation failed: ${describe(t)}"
+                    break
+                }
+                // Between the first and the last chunk of each answer: excludes the
+                // load and the prompt evaluation, which say nothing about how fast
+                // this device generates with this model.
+                if (chunks >= 2) {
+                    intervals += chunks - 1
+                    generatingMs += lastAt - firstAt
+                }
+                val reply = answer.toString()
+                val final = finalAnswer(reply)
+                if (final == null) {
+                    suiteAnswers += reply
+                    failure = "no answer to: ${probe.title} -- still reasoning (<think> not closed) when the reply ended"
+                    break
+                }
+                suiteAnswers += final
+                if (final.isBlank()) {
+                    failure = "empty answer to: ${probe.title}"
+                    break
+                }
+                if (!probe.passes(final)) {
+                    failure = "wrong answer to: ${probe.title} (expected ${probe.expectAnyOf.joinToString(" or ")})"
+                    break
+                }
             }
-            // Between the first and the last chunk of each answer: excludes the
-            // load and the prompt evaluation, which say nothing about how fast
-            // this device generates with this model.
-            if (chunks >= 2) {
-                intervals += chunks - 1
-                generatingMs += lastAt - firstAt
-            }
-            val reply = answer.toString()
-            val final = finalAnswer(reply)
-            if (final == null) {
-                answers += reply
-                return verdict(inferenceOk = false, error = "no answer to: ${probe.title} -- still reasoning (<think> not closed) when the reply ended")
-            }
-            answers += final
-            if (final.isBlank()) return verdict(inferenceOk = false, error = "empty answer to: ${probe.title}")
-            if (!probe.passes(final)) {
-                return verdict(inferenceOk = false, error = "wrong answer to: ${probe.title} (expected ${probe.expectAnyOf.joinToString(" or ")})")
-            }
+            answers += suiteAnswers
+            val sample = suiteAnswers.joinToString(" | ") { it.trim().replace('\n', ' ') }.take(SAMPLE_CHARS).ifBlank { null }
+            checks[capability] = if (failure == null) CapabilityCheck(CheckStatus.PASS, sample = sample) else CapabilityCheck(CheckStatus.FAIL, failure, sample)
         }
-        return verdict(inferenceOk = true, error = null)
+        val failed = checks.filterValues { it.status == CheckStatus.FAIL }
+        return verdict(error = failed.entries.joinToString("; ") { (cap, check) -> "$cap: ${check.detail}" }.ifBlank { null })
     }
 
     private fun describe(t: Throwable) = "${t.javaClass.simpleName}: ${t.message.orEmpty()}".trimEnd(' ', ':')

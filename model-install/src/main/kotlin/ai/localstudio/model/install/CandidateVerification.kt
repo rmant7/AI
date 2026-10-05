@@ -42,10 +42,41 @@ data class DeviceVerification(
      * unfinished reasoning draft.
      */
     val checkVersion: Int = 1,
+    /**
+     * What each capability's own check on this device found, by
+     * [VerifiedCapability] name -- absent means NOT_TESTED. From
+     * [CURRENT_CHECK] 3 on this, not [inferenceOk] alone, is what a model
+     * is good for: a translation model failing chat questions is a
+     * translation-only model, not a failed one.
+     */
+    val checks: Map<String, CapabilityCheck> = emptyMap(),
 ) {
+    fun status(capability: String): CheckStatus = checks[capability]?.status ?: CheckStatus.NOT_TESTED
+
+    /** Passed by the current check -- never by an older version's weaker one. */
+    fun passes(capability: String): Boolean = checkVersion >= CURRENT_CHECK && status(capability) == CheckStatus.PASS
+
+    /** The capabilities that passed, in [VerifiedCapability.ALL] order. */
+    val passed: List<String> get() = VerifiedCapability.ALL.filter(::passes)
+
     companion object {
-        const val CURRENT_CHECK = 2
+        const val CURRENT_CHECK = 3
     }
+}
+
+@Serializable
+enum class CheckStatus { PASS, FAIL, NOT_TESTED }
+
+/** One capability's check: [detail] says why it failed (or what was noted), [sample] what the model actually said. */
+@Serializable
+data class CapabilityCheck(val status: CheckStatus, val detail: String? = null, val sample: String? = null)
+
+/** What a local model can be verified for -- the names [DeviceVerification.checks] uses, and what a model is offered for. */
+object VerifiedCapability {
+    const val TEXT = "text"
+    const val TRANSLATION = "translation"
+    const val VISION = "vision"
+    val ALL = listOf(TEXT, TRANSLATION, VISION)
 }
 
 /**
@@ -64,7 +95,7 @@ enum class CandidateTier {
 /** The one place a [DeviceVerification] becomes a [CandidateTier] -- see that enum's own doc comment on why this is the only path to anything past UNVERIFIED. */
 fun DeviceVerification?.tier(): CandidateTier = when {
     this == null -> CandidateTier.UNVERIFIED
-    inferenceOk && checkVersion >= DeviceVerification.CURRENT_CHECK -> CandidateTier.FUNCTIONAL
+    passed.isNotEmpty() -> CandidateTier.FUNCTIONAL
     // An older check's "answered" still proves it loaded and produced text.
     inferenceOk || loaded -> CandidateTier.LOADABLE
     else -> CandidateTier.UNVERIFIED

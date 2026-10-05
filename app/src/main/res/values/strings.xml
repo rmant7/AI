@@ -500,6 +500,13 @@
     <string name="candidate_created">published %1$s</string>
     <string name="candidate_new">NEW</string>
     <string name="candidate_retest">Test again</string>
+    <string name="candidate_cap_text">Chat</string>
+    <string name="candidate_cap_translation">Translation</string>
+    <string name="candidate_check_pass">works</string>
+    <string name="candidate_check_fail">did not pass</string>
+    <string name="candidate_check_not_tested">not tested</string>
+    <string name="candidate_old_check">Tested by an older version of the test — test again for a current result</string>
+    <string name="candidate_check_said">answered: %1$s</string>
     <string name="candidate_use_chat">Use in chat</string>
     <string name="candidate_use_translation">Use for translation</string>
     <string name="candidate_selected_chat">In use: the chat answers with this model</string>
@@ -517,7 +524,6 @@
     <string name="notice_new_header">Found since the last search (%1$d):</string>
     <string name="notice_new_untested">Not tested yet: none of these is a recommendation until it is downloaded and tested on this phone.</string>
     <string name="notice_tested_header">Tested on this phone:</string>
-    <string name="notice_tested_ok">%1$s — works (%2$s tok/s)</string>
     <string name="notice_tested_failed">%1$s — did not pass: %2$s</string>
     <string name="notice_for_chat">for chat</string>
     <string name="notice_for_translation">for translation</string>

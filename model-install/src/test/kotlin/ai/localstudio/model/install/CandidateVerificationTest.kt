@@ -17,14 +17,51 @@ class CandidateVerificationTest {
         assertEquals(CandidateTier.UNVERIFIED, null.tier())
     }
 
-    private fun verification(loaded: Boolean, inferenceOk: Boolean, checkVersion: Int = DeviceVerification.CURRENT_CHECK) = DeviceVerification(
+    private fun verification(
+        loaded: Boolean,
+        inferenceOk: Boolean,
+        checkVersion: Int = DeviceVerification.CURRENT_CHECK,
+        checks: Map<String, CapabilityCheck> = if (inferenceOk) mapOf(VerifiedCapability.TEXT to CapabilityCheck(CheckStatus.PASS)) else emptyMap(),
+    ) = DeviceVerification(
         deviceProfile = "Pixel 10 Pro / API 37 / 16.3 GB / llama.cpp b10448 (i8mm)",
         runtimeId = "llama_cpp",
         loaded = loaded,
         inferenceOk = inferenceOk,
         verifiedAtEpochMs = 1_000L,
         checkVersion = checkVersion,
+        checks = checks,
     )
+
+    @Test
+    fun a_translation_model_failing_chat_questions_is_functional_for_translation_only() {
+        val v = verification(
+            loaded = true, inferenceOk = true,
+            checks = mapOf(
+                VerifiedCapability.TEXT to CapabilityCheck(CheckStatus.FAIL, "wrong answer"),
+                VerifiedCapability.TRANSLATION to CapabilityCheck(CheckStatus.PASS),
+            ),
+        )
+        assertEquals(CandidateTier.FUNCTIONAL, v.tier())
+        assertEquals(listOf(VerifiedCapability.TRANSLATION), v.passed)
+        assertEquals(CheckStatus.NOT_TESTED, v.status(VerifiedCapability.VISION))
+    }
+
+    @Test
+    fun a_pass_recorded_by_the_previous_check_version_is_not_trusted() {
+        // Version 2 judged translation with a chat-style prompt the Translation screen never sends.
+        val v = verification(loaded = true, inferenceOk = true, checkVersion = 2)
+        assertEquals(CandidateTier.LOADABLE, v.tier())
+        assertEquals(emptyList(), v.passed)
+    }
+
+    @Test
+    fun answering_without_any_capability_passing_is_loadable() {
+        val v = verification(
+            loaded = true, inferenceOk = false,
+            checks = mapOf(VerifiedCapability.TEXT to CapabilityCheck(CheckStatus.FAIL), VerifiedCapability.TRANSLATION to CapabilityCheck(CheckStatus.FAIL)),
+        )
+        assertEquals(CandidateTier.LOADABLE, v.tier())
+    }
 
     @Test
     fun an_answer_judged_by_an_older_check_is_not_trusted_as_functional() {

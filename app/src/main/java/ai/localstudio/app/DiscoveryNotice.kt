@@ -2,8 +2,8 @@ package ai.localstudio.app
 
 import ai.localstudio.app.modelinstall.DiscoveredCandidate
 import ai.localstudio.app.modelinstall.DiscoveryLabels
-import ai.localstudio.model.install.CandidateTier
-import ai.localstudio.model.install.tier
+import ai.localstudio.model.install.CheckStatus
+import ai.localstudio.model.install.VerifiedCapability
 import android.content.Intent
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -86,13 +86,12 @@ object DiscoveryNotice {
     private fun testedLine(activity: AppCompatActivity, c: DiscoveredCandidate): String {
         val v = c.verification ?: return c.repoId
         val name = c.repoId.substringAfter('/')
-        return when (v.tier()) {
-            CandidateTier.FUNCTIONAL -> activity.getString(
-                R.string.notice_tested_ok,
-                name,
-                v.tokensPerSecond?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "?",
-            )
-            else -> activity.getString(R.string.notice_tested_failed, name, v.error?.take(120) ?: "")
-        }
+        if (!v.loaded) return activity.getString(R.string.notice_tested_failed, name, v.error?.take(120) ?: "")
+        val parts = listOf(VerifiedCapability.TEXT, VerifiedCapability.TRANSLATION).filter { it in v.checks }.map { cap ->
+            val what = activity.getString(if (cap == VerifiedCapability.TRANSLATION) R.string.candidate_cap_translation else R.string.candidate_cap_text)
+            val status = activity.getString(if (v.status(cap) == CheckStatus.PASS) R.string.candidate_check_pass else R.string.candidate_check_fail)
+            "$what: $status"
+        } + listOfNotNull(v.tokensPerSecond?.let { String.format(Locale.ROOT, "%.1f tok/s", it) })
+        return "$name — " + parts.joinToString(" · ")
     }
 }

@@ -11,6 +11,8 @@ import ai.localstudio.app.modelinstall.DiscoveryLabels
 import ai.localstudio.app.modelinstall.DiscoveryRun
 import ai.localstudio.app.models.ModelDownloadService
 import ai.localstudio.model.install.CandidateTier
+import ai.localstudio.model.install.CheckStatus
+import ai.localstudio.model.install.VerifiedCapability
 import ai.localstudio.model.install.tier
 import android.os.Bundle
 import android.view.View
@@ -141,38 +143,33 @@ class CandidatesActivity : AppCompatActivity() {
         val download = work.downloads[name]
         val trial = work.trial?.takeIf { it.repoId == name }
         val queued = name in work.queued
-        val usage = if (download == null) container.candidateUsage(label, c) else CandidateUsage.NONE
-        val inUse = usage != CandidateUsage.NONE
-        val translation = DiscoveryLabels.isTranslation(label)
+        val verification = c.verification
+        // What a model is offered for comes from what passed on this phone, not from which search found it.
+        val usage = USABLE.associateWith { if (download == null) container.candidateUsage(it, c) else CandidateUsage.NONE }
+        val passed = verification?.passed.orEmpty().filter { it in USABLE }
+        val actions = USABLE.filter { it in passed || usage.getValue(it) != CandidateUsage.NONE }
+        val testable = download == null && container.candidateTestable(c)
         val installedBytes = if (download == null) container.candidateInstalledBytes(c) else null
-        val partialBytes = if (download == null && installedBytes == null) container.candidatePartialBytes(c) else null
+        val partialBytes = if (download == null && installedBytes == null && !testable) container.candidatePartialBytes(c) else null
 
         card.localTitle.text = name.substringAfter('/') + if (container.discoveryStore.isNew(c)) "  · " + getString(R.string.candidate_new) else ""
         card.localSubtitle.text = subtitle(c, facts)
 
-        val verification = c.verification
-        val result = if (verification == null) {
-            tierLabel(CandidateTier.UNVERIFIED)
-        } else {
-            buildString {
-                append(tierLabel(verification.tier()))
-                verification.tokensPerSecond?.let { append(String.format(Locale.ROOT, " · %.1f tok/s", it)) }
-                verification.error?.let { append("\n").append(it) }
-            }
-        }
         val mb = { bytes: Long -> (bytes / 1_000_000).toInt() }
         card.localStatus.text = when {
             download != null -> getString(R.string.candidate_downloading, mb(download.bytesDone), mb(download.bytesTotal))
             trial != null -> trial.describe(this)
             queued -> getString(R.string.candidate_queued)
             else -> listOfNotNull(
-                when (usage) {
-                    CandidateUsage.SELECTED -> getString(if (translation) R.string.candidate_selected_translation else R.string.candidate_selected_chat)
-                    CandidateUsage.IN_MODELS -> getString(if (translation) R.string.candidate_in_use_translation else R.string.candidate_in_use_chat)
-                    CandidateUsage.NONE -> null
-                },
+                *USABLE.mapNotNull { cap ->
+                    when (usage.getValue(cap)) {
+                        CandidateUsage.SELECTED -> getString(if (cap == VerifiedCapability.TRANSLATION) R.string.candidate_selected_translation else R.string.candidate_selected_chat)
+                        CandidateUsage.IN_MODELS -> getString(if (cap == VerifiedCapability.TRANSLATION) R.string.candidate_in_use_translation else R.string.candidate_in_use_chat)
+                        CandidateUsage.NONE -> null
+                    }
+                }.toTypedArray(),
                 partialBytes?.let { getString(R.string.candidate_paused, mb(it), mb(c.sizeBytes)) },
-                result,
+                checksSummary(verification),
                 work.failures[name]?.let { getString(R.string.candidate_download_failed, it) },
             ).joinToString("\n")
         }
@@ -196,27 +193,28 @@ class CandidatesActivity : AppCompatActivity() {
                 primary.isEnabled = false
                 primary.setOnClickListener(null)
             }
-            usage == CandidateUsage.SELECTED -> {
-                primary.text = getString(if (translation) R.string.candidate_open_translation else R.string.candidate_open_chat)
-                primary.setOnClickListener { openWhereUsed(translation) }
+            actions.isNotEmpty() -> {
+                bindAction(primary, actions[0], usage.getValue(actions[0]), c)
+                when {
+                    actions.size > 1 -> {
+                        secondary.visibility = View.VISIBLE
+                        bindAction(secondary, actions[1], usage.getValue(actions[1]), c)
+                    }
+                    installedBytes != null -> {
+                        secondary.visibility = View.VISIBLE
+                        secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
+                        secondary.setOnClickListener { deleteInstall(c) }
+                    }
+                }
             }
-            inUse -> {
-                primary.text = getString(if (translation) R.string.candidate_use_translation else R.string.candidate_use_chat)
-                primary.setOnClickListener { use(label, c) }
-            }
-            installedBytes != null && verification.tier() == CandidateTier.FUNCTIONAL -> {
-                primary.text = getString(if (translation) R.string.candidate_use_translation else R.string.candidate_use_chat)
-                primary.setOnClickListener { use(label, c) }
-                secondary.visibility = View.VISIBLE
-                secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
-                secondary.setOnClickListener { deleteInstall(c) }
-            }
-            installedBytes != null -> {
+            testable -> {
                 primary.text = getString(if (verification == null) R.string.candidate_test else R.string.candidate_retest)
                 primary.setOnClickListener { test(label, c) }
-                secondary.visibility = View.VISIBLE
-                secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
-                secondary.setOnClickListener { deleteInstall(c) }
+                if (installedBytes != null) {
+                    secondary.visibility = View.VISIBLE
+                    secondary.text = getString(R.string.candidate_delete, mb(installedBytes))
+                    secondary.setOnClickListener { deleteInstall(c) }
+                }
             }
             partialBytes != null -> {
                 primary.text = getString(R.string.model_resume)
@@ -228,6 +226,46 @@ class CandidatesActivity : AppCompatActivity() {
             else -> {
                 primary.text = getString(R.string.candidate_download, mb(c.sizeBytes))
                 primary.setOnClickListener { download(label, c) }
+            }
+        }
+    }
+
+    /** "Open chat" when the model already answers there, otherwise "Use in chat" / "Use for translation". */
+    private fun bindAction(button: android.widget.Button, capability: String, usage: CandidateUsage, c: DiscoveredCandidate) {
+        val translation = capability == VerifiedCapability.TRANSLATION
+        if (usage == CandidateUsage.SELECTED) {
+            button.text = getString(if (translation) R.string.candidate_open_translation else R.string.candidate_open_chat)
+            button.setOnClickListener { openWhereUsed(translation) }
+        } else {
+            button.text = getString(if (translation) R.string.candidate_use_translation else R.string.candidate_use_chat)
+            button.setOnClickListener { use(capability, c) }
+        }
+    }
+
+    /** One line per checked capability ("Chat: works · Translation: did not pass") plus why, speed, or a call to test again. */
+    private fun checksSummary(v: ai.localstudio.model.install.DeviceVerification?): String {
+        if (v == null) return tierLabel(CandidateTier.UNVERIFIED)
+        if (v.checkVersion < ai.localstudio.model.install.DeviceVerification.CURRENT_CHECK) {
+            return getString(if (v.loaded) R.string.candidate_old_check else R.string.candidate_tier_unverified) +
+                (v.error?.let { "\n$it" } ?: "")
+        }
+        if (!v.loaded) return tierLabel(CandidateTier.UNVERIFIED) + (v.error?.let { "\n$it" } ?: "")
+        val lines = USABLE.map { cap ->
+            val what = getString(if (cap == VerifiedCapability.TRANSLATION) R.string.candidate_cap_translation else R.string.candidate_cap_text)
+            val status = getString(
+                when (v.status(cap)) {
+                    CheckStatus.PASS -> R.string.candidate_check_pass
+                    CheckStatus.FAIL -> R.string.candidate_check_fail
+                    CheckStatus.NOT_TESTED -> R.string.candidate_check_not_tested
+                },
+            )
+            "$what: $status"
+        }
+        return buildString {
+            append(lines.joinToString(" · "))
+            v.tokensPerSecond?.let { append(String.format(Locale.ROOT, " · %.1f tok/s", it)) }
+            v.checks.filterValues { it.status == CheckStatus.FAIL }.forEach { (cap, check) ->
+                append("\n").append(cap).append(": ").append(check.detail?.take(160) ?: "")
             }
         }
     }
@@ -308,14 +346,26 @@ class CandidatesActivity : AppCompatActivity() {
                     ),
                 )
             }
+            c.verification?.checks?.forEach { (cap, check) ->
+                append("\n\n• ").append(cap).append(": ").append(check.status.name)
+                check.detail?.let { append(" — ").append(it) }
+                check.sample?.let { append("\n  ").append(getString(R.string.candidate_check_said, it)) }
+            }
             if (c.tags.isNotEmpty()) append("\n\n").append(getString(R.string.candidate_all_tags, c.tags.joinToString(", ")))
         }
-        val canRetest = container.candidateInstalledBytes(c) != null && !container.candidateWork.value.isBusy(c.repoId)
+        val busy = container.candidateWork.value.isBusy(c.repoId)
+        val canRetest = container.candidateTestable(c) && !busy
+        val installedBytes = container.candidateInstalledBytes(c)
         AlertDialog.Builder(this)
             .setTitle(c.repoId)
             .setMessage(details)
             .setPositiveButton(android.R.string.ok, null)
             .apply { if (canRetest) setNeutralButton(R.string.candidate_retest) { _, _ -> test(label, c) } }
+            .apply {
+                if (installedBytes != null && !busy) {
+                    setNegativeButton(getString(R.string.candidate_delete, (installedBytes / 1_000_000).toInt())) { _, _ -> deleteInstall(c) }
+                }
+            }
             .show()
     }
 
@@ -331,14 +381,14 @@ class CandidatesActivity : AppCompatActivity() {
      * gone before it was read, and a translation model ending up under
      * Translation (not Chat) was a surprise nothing had announced.
      */
-    private fun use(label: String, c: DiscoveredCandidate) {
-        val seed = container.useCandidate(label, c)
+    private fun use(capability: String, c: DiscoveredCandidate) {
+        val seed = container.useCandidate(capability, c)
         render()
         if (seed == null) {
             Toast.makeText(this, R.string.candidate_use_failed, Toast.LENGTH_LONG).show()
             return
         }
-        val translation = DiscoveryLabels.isTranslation(label)
+        val translation = capability == VerifiedCapability.TRANSLATION
         AlertDialog.Builder(this)
             .setTitle(getString(if (translation) R.string.candidate_used_title_translation else R.string.candidate_used_title_chat, seed.title))
             .setMessage(if (translation) R.string.candidate_used_translation else R.string.candidate_used_chat)
@@ -371,5 +421,8 @@ class CandidatesActivity : AppCompatActivity() {
 
     private companion object {
         const val MENU_DISCOVER = 9100
+
+        /** The capabilities a model can be put to use for from here; vision joins once it is checked. */
+        val USABLE = listOf(VerifiedCapability.TEXT, VerifiedCapability.TRANSLATION)
     }
 }

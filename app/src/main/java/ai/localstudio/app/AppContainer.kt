@@ -760,7 +760,7 @@ class AppContainer private constructor(private val context: Context) {
 
     /** Queues a test of an installed [candidate]; false when it is not installed or already downloading, queued or being tested. */
     fun testCandidate(label: String, candidate: DiscoveredCandidate): Boolean {
-        if (candidateInstalledBytes(candidate) == null) return false
+        if (!candidateTestable(candidate)) return false
         fun waiting(w: CandidateWork) = candidate.repoId in w.queued || w.trial?.repoId == candidate.repoId
         val before = candidateWork.getAndUpdate { if (waiting(it)) it else it.copy(queued = it.queued + candidate.repoId) }
         if (waiting(before)) return false
@@ -796,14 +796,16 @@ class AppContainer private constructor(private val context: Context) {
                 )
             val running = RunningTrial(label, name, profile, RuntimeKind.LLAMA_CPP.id, System.currentTimeMillis())
             candidateTrialMarker.write(running)
-            val probes = FunctionalProbe.forLabel(label)
+            logChatTemplate(name, weights)
+            val suites = FunctionalProbe.SUITES
+            val total = suites.values.sumOf { it.size }
             val runtime = candidateRuntime(candidate, weights)
             var asked = 0
             var loadReported = false
             val verification = CandidateTrial().run(
                 deviceProfile = profile,
                 runtimeId = RuntimeKind.LLAMA_CPP.id,
-                probes = probes,
+                suites = suites,
                 runtime = TrialRuntime { prompt, onLoaded, onChunk ->
                     val probe = ++asked
                     runtime.answer(
@@ -813,9 +815,9 @@ class AppContainer private constructor(private val context: Context) {
                             if (!loadReported) {
                                 loadReported = true
                                 candidateTrialMarker.write(running.copy(loaded = true))
-                                appLog.record(tag, "$name: loaded; asking ${probes.size} question(s)")
+                                appLog.record(tag, "$name: loaded; asking $total question(s): ${suites.entries.joinToString { "${it.value.size} ${it.key}" }}")
                             }
-                            candidateWork.update { it.copy(trial = CandidateTrialState(name, CandidateTrialState.Phase.ANSWERING, probe, probes.size)) }
+                            candidateWork.update { it.copy(trial = CandidateTrialState(name, CandidateTrialState.Phase.ANSWERING, probe, total)) }
                         },
                         onChunk = onChunk,
                     )
@@ -839,7 +841,9 @@ class AppContainer private constructor(private val context: Context) {
         val tag = "CANDIDATE_TEST"
         appLog.record(
             tag,
-            "$name: ${verification.tier()} -- loaded=${verification.loaded}, answered=${verification.inferenceOk}" +
+            "$name: ${verification.tier()} -- loaded=${verification.loaded}" +
+                ai.localstudio.model.install.VerifiedCapability.ALL.filter { it in verification.checks }
+                    .joinToString("") { ", $it ${verification.status(it)}" } +
                 (verification.tokensPerSecond?.let { String.format(java.util.Locale.ROOT, ", %.1f tok/s", it) } ?: "") +
                 (verification.error?.let { ", $it" } ?: "") +
                 (verification.sampleOutput?.let { " -- said: $it" } ?: ""),
@@ -865,17 +869,23 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
-    /** The user's own model a candidate becomes once it is in use: a custom chat or translation model of the same repository. */
-    fun candidateSeed(label: String, candidate: DiscoveredCandidate): LocalModelSeed =
-        if (DiscoveryLabels.isTranslation(label)) LocalModels.customTranslation(candidate.repoId) else LocalModels.custom(candidate.repoId)
+    /**
+     * The user's own model a candidate becomes for [capability]
+     * ([ai.localstudio.model.install.VerifiedCapability] TEXT or TRANSLATION):
+     * a custom chat or translation model of the same repository. Both share
+     * one id, so one file serves both when a model passed both checks.
+     */
+    fun candidateSeed(capability: String, candidate: DiscoveredCandidate): LocalModelSeed =
+        if (capability == ai.localstudio.model.install.VerifiedCapability.TRANSLATION) LocalModels.customTranslation(candidate.repoId) else LocalModels.custom(candidate.repoId)
 
-    private fun candidatePurpose(label: String) = if (DiscoveryLabels.isTranslation(label)) ModelPurpose.TRANSLATION else ModelPurpose.CHAT
+    private fun candidatePurpose(capability: String) =
+        if (capability == ai.localstudio.model.install.VerifiedCapability.TRANSLATION) ModelPurpose.TRANSLATION else ModelPurpose.CHAT
 
-    /** Where a candidate stands after "Use": not one of the user's models, one of them, or the one selected right now. */
-    fun candidateUsage(label: String, candidate: DiscoveredCandidate): CandidateUsage {
-        if (!candidateInUse(label, candidate)) return CandidateUsage.NONE
-        val seed = candidateSeed(label, candidate)
-        val selected = if (DiscoveryLabels.isTranslation(label)) {
+    /** Where a candidate stands for [capability]: not one of the user's models for it, one of them, or the one selected right now. */
+    fun candidateUsage(capability: String, candidate: DiscoveredCandidate): CandidateUsage {
+        if (!candidateInUse(capability, candidate)) return CandidateUsage.NONE
+        val seed = candidateSeed(capability, candidate)
+        val selected = if (capability == ai.localstudio.model.install.VerifiedCapability.TRANSLATION) {
             settings.translationModel == seed.id
         } else {
             settings.providerId == CloudProviders.LOCAL.id && settings.chatModelFor(CloudProviders.LOCAL.id) == seed.id
@@ -883,27 +893,27 @@ class AppContainer private constructor(private val context: Context) {
         return if (selected) CandidateUsage.SELECTED else CandidateUsage.IN_MODELS
     }
 
-    /** Whether [candidate] is already one of the user's own models for [label]'s purpose, installed. */
-    fun candidateInUse(label: String, candidate: DiscoveredCandidate): Boolean {
-        val seed = candidateSeed(label, candidate)
-        return customSeeds(candidatePurpose(label)).any { it.id == seed.id } && modelStore.isInstalled(seed)
+    /** Whether [candidate] is already one of the user's own models for [capability], installed. */
+    fun candidateInUse(capability: String, candidate: DiscoveredCandidate): Boolean {
+        val seed = candidateSeed(capability, candidate)
+        return customSeeds(candidatePurpose(capability)).any { it.id == seed.id } && modelStore.isInstalled(seed)
     }
 
     /**
-     * Makes a candidate that passed this device's test one of the user's own
-     * models and selects it -- for chat or translation, by the search it came
-     * from. Its tested file moves into place as that model's installation
-     * (see [ai.localstudio.model.install.InstalledVariants.adopt]): nothing is
-     * downloaded again, and what runs is byte for byte what was tested.
-     * Null, and nothing changed, unless the candidate is installed and
-     * FUNCTIONAL by the current check -- never on discovery's word alone.
+     * Makes a candidate that passed this device's check for [capability] one
+     * of the user's own models for it and selects it. Its tested file moves
+     * into place as that model's installation (see
+     * [ai.localstudio.model.install.InstalledVariants.adopt]) unless it already
+     * is one (used for the other capability before): nothing is downloaded
+     * again, and what runs is byte for byte what was tested. Null, and
+     * nothing changed, unless [capability] passed by the current check --
+     * never on discovery's word, and never on which search found it.
      */
-    fun useCandidate(label: String, candidate: DiscoveredCandidate): LocalModelSeed? {
-        if (candidate.verification.tier() != ai.localstudio.model.install.CandidateTier.FUNCTIONAL) return null
+    fun useCandidate(capability: String, candidate: DiscoveredCandidate): LocalModelSeed? {
+        if (candidate.verification?.passes(capability) != true) return null
         if (candidateWork.value.isBusy(candidate.repoId)) return null
-        val seed = candidateSeed(label, candidate)
-        // Already moved in earlier: only the selection is left to do.
-        val adopted = if (candidateInUse(label, candidate)) {
+        val seed = candidateSeed(capability, candidate)
+        val adopted = if (modelStore.isInstalled(seed)) {
             null
         } else {
             modelInstallation.installed.adopt(
@@ -912,8 +922,8 @@ class AppContainer private constructor(private val context: Context) {
                 ai.localstudio.model.ModelId(seed.id),
             ) ?: return null
         }
-        addCustomModel(candidate.repoId, candidatePurpose(label))
-        if (DiscoveryLabels.isTranslation(label)) {
+        addCustomModel(candidate.repoId, candidatePurpose(capability))
+        if (capability == ai.localstudio.model.install.VerifiedCapability.TRANSLATION) {
             settings.translationModel = seed.id
         } else {
             settings.providerId = CloudProviders.LOCAL.id
@@ -921,10 +931,38 @@ class AppContainer private constructor(private val context: Context) {
         }
         appLog.record(
             "MODEL_SWITCH",
-            "${if (DiscoveryLabels.isTranslation(label)) "translation" else "chat"}: ${candidate.repoId} -- tested candidate in use as ${seed.id} " +
+            "$capability: ${candidate.repoId} -- tested candidate in use as ${seed.id} " +
                 (adopted?.let { m -> "(moved in: ${m.artifacts.sumOf { it.sizeBytes } / 1_000_000} MB, ${candidate.filePath}@${candidate.commit.take(8)})" } ?: "(already installed)"),
         )
         return seed
+    }
+
+    /**
+     * What the candidate's chat template says, from its own GGUF header on
+     * disk: length, a few telling keywords, the start, and the text around
+     * the first "lang" -- evidence for a model whose prompt format is not the
+     * generic one (build #471: TranslateGemma answered in Kinyarwanda to the
+     * generic translation prompt; its 16982-character template likely wants
+     * structured language codes).
+     */
+    private fun logChatTemplate(name: String, weights: File) {
+        val tag = "CANDIDATE_TEST"
+        runCatching {
+            val metadata = weights.inputStream().use { input ->
+                ai.localstudio.model.install.GgufMetadataReader.read(input) { it.containsKey(ai.localstudio.model.install.GgufMetadata.KEY_CHAT_TEMPLATE) }
+            }
+            val template = metadata.values[ai.localstudio.model.install.GgufMetadata.KEY_CHAT_TEMPLATE] as? String
+            if (template == null) {
+                appLog.record(tag, "$name: no chat template in its header")
+                return@runCatching
+            }
+            val flat = template.replace('\n', ' ')
+            val markers = listOf("source_lang_code", "target_lang_code", "source_lang", "target_lang", "<think>", "enable_thinking", "tools", "image")
+                .filter { it in template }
+            appLog.record(tag, "$name: chat template ${template.length} chars; mentions ${markers.ifEmpty { listOf("none of the usual markers") }}; starts: ${flat.take(300)}")
+            val lang = flat.indexOf("lang")
+            if (lang >= 0) appLog.record(tag, "$name: chat template around \"lang\": ${flat.substring(maxOf(0, lang - 200), minOf(flat.length, lang + 400))}")
+        }.onFailure { appLog.record(tag, "$name: chat template not read: ${it.javaClass.simpleName}: ${it.message}") }
     }
 
     private fun candidateVariantId(candidate: DiscoveredCandidate) =
@@ -934,11 +972,27 @@ class AppContainer private constructor(private val context: Context) {
     fun candidateInstalledBytes(candidate: DiscoveredCandidate): Long? =
         modelInstallation.installed.manifest(candidateVariantId(candidate))?.let { m -> m.artifacts.sumOf { it.unpackedBytes ?: it.sizeBytes } }
 
+    /**
+     * The candidate's weights on disk: its own install, or -- once "Use" moved
+     * it into a custom model -- that model's file, when it is the very same
+     * commit and path. Tested again from there, never downloaded again.
+     */
     private fun candidateWeights(candidate: DiscoveredCandidate): File? {
-        val manifest = modelInstallation.installed.manifest(candidateVariantId(candidate)) ?: return null
+        val installed = modelInstallation.installed
+        val own = installed.manifest(candidateVariantId(candidate))
+        val manifest = own ?: installed.manifest(modelStore.variantId(LocalModels.custom(candidate.repoId)))
+            ?.takeIf { m ->
+                m.artifacts.any {
+                    it.role == ai.localstudio.model.ArtifactRoles.WEIGHTS && it.source.commit == candidate.commit && it.source.path == candidate.filePath
+                }
+            }
+            ?: return null
         val artifact = manifest.artifacts.firstOrNull { it.role == ai.localstudio.model.ArtifactRoles.WEIGHTS } ?: return null
-        return modelInstallation.installed.pathOf(manifest, artifact).takeIf { it.isFile }
+        return installed.pathOf(manifest, artifact).takeIf { it.isFile }
     }
+
+    /** Whether [testCandidate] has a file to test: downloaded, or already moved into one of the user's models. */
+    fun candidateTestable(candidate: DiscoveredCandidate): Boolean = candidateWeights(candidate) != null
 
     /**
      * Removes [candidate]'s installed file and any paused partial download;
