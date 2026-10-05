@@ -58,6 +58,20 @@ class CandidatesActivity : AppCompatActivity() {
         container.discoveryStore.markSeen()
     }
 
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        menu.add(android.view.Menu.NONE, MENU_DISCOVER, android.view.Menu.NONE, R.string.discover_menu)
+        UtilityMenu.inflate(this, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        if (item.itemId == MENU_DISCOVER) {
+            DiscoveryLauncher.start(this)
+            return true
+        }
+        return UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
+    }
+
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
@@ -317,5 +331,9 @@ class CandidatesActivity : AppCompatActivity() {
             ).show()
             render()
         }
+    }
+
+    private companion object {
+        const val MENU_DISCOVER = 9100
     }
 }

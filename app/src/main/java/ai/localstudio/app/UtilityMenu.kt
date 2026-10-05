@@ -6,8 +6,9 @@ import android.view.MenuItem
 import androidx.appcompat.app.AppCompatActivity
 
 /**
- * The same "jump to another utility screen" menu on every secondary
- * screen (Models, Settings, History, Log, Transcribe, Benchmark) — not just
+ * The same "jump to another utility screen" menu on every screen of the
+ * app (Models, Settings, History, Log, Transcribe, Benchmark, Memory, API
+ * keys, ...) — not just
  * [ChatActivity]. Real device report: reaching Benchmark from Log meant
  * navigating back to Chat first, just to switch between two screens
  * neither of which is chat, and re-triggering whatever Chat's own
@@ -28,7 +29,7 @@ import androidx.appcompat.app.AppCompatActivity
  * reason — it is chat's own, and [ChatActivity] already adds its own
  * History item (which needs a result back, see [inflate]).
  *
- * [MORE_ENTRIES] (Phrasebook, Benchmark) fold into one "More" submenu
+ * [MORE_ENTRIES] (Discovered candidates, Phrasebook, Benchmark) fold into one "More" submenu
  * instead of two more flat rows — both are occasional, task-specific
  * screens (a fixed phrase list; a one-off perf measurement), unlike the
  * six above them a user actually switches between while working. Still
@@ -61,9 +62,19 @@ object UtilityMenu {
 
     /** Folded into the "More" submenu — see this object's own doc comment. */
     private val MORE_ENTRIES = listOf(
+        Entry(9010, R.string.candidates_menu, CandidatesActivity::class.java),
         Entry(9009, R.string.menu_phrasebook, PhrasebookActivity::class.java),
         Entry(9007, R.string.menu_benchmark, BenchmarkActivity::class.java),
     )
+
+    // Explicit menu order, not insertion order: a screen's own items (added
+    // with the default order 0, before or after [inflate]) always come
+    // first, then these, and Log is always the very last row. Insertion
+    // order alone let a screen break that -- Models added its discovery
+    // items after [inflate] and Log ended up in the middle.
+    private const val ORDER_SHARED = 100
+    private const val ORDER_MORE = 900
+    private const val ORDER_LOG = 1000
 
     // Log stays its own last row, not folded into "More" — an error log is
     // exactly what someone reaches for right after something went wrong,
@@ -85,16 +96,16 @@ object UtilityMenu {
      */
     fun inflate(activity: AppCompatActivity, menu: Menu, skip: Set<Class<out AppCompatActivity>> = emptySet()) {
         ENTRIES.filter { it.activityClass != activity::class.java && it.activityClass !in skip }
-            .forEach { entry -> menu.add(0, entry.id, 0, entry.titleRes) }
+            .forEachIndexed { i, entry -> menu.add(0, entry.id, ORDER_SHARED + i, entry.titleRes) }
 
         val more = MORE_ENTRIES.filter { it.activityClass != activity::class.java && it.activityClass !in skip }
         if (more.isNotEmpty()) {
-            val subMenu = menu.addSubMenu(0, Menu.NONE, 0, R.string.menu_more)
+            val subMenu = menu.addSubMenu(0, Menu.NONE, ORDER_MORE, R.string.menu_more)
             more.forEach { entry -> subMenu.add(0, entry.id, 0, entry.titleRes) }
         }
 
         if (LOG_ENTRY.activityClass != activity::class.java && LOG_ENTRY.activityClass !in skip) {
-            menu.add(0, LOG_ENTRY.id, 0, LOG_ENTRY.titleRes)
+            menu.add(0, LOG_ENTRY.id, ORDER_LOG, LOG_ENTRY.titleRes)
         }
     }
 

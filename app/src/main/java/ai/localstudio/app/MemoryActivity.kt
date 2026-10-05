@@ -59,6 +59,14 @@ class MemoryActivity : AppCompatActivity() {
         render()
     }
 
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        UtilityMenu.inflate(this, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean =
+        UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
+
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true

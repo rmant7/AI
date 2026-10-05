@@ -41,7 +41,6 @@ import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.ModelFit
 import ai.localstudio.core.speech.AsrEngineType
 import kotlinx.coroutines.launch
-import ai.localstudio.app.models.ModelDownloadService
 
 /**
  * Every model the app can run, grouped by what it is *for* — chat models,
@@ -161,19 +160,15 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        UtilityMenu.inflate(this, menu)
+        // This screen's own items first; UtilityMenu's shared ones (Discovered candidates under More, Log last) follow.
         menu.add(Menu.NONE, MENU_DISCOVER, Menu.NONE, R.string.discover_menu)
-        menu.add(Menu.NONE, MENU_CANDIDATES, Menu.NONE, R.string.candidates_menu)
+        UtilityMenu.inflate(this, menu)
         return true
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         if (item.itemId == MENU_DISCOVER) {
             runDiscovery()
-            return true
-        }
-        if (item.itemId == MENU_CANDIDATES) {
-            showCandidates()
             return true
         }
         return UtilityMenu.handle(this, item.itemId) || super.onOptionsItemSelected(item)
@@ -197,27 +192,7 @@ class ModelsActivity : AppCompatActivity() {
      * called from [onResume], is what picks the result back up whenever this
      * screen (re)opens, whether that's seconds or days later.
      */
-    private fun runDiscovery() {
-        // Logged before anything else, synchronously (AppLog.record writes
-        // to disk on the spot) -- a device report (build #455) showed zero
-        // DISCOVERY lines and no visible effect at all after tapping this,
-        // with no crash either. Either this method was never reached, or it
-        // returned right here with discovery == null; this line tells the
-        // two apart on the next attempt regardless of which it was.
-        val discoveryAvailable = container.modelInstallation.discovery != null
-        container.appLog.record("DISCOVERY", "menu item tapped; discovery ${if (discoveryAvailable) "available" else "unavailable (hub cannot search)"}")
-        if (!discoveryAvailable) {
-            Toast.makeText(this, R.string.discover_unavailable, Toast.LENGTH_LONG).show()
-            return
-        }
-        if (container.discoveryRunning.value) {
-            Toast.makeText(this, R.string.discover_already_running, Toast.LENGTH_SHORT).show()
-            return
-        }
-        Toast.makeText(this, R.string.discover_running, Toast.LENGTH_SHORT).show()
-        ModelDownloadService.ensureStarted(this)
-        container.startDiscovery()
-    }
+    private fun runDiscovery() = DiscoveryLauncher.start(this)
 
     /**
      * Opens the candidates screen once for whatever finished since it was
@@ -1376,7 +1351,6 @@ class ModelsActivity : AppCompatActivity() {
 
         /** Outside UtilityMenu's 9000-range ids. */
         private const val MENU_DISCOVER = 9100
-        private const val MENU_CANDIDATES = 9101
 
         /** [Category.name], read by [onCreate] to open on a specific tab — see [intent]. */
         const val EXTRA_CATEGORY = "category"
