@@ -529,7 +529,7 @@ class ModelsActivity : AppCompatActivity() {
                 else getString(R.string.model_check_answering, running.probe, running.probes)
             check.queued -> getString(R.string.model_check_queued)
             record == null || now == null -> getString(R.string.model_check_none)
-            else -> VerificationText.summary(this, record, now)
+            else -> VerificationText.summary(this, record, now) + "  ›"
         }
         return Row.CheckLine(
             text = text,
@@ -543,7 +543,7 @@ class ModelsActivity : AppCompatActivity() {
                 render()
             },
             onDetails = if (record != null && now != null) {
-                { showCheckDetails(seed.title, VerificationText.details(this, record, now)) }
+                { showCheckDetails(seed.title, VerificationText.details(this, record, now, container.memoryReport(seed))) }
             } else {
                 null
             },
@@ -1360,6 +1360,8 @@ class ModelsActivity : AppCompatActivity() {
             binding.localProgress.visibility = View.GONE
             binding.localSecondaryButton.visibility = View.GONE
             binding.localCheckRow.visibility = View.GONE
+            binding.root.setOnClickListener(null)
+            binding.root.isClickable = false
             binding.localPrimaryButton.text = context.getString(R.string.models_custom_add)
             binding.localPrimaryButton.isEnabled = true
             binding.localPrimaryButton.setOnClickListener { onClick() }
@@ -1414,7 +1416,11 @@ class ModelsActivity : AppCompatActivity() {
             binding.localCheckRow.visibility = if (check == null) View.GONE else View.VISIBLE
             binding.localCheckText.text = check?.text.orEmpty()
             binding.localCheckText.isClickable = check?.onDetails != null
-            binding.localCheckText.setOnClickListener(check?.onDetails?.let { details -> View.OnClickListener { details() } })
+            val openDetails = check?.onDetails?.let { details -> View.OnClickListener { details() } }
+            binding.localCheckText.setOnClickListener(openDetails)
+            // The whole card opens the check report too: the line alone was too small a target to find.
+            binding.root.setOnClickListener(openDetails)
+            binding.root.isClickable = openDetails != null
             binding.localCheckButton.text = check?.buttonLabel.orEmpty()
             binding.localCheckButton.isEnabled = check?.buttonEnabled == true
             binding.localCheckButton.setOnClickListener { check?.onButton?.invoke() }

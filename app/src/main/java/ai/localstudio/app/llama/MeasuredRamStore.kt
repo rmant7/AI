@@ -64,6 +64,42 @@ class MeasuredRamStore(
         return true
     }
 
+    /**
+     * Drops every measurement of this file -- all context sizes, mapped or
+     * read into memory: a device check is the measurement, and a figure an
+     * older, possibly disturbed run left for another context size must not
+     * outlive it (#492: the check measured Gemma 4 E4B at 2048 tokens, chat
+     * then refused it on a September peak for 4096 tokens, ~9.8 GB). The
+     * mapped-anonymous profile that picks the load mode stays. The number of
+     * measurements dropped.
+     */
+    @Synchronized
+    fun forgetAll(artifactPath: String): Int {
+        val prefix = filePrefix(artifactPath) ?: return 0
+        val keys = prefs.all.keys.filter { it.startsWith(prefix) }
+        if (keys.isNotEmpty()) prefs.edit().apply { keys.forEach { remove(it) } }.apply()
+        return keys.size
+    }
+
+    /** Every measurement of this file: context size, whether read into memory, and the figure -- for a person reading a check. */
+    fun measurementsOf(artifactPath: String): List<Triple<Int, Boolean, RamMeasurement>> {
+        val prefix = filePrefix(artifactPath) ?: return emptyList()
+        return prefs.all.mapNotNull { (key, value) ->
+            if (!key.startsWith(prefix)) return@mapNotNull null
+            val rest = key.removePrefix(prefix)
+            val read = rest.endsWith("|read")
+            val ctx = rest.removeSuffix("|read").toIntOrNull() ?: return@mapNotNull null
+            decode(value as? String)?.let { Triple(ctx, read, it) }
+        }.sortedWith(compareBy({ it.first }, { it.second }))
+    }
+
+    private fun filePrefix(artifactPath: String): String? {
+        val file = File(artifactPath)
+        if (!file.isFile) return null
+        val canonical = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
+        return "$KEY_VERSION|$canonical|${file.length()}|"
+    }
+
     private fun keyFor(artifactPath: String, contextTokens: Int): String? {
         val file = File(artifactPath)
         if (!file.isFile) return null

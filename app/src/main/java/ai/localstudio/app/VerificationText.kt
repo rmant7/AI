@@ -4,6 +4,7 @@ import ai.localstudio.model.install.CheckStatus
 import ai.localstudio.model.install.DeviceVerification
 import ai.localstudio.model.install.VerificationContext
 import ai.localstudio.model.install.VerifiedCapability
+import ai.localstudio.model.install.tier
 import android.content.Context
 import java.util.Locale
 
@@ -32,8 +33,14 @@ object VerificationText {
         v.staleReason(now)?.let { append("\n").append(context.getString(R.string.candidate_stale_reason, it)) }
     }
 
-    /** Every question of every capability, in order: passed or not, what was said, how fast; then the record's own facts. */
-    fun details(context: Context, v: DeviceVerification, now: VerificationContext): String = buildString {
+    /**
+     * The whole check as one copyable report: the verdict, every question
+     * of every capability in order (passed or not, what was said, how long),
+     * what the record is evidence for, and [memory] -- what the model costs
+     * in RAM here (see [AppContainer.memoryReport]).
+     */
+    fun details(context: Context, v: DeviceVerification, now: VerificationContext, memory: String = ""): String = buildString {
+        append(v.tier(now).name).append("\n")
         append(summary(context, v, now))
         append("\n\n").append(v.deviceProfile)
         append("\n").append(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(v.verifiedAtEpochMs)))
@@ -50,7 +57,9 @@ object VerificationText {
                 step.answer?.let { append(" — «").append(it).append("»") }
                 step.error?.let { append(" — ").append(it) }
                 val timing = listOfNotNull(
-                    step.firstTokenMs?.let { String.format(Locale.ROOT, "%.1f s", it / 1000.0) },
+                    step.firstTokenMs?.let { String.format(Locale.ROOT, "first token %.1f s", it / 1000.0) },
+                    step.totalMs?.let { String.format(Locale.ROOT, "total %.1f s", it / 1000.0) },
+                    step.generatedTokens?.takeIf { it > 0 }?.let { "$it tok" },
                     step.tokensPerSecond?.let { String.format(Locale.ROOT, "%.1f tok/s", it) },
                 )
                 if (timing.isNotEmpty()) append(" [").append(timing.joinToString(", ")).append("]")
@@ -58,6 +67,7 @@ object VerificationText {
             if (check.steps.isEmpty()) check.sample?.let { append("\n").append(context.getString(R.string.candidate_check_said, it)) }
         }
         if (v.checks.isEmpty()) v.error?.let { append("\n\n").append(it) }
+        if (memory.isNotBlank()) append("\n\nRAM:\n").append(memory)
     }
 
     private fun capability(context: Context, cap: String) = context.getString(

@@ -689,7 +689,12 @@ class AppContainer private constructor(private val context: Context) {
         val files: () -> TrialFiles?,
     )
 
-    /** What a check loads and asks: the files, the bytes they are, and the questions for them. */
+    /**
+     * What a check loads and asks: the files, the bytes they are, and the
+     * questions for them. [contextTokens] is the context it loads with --
+     * for an installed model the one chat loads it with, so the RAM it
+     * measures is the figure chat is admitted against, not another one.
+     */
     private class TrialFiles(
         val weights: File,
         val projector: File?,
@@ -697,6 +702,7 @@ class AppContainer private constructor(private val context: Context) {
         val suites: Map<String, List<FunctionalProbe>>,
         val contextLength: Int,
         val sourceUrl: String?,
+        val contextTokens: Int,
     )
 
     private fun candidateSubject(label: String, candidate: DiscoveredCandidate) = TrialSubject(candidate.identity, candidate.repoId, label) {
@@ -704,6 +710,8 @@ class AppContainer private constructor(private val context: Context) {
             TrialFiles(
                 weights, projector, candidate.artifact().id, FunctionalProbe.suitesFor(candidate.artifact()),
                 candidate.contextLength?.toInt() ?: 0, "https://huggingface.co/${candidate.repoId}",
+                // Used from chat once it passes ("Use"): measured as chat will load it.
+                effectiveContextTokens(),
             )
         }
     }
@@ -871,6 +879,7 @@ class AppContainer private constructor(private val context: Context) {
                     ),
                     seed.contextTokens,
                     seed.repoIds.firstOrNull()?.let { "https://huggingface.co/$it" },
+                    effectiveContextTokens(),
                 )
             },
         )
@@ -925,6 +934,35 @@ class AppContainer private constructor(private val context: Context) {
         )
     }
 
+    /**
+     * What installed [seed] costs in RAM here, for a person reading its
+     * check: how its weights load and why, every measurement of its file
+     * (by context size and load mode), the context chat loads it with now,
+     * and its projector, admitted separately on the first image turn.
+     */
+    fun memoryReport(seed: LocalModelSeed): String {
+        val weights = modelStore.fileFor(seed).takeIf { it.isFile } ?: return ""
+        val decision = weightsLoadDecision(weights)
+        return buildList {
+            add("weights ${weights.length() / 1_000_000} MB, ${if (decision.mapped) "mapped" else "read into memory"} -- ${decision.reason}")
+            add("chat loads it with ${effectiveContextTokens()} tokens of context")
+            val measured = measuredRam.measurementsOf(weights.absolutePath)
+            if (measured.isEmpty()) add("not measured yet: admitted on the estimate, ${weights.length() * 13 / 10 / 1_000_000} MB")
+            measured.forEach { (ctx, inMemory, m) ->
+                add(
+                    "measured at $ctx tokens (${if (inMemory) "in memory" else "mapped"}): peak ${m.peakBytes / 1_000_000} MB " +
+                        "over ${m.sampleCount} run(s) -- admitted at ${m.requiredBytes / 1_000_000} MB",
+                )
+            }
+            modelStore.mmprojFileFor(seed).takeIf { modelStore.hasMmproj(seed) }?.let {
+                add(
+                    "projector ${it.length() / 1_000_000} MB: +${(it.length() * ai.localstudio.app.llama.MMPROJ_RAM_SAFETY_FACTOR).toLong() / 1_000_000} MB " +
+                        "reserved on the first image turn, on top of the weights",
+                )
+            }
+        }.joinToString("\n")
+    }
+
     data class InstalledCheck(
         val record: ai.localstudio.model.install.DeviceVerification?,
         /** Null while the files are not identified (see [checkIdentity]): then no record applies. */
@@ -971,9 +1009,9 @@ class AppContainer private constructor(private val context: Context) {
             logChatTemplate(name, weights)
             // A test is the measurement: what an earlier, possibly disturbed run recorded (merged by maximum,
             // so one bad sample would stay forever -- #479: +7996 MB for a 4.7 GB model measured while another
-            // model downloaded) is dropped, and this run's own measurement replaces it.
-            if (measuredRam.forget(weights.absolutePath, SMALL_CONTEXT_TOKENS)) {
-                appLog.record(tag, "$name: earlier RAM measurement dropped; this test measures again")
+            // model downloaded) is dropped for every context size, and this run's own measurement replaces it.
+            measuredRam.forgetAll(weights.absolutePath).takeIf { it > 0 }?.let {
+                appLog.record(tag, "$name: $it earlier RAM measurement(s) dropped; this test measures again at ${files.contextTokens} tokens of context")
             }
             val suites = files.suites
             val total = suites.values.sumOf { it.size }
@@ -1320,7 +1358,8 @@ class AppContainer private constructor(private val context: Context) {
     /**
      * The trial's [TrialRuntime]: the same llama.cpp stack a chat model loads
      * through ([sharedRuntimeManager], [deviceMemoryGate], RAM measuring),
-     * with a short context (the probes are a few dozen tokens) and greedy
+     * with the context chat loads it with (so what it measures is what chat
+     * is admitted against -- see [TrialFiles]) and greedy
      * sampling so a rerun asks the same question the same way. A probe that
      * does not finish within [CANDIDATE_PROBE_TIMEOUT_MS] -- the first one
      * includes the load -- fails as a timeout instead of hanging the trial.
@@ -1328,7 +1367,7 @@ class AppContainer private constructor(private val context: Context) {
     private fun trialRuntime(name: String, files: TrialFiles): TrialRuntime {
         val weights = files.weights
         val projector = files.projector
-        val contextTokens = SMALL_CONTEXT_TOKENS
+        val contextTokens = files.contextTokens
         val runtime = RamMeasuringRuntime(
             inner = LlamaCppRuntime(
                 contextTokens = contextTokens,

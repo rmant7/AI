@@ -133,9 +133,12 @@ data class CapabilityCheck(
 
 /**
  * What one question of a check observed. [firstTokenMs] is from asking to
- * the first piece of the answer (a load or a reload included, when the
- * question caused one); [tokensPerSecond] the generation after it. Both are
- * performance, a separate axis from [passed].
+ * the first piece of the answer -- a load or reload the question caused,
+ * reading its images and the prompt included; [totalMs] to the end of it;
+ * [generatedTokens] how many pieces of answer came, [tokensPerSecond] how
+ * fast after the first (null below two -- a one-word answer has no rate).
+ * All of it is performance, a separate axis from [passed]: a vision step's
+ * time is dominated by reading the image, not by generating.
  */
 @Serializable
 data class ProbeStep(
@@ -145,6 +148,8 @@ data class ProbeStep(
     val error: String? = null,
     val firstTokenMs: Long? = null,
     val tokensPerSecond: Double? = null,
+    val totalMs: Long? = null,
+    val generatedTokens: Int? = null,
 )
 
 /**

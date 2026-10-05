@@ -290,6 +290,8 @@ class CandidateTrial(
                     error = error,
                     firstTokenMs = if (chunks > 0) firstAt - askedAt else null,
                     tokensPerSecond = if (chunks >= 2 && lastAt > firstAt) (chunks - 1) * 1000.0 / (lastAt - firstAt) else null,
+                    totalMs = clock() - askedAt,
+                    generatedTokens = chunks,
                 )
                 try {
                     runtime.answer(

@@ -418,6 +418,8 @@ class CandidateTrialTest {
         // Stepping clock: asked at t, first chunk at t+100, three chunks 100 ms apart.
         assertEquals(100L, steps[0].firstTokenMs)
         assertEquals(10.0, steps[0].tokensPerSecond!!, 0.001)
+        assertEquals(3, steps[0].generatedTokens)
+        assertEquals(400L, steps[0].totalMs)
     }
 
     @Test

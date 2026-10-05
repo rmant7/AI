@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicReference
  * a ~990MB projector); 1.4 still leaves real margin above the bare weight
  * size without being the reason vision never gets to run at all.
  */
-private const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
+internal const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 
 /**
  * Same reasoning as [MMPROJ_RAM_SAFETY_FACTOR], for the main GGUF itself —
