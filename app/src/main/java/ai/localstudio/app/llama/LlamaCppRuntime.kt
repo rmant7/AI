@@ -153,6 +153,36 @@ internal fun readSelfRssParts(): RssParts? = runCatching {
     total?.let { RssParts(it, anon, file) }
 }.getOrNull()
 
+/**
+ * What slows a turn down besides the model itself, read before and after
+ * it: major page faults (pages read back from storage -- mapped weights
+ * the kernel dropped, or anything swapped out) and how much of this process
+ * is in swap (zram). A 2B model whose image turn takes minutes is either
+ * reading its weights back from flash, swapping, or throttled; these and
+ * the thermal status (see [LlamaCppRuntime]'s deviceConditions) tell which.
+ */
+internal data class TurnConditions(val majorFaults: Long?, val swapBytes: Long?) {
+    fun since(before: TurnConditions): String = listOfNotNull(
+        majorFaults?.let { now -> before.majorFaults?.let { "major page faults +${now - it}" } },
+        swapBytes?.let { now -> "swap ${now / 1_000_000} MB" + (before.swapBytes?.let { String.format(java.util.Locale.ROOT, " (%+d)", (now - it) / 1_000_000) } ?: "") },
+    ).joinToString(", ")
+
+    companion object {
+        fun read(): TurnConditions {
+            // Field 12 of /proc/self/stat, counted after the command name's closing parenthesis (which may contain spaces).
+            val majflt = runCatching {
+                File("/proc/self/stat").readText().substringAfterLast(')').trim().split(' ')[9].toLong()
+            }.getOrNull()
+            val swap = runCatching {
+                File("/proc/self/status").useLines { lines ->
+                    lines.firstOrNull { it.startsWith("VmSwap:") }?.removePrefix("VmSwap:")?.trim()?.removeSuffix("kB")?.trim()?.toLongOrNull()?.times(1024)
+                }
+            }.getOrNull()
+            return TurnConditions(majflt, swap)
+        }
+    }
+}
+
 internal fun readSelfRssBytes(): Long? = runCatching {
     File("/proc/self/status").useLines { lines ->
         lines.firstOrNull { it.startsWith("VmRSS:") }
@@ -236,6 +266,8 @@ class LlamaCppRuntime(
     private val weightsLoading: (File) -> ai.localstudio.core.runtime.WeightsLoadDecision = {
         ai.localstudio.core.runtime.WeightsLoadDecision(true, "mapped (default)")
     },
+    /** The device's own state, for each turn's log line (the thermal status); empty when unknown -- see [TurnConditions]. */
+    private val deviceConditions: () -> String = { "" },
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
@@ -447,7 +479,7 @@ class LlamaCppRuntime(
             }
             if (hasEncoder) log("LOCAL_LOAD", "${file.name}: encoder-decoder model — routing generate() through nativeGenerateT5")
 
-            return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, vision, hasEncoder, log)
+            return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, vision, hasEncoder, log, deviceConditions)
         } catch (t: Throwable) {
             log("LOCAL_LOAD", "${file.name}: abandoned after load (${t.javaClass.simpleName}) — freeing native model")
             trackPendingNativeWork(releaseInBackground(bridge, handle, file.name))
@@ -523,6 +555,7 @@ private class LlamaTextModel(
     /** Whether this handle is an encoder-decoder (T5-family) model — see [generate]. */
     private val hasEncoder: Boolean,
     private val log: (tag: String, message: String) -> Unit,
+    private val deviceConditions: () -> String,
 ) : TextModelHandle {
 
     // nativeCancel()/Job.cancel() only ask a blocking native call to stop at
@@ -542,6 +575,7 @@ private class LlamaTextModel(
 
     override fun generate(request: GenerationRequest): Flow<String> = callbackFlow {
         val start = System.currentTimeMillis()
+        val conditionsBefore = TurnConditions.read()
         var tokenCount = 0
         var firstTokenLogged = false
         val completed = AtomicBoolean(false)
@@ -708,6 +742,10 @@ private class LlamaTextModel(
                 log("LOCAL_GENERATE", "$modelId: done in ${elapsedMs}ms, $produced tokens")
                 runCatching { bridge.nativeLastTurnStats(handle) }
                     .onSuccess { log("LOCAL_GENERATE", "$modelId: $it") }
+                listOf(TurnConditions.read().since(conditionsBefore), runCatching(deviceConditions).getOrDefault(""))
+                    .filter { it.isNotBlank() }
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { log("LOCAL_GENERATE", "$modelId: during the turn: ${it.joinToString(", ")}") }
                 close()
             }
         }

@@ -1337,6 +1337,7 @@ class AppContainer private constructor(private val context: Context) {
                 memoryDiagnostics = { currentMemoryDiagnostics(context) },
                 memory = sharedRuntimeManager,
                 weightsLoading = ::weightsLoadDecision,
+                deviceConditions = { currentThermalConditions(context) },
             ),
             contextTokens = contextTokens,
             store = measuredRam,
@@ -3027,6 +3028,7 @@ class AppContainer private constructor(private val context: Context) {
                         memoryDiagnostics = { currentMemoryDiagnostics(context) },
                         memory = sharedRuntimeManager,
                         weightsLoading = ::weightsLoadDecision,
+                        deviceConditions = { currentThermalConditions(context) },
                     ),
                     contextTokens = contextTokens,
                     store = measuredRam,
@@ -3717,6 +3719,33 @@ class AppContainer private constructor(private val context: Context) {
          * now despite a low [ActivityManager.MemoryInfo.availMem] reading,
          * that reading is the one not to be trusted.
          */
+        /**
+         * The phone's thermal state as Android reports it: the status (NONE
+         * .. SHUTDOWN; from LIGHT up the CPU is being slowed) and, where
+         * available, the headroom (1.0 = severe throttling). A model that
+         * answers ten times slower after minutes of work is often hot, not broken.
+         */
+        fun currentThermalConditions(context: Context): String {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return ""
+            val power = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager ?: return ""
+            val status = when (power.currentThermalStatus) {
+                android.os.PowerManager.THERMAL_STATUS_NONE -> "none"
+                android.os.PowerManager.THERMAL_STATUS_LIGHT -> "light"
+                android.os.PowerManager.THERMAL_STATUS_MODERATE -> "moderate"
+                android.os.PowerManager.THERMAL_STATUS_SEVERE -> "severe"
+                android.os.PowerManager.THERMAL_STATUS_CRITICAL -> "critical"
+                android.os.PowerManager.THERMAL_STATUS_EMERGENCY -> "emergency"
+                android.os.PowerManager.THERMAL_STATUS_SHUTDOWN -> "shutdown"
+                else -> power.currentThermalStatus.toString()
+            }
+            val headroom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                power.getThermalHeadroom(0).takeIf { !it.isNaN() }?.let { String.format(java.util.Locale.ROOT, ", headroom %.2f", it) }
+            } else {
+                null
+            }
+            return "thermal $status" + headroom.orEmpty()
+        }
+
         fun currentMemoryDiagnostics(context: Context): String {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val info = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
