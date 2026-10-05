@@ -80,14 +80,33 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
 
     fun runs(): List<DiscoveryRun> = read().runs
 
+    /**
+     * Replaces [run]'s label. A candidate found again at the same commit and
+     * path keeps the verification it already had: that is evidence about
+     * those exact bytes on this device, and a new sweep re-finding them
+     * changes nothing about it. A different commit or file starts over.
+     */
     @Synchronized
     fun record(run: DiscoveryRun) {
         val current = read()
-        write(current.copy(runs = current.runs.filterNot { it.label == run.label } + run))
+        val known = current.runs.flatMap { it.candidates }
+            .mapNotNull { c -> c.verification?.let { Triple(c.repoId, c.commit, c.filePath) to it } }
+            .toMap()
+        val carried = run.copy(
+            candidates = run.candidates.map { c ->
+                if (c.verification != null) c else c.copy(verification = known[Triple(c.repoId, c.commit, c.filePath)])
+            },
+        )
+        write(current.copy(runs = current.runs.filterNot { it.label == run.label } + carried))
     }
 
-    /** Whether any run finished after the last time [markSeen] was called. */
-    fun hasUnseen(): Boolean = read().let { f -> f.runs.any { it.finishedAtEpochMs > f.lastSeenAtEpochMs } }
+    /** Whether any run finished, or any candidate was verified, after the last time [markSeen] was called. */
+    fun hasUnseen(): Boolean = read().let { f ->
+        f.runs.any { run ->
+            run.finishedAtEpochMs > f.lastSeenAtEpochMs ||
+                run.candidates.any { (it.verification?.verifiedAtEpochMs ?: 0L) > f.lastSeenAtEpochMs }
+        }
+    }
 
     @Synchronized
     fun markSeen() {

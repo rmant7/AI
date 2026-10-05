@@ -370,6 +370,7 @@
     <string name="download_notification_searching">Looking for the file…</string>
     <string name="download_notification_discovery">Searching for new models…</string>
     <string name="download_notification_title_discovery">Searching Hugging Face</string>
+    <string name="download_notification_title_candidate_test">Testing a model</string>
     <string name="download_notification_title_one">Downloading model</string>
     <string name="download_notification_title_many">Downloading models (%1$d)</string>
 
@@ -480,7 +481,20 @@
     <string name="discover_already_running">Already searching — results will show here once it finishes</string>
     <string name="discover_running">Searching Hugging Face… can take a couple of minutes; it keeps running if you leave this screen or close the app, and the result will be shown here next time you open Models</string>
     <string name="discover_title">New model candidates</string>
-    <string name="discover_section">%1$s: %2$d loadable of %3$d checked</string>
+    <string name="discover_section">%1$s: %2$d candidates (unverified) of %3$d checked</string>
     <string name="discover_failed">%1$s: search failed — %2$s</string>
-    <string name="discover_footer">Nothing was downloaded. Every result and the reason for each dropped model are in the Log (DISCOVERY).</string>
+    <string name="discover_footer">Only the file header was checked — none of these is a recommendation until it is tested on this device. Tap one to download and test it. Every result and each dropped model\'s reason are in the Log (DISCOVERY, CANDIDATE_TEST).</string>
+    <string name="candidates_menu">Discovered candidates</string>
+    <string name="candidates_none">No candidates yet — use “Find new models” first</string>
+    <string name="candidate_tier_unverified">unverified</string>
+    <string name="candidate_tier_loadable">loads, but did not answer correctly</string>
+    <string name="candidate_tier_functional">works on this device</string>
+    <string name="candidate_details">%1$s\nFile: %2$s (%3$d MB)\nArchitecture: %4$s, context %5$s\nCommit: %6$s\nStatus: %7$s</string>
+    <string name="candidate_verification">Tested on: %1$s\nLoaded: %2$s · Correct answers: %3$s\nSpeed: %4$s\nAnswered: %5$s\nProblem: %6$s</string>
+    <string name="candidate_test">Download &amp; Test</string>
+    <string name="candidate_test_busy">Another candidate is being tested right now</string>
+    <string name="candidate_test_started">Downloading and testing %1$s — keeps running in the background; the result will show here when you next open Models</string>
+    <string name="candidate_delete">Delete download (%1$d MB)</string>
+    <string name="candidate_deleted">Deleted</string>
+    <string name="candidate_delete_failed">Not deleted — a test is running, or nothing was installed</string>
 </resources>

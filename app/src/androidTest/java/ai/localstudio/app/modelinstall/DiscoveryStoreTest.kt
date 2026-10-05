@@ -33,9 +33,9 @@ class DiscoveryStoreTest {
         commit = "a".repeat(40), downloads = 1234,
     )
 
-    private fun verification(loaded: Boolean = true, inferenceOk: Boolean = true) = DeviceVerification(
+    private fun verification(loaded: Boolean = true, inferenceOk: Boolean = true, at: Long = 5_000L) = DeviceVerification(
         deviceProfile = "Pixel 10 Pro / API 37 / 16.3 GB / llama.cpp b10448 (i8mm)",
-        runtimeId = "llama_cpp", loaded = loaded, inferenceOk = inferenceOk, verifiedAtEpochMs = 5_000L,
+        runtimeId = "llama_cpp", loaded = loaded, inferenceOk = inferenceOk, verifiedAtEpochMs = at,
     )
 
     @After
@@ -126,5 +126,43 @@ class DiscoveryStoreTest {
 
         assertFalse("wrong label", store.recordVerification("translation", "acme/a-GGUF", verification()))
         assertFalse("a sweep since replaced this run without that repo", store.recordVerification("chat", "acme/gone-GGUF", verification()))
+    }
+
+    @Test
+    fun a_sweep_finding_the_same_file_again_keeps_its_verification() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(candidate("acme/a-GGUF"))))
+        store.recordVerification("chat", "acme/a-GGUF", verification())
+
+        store.record(DiscoveryRun("chat", 2_000L, 2, listOf(candidate("acme/a-GGUF"), candidate("acme/b-GGUF"))))
+
+        val byId = store.runs().single().candidates.associateBy { it.repoId }
+        assertEquals(verification(), byId.getValue("acme/a-GGUF").verification)
+        assertNull(byId.getValue("acme/b-GGUF").verification)
+    }
+
+    @Test
+    fun a_new_commit_or_a_different_file_starts_unverified_again() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(candidate("acme/a-GGUF"))))
+        store.recordVerification("chat", "acme/a-GGUF", verification())
+
+        store.record(DiscoveryRun("chat", 2_000L, 1, listOf(candidate("acme/a-GGUF").copy(commit = "c".repeat(40)))))
+        assertNull("other bytes, no evidence about them", store.runs().single().candidates.single().verification)
+
+        store.recordVerification("chat", "acme/a-GGUF", verification())
+        store.record(DiscoveryRun("chat", 3_000L, 1, listOf(candidate("acme/a-GGUF").copy(commit = "c".repeat(40), filePath = "q8/model-Q8_0.gguf"))))
+        assertNull(store.runs().single().candidates.single().verification)
+    }
+
+    @Test
+    fun a_verification_after_the_last_look_counts_as_unseen() {
+        val store = store()
+        store.record(DiscoveryRun("chat", 1_000L, 1, listOf(candidate("acme/a-GGUF"))))
+        store.markSeen()
+        assertFalse(store.hasUnseen())
+
+        store.recordVerification("chat", "acme/a-GGUF", verification(at = System.currentTimeMillis() + 10_000))
+        assertTrue("a finished test is news even though the sweep was already seen", store.hasUnseen())
     }
 }

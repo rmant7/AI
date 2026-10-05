@@ -372,6 +372,7 @@
     <string name="download_notification_searching">Поиск файла…</string>
     <string name="download_notification_discovery">Поиск новых моделей…</string>
     <string name="download_notification_title_discovery">Поиск на Hugging Face</string>
+    <string name="download_notification_title_candidate_test">Проверка модели</string>
     <string name="download_notification_title_one">Загрузка модели</string>
     <string name="download_notification_title_many">Загрузка моделей (%1$d)</string>
 
@@ -476,7 +477,20 @@
     <string name="discover_already_running">Поиск уже идёт — результат появится здесь, когда он завершится</string>
     <string name="discover_running">Поиск на Hugging Face… может занять пару минут; он продолжится, даже если вы уйдёте с экрана или закроете приложение, а результат появится здесь при следующем открытии экрана «Модели»</string>
     <string name="discover_title">Кандидаты в новые модели</string>
-    <string name="discover_section">%1$s: загружаемых %2$d из %3$d проверенных</string>
+    <string name="discover_section">%1$s: кандидатов (не проверены) %2$d из %3$d просмотренных</string>
     <string name="discover_failed">%1$s: поиск не удался — %2$s</string>
-    <string name="discover_footer">Ничего не скачано. Все результаты и причина отсева каждой модели — в журнале (DISCOVERY).</string>
+    <string name="discover_footer">Проверен только заголовок файла — ни один кандидат не является рекомендацией, пока не проверен на этом устройстве. Нажмите на кандидата, чтобы скачать и проверить. Все результаты и причины отсева — в журнале (DISCOVERY, CANDIDATE_TEST).</string>
+    <string name="candidates_menu">Найденные кандидаты</string>
+    <string name="candidates_none">Кандидатов пока нет — сначала «Найти новые модели»</string>
+    <string name="candidate_tier_unverified">не проверена</string>
+    <string name="candidate_tier_loadable">загружается, но не ответила правильно</string>
+    <string name="candidate_tier_functional">работает на этом устройстве</string>
+    <string name="candidate_details">%1$s\nФайл: %2$s (%3$d МБ)\nАрхитектура: %4$s, контекст %5$s\nКоммит: %6$s\nСтатус: %7$s</string>
+    <string name="candidate_verification">Проверено на: %1$s\nЗагрузилась: %2$s · Правильные ответы: %3$s\nСкорость: %4$s\nОтвет: %5$s\nПроблема: %6$s</string>
+    <string name="candidate_test">Скачать и проверить</string>
+    <string name="candidate_test_busy">Сейчас уже проверяется другой кандидат</string>
+    <string name="candidate_test_started">Скачивание и проверка %1$s — продолжится в фоне; результат появится здесь при следующем открытии экрана «Модели»</string>
+    <string name="candidate_delete">Удалить скачанное (%1$d МБ)</string>
+    <string name="candidate_deleted">Удалено</string>
+    <string name="candidate_delete_failed">Не удалено — идёт проверка, или ничего не установлено</string>
 </resources>

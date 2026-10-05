@@ -59,16 +59,19 @@ class ModelDownloadService : Service() {
         startForegroundCompat(buildNotification(getString(R.string.download_notification_preparing)))
 
         val container = AppContainer.get(this)
-        combine(container.downloads.state, container.whisperDownloads.state, container.discoveryRunning) { ggufStates, whisperStates, discovering ->
-            Triple(ggufStates, whisperStates, discovering)
-        }
-            .onEach { (ggufStates, whisperStates, discovering) ->
+        combine(
+            container.downloads.state,
+            container.whisperDownloads.state,
+            container.discoveryRunning,
+            container.candidateTrialStatus,
+        ) { ggufStates, whisperStates, discovering, trial -> Watched(ggufStates, whisperStates, discovering, trial) }
+            .onEach { (ggufStates, whisperStates, discovering, trial) ->
                 val ggufRunning = ggufStates.values.filterIsInstance<DownloadState.Running>()
                 val ggufResolving = ggufStates.values.any { it is DownloadState.Resolving }
                 val whisperRunning = whisperStates.values.filterIsInstance<WhisperDownloadState.Running>()
                 val activeCount = ggufRunning.size + whisperRunning.size
 
-                if (activeCount == 0 && !ggufResolving && !discovering) {
+                if (activeCount == 0 && !ggufResolving && !discovering && trial == null) {
                     ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return@onEach
@@ -80,12 +83,18 @@ class ModelDownloadService : Service() {
                         add(getString(R.string.download_notification_whisper_progress, (it.progress.fraction * 100).toInt()))
                     }
                     if (discovering) add(getString(R.string.download_notification_discovery))
+                    if (trial != null) add(trial)
                     if (isEmpty() && ggufResolving) add(getString(R.string.download_notification_searching))
                 }
                 // Discovery alone (activeCount 0) must not say "Downloading
                 // model" -- nothing is downloading, and that title would
                 // just be wrong for however long the sweep runs on its own.
-                val title = if (activeCount == 0 && discovering) getString(R.string.download_notification_title_discovery) else null
+                val title = when {
+                    activeCount > 0 -> null
+                    trial != null -> getString(R.string.download_notification_title_candidate_test)
+                    discovering -> getString(R.string.download_notification_title_discovery)
+                    else -> null
+                }
                 notificationManager.notify(NOTIFICATION_ID, buildNotification(parts.joinToString(" · "), activeCount, title))
             }
             .launchIn(scope)
@@ -150,3 +159,10 @@ class ModelDownloadService : Service() {
         }
     }
 }
+
+private data class Watched(
+    val gguf: Map<String, DownloadState>,
+    val whisper: Map<String, WhisperDownloadState>,
+    val discovering: Boolean,
+    val trial: String?,
+)
