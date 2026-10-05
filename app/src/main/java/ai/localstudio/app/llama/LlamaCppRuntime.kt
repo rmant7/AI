@@ -232,6 +232,8 @@ class LlamaCppRuntime(
      * a caller with no manager): the live free-RAM reading decides alone.
      */
     private val memory: ModelMemory? = null,
+    /** Read at every load: map the weights from their file (default) or read them into memory -- see Settings.mapModelWeights. */
+    private val mapWeights: () -> Boolean = { true },
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
@@ -306,7 +308,12 @@ class LlamaCppRuntime(
         // predicts is otherwise invisible here until someone asks "was
         // something else holding memory at the time" and has no log line to
         // check.
-        log("LOCAL_LOAD", "${file.name}: starting (ctx=$contextTokens, threads=$threads, free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)")
+        val mapped = mapWeights()
+        log(
+            "LOCAL_LOAD",
+            "${file.name}: starting (ctx=$contextTokens, threads=$threads, weights ${if (mapped) "mapped" else "read into memory"}, " +
+                "free RAM: ${effectiveHeadroomBytes() / (1024 * 1024)} MB)",
+        )
 
         // nativeLoad() is a single blocking JNI call — llama_model_load_from_file()
         // and llama_init_from_model() have no cancellation hook of their own,
@@ -348,7 +355,7 @@ class LlamaCppRuntime(
                     log("LOCAL_LOAD", "${file.name}: abandoned before the load started — skipped")
                     return@withLock
                 }
-                val produced = runCatching { bridge.nativeLoad(file.absolutePath, contextTokens, threads) }.getOrDefault(0L)
+                val produced = runCatching { bridge.nativeLoad(file.absolutePath, contextTokens, threads, mapped) }.getOrDefault(0L)
                 producedRef.set(produced)
                 if (!result.complete(produced) && produced != 0L) {
                     bridge.nativeFree(produced)

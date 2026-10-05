@@ -76,6 +76,65 @@ data class ArtifactRef(
     val key: String get() = listOfNotNull(repository, revision, mainFile, projectorFile).joinToString("|")
 }
 
+/** Where a model's files came from. */
+enum class ModelSource {
+    /** Shipped in the app's own catalog. */
+    CATALOG,
+    /** Found by discovery and taken in after a check on this device. */
+    DISCOVERED,
+    /** Added by the user by its repository. */
+    CUSTOM,
+}
+
+/**
+ * Which models a caller wants -- the catalog's filters as data, so every
+ * screen (this app's, IntelliVerse's, a mini app's) means the same thing by
+ * them. Every set criterion must hold; unset ones do not filter.
+ */
+data class ModelQuery(
+    /** Offered for this capability (its files allow it). */
+    val capability: LocalCapability? = null,
+    /**
+     * What a check on this device says now: for [capability] when one is
+     * set, otherwise for any capability. setOf(PASS) = proven only.
+     */
+    val checkResults: Set<CheckResult>? = null,
+    val sources: Set<ModelSource>? = null,
+    /** Every word must appear in the id, the name or (for a candidate) the repository; case ignored. */
+    val text: String = "",
+) {
+    fun matches(model: LocalModel): Boolean =
+        offered(model.capabilities) && checked(model.verified) &&
+            (sources == null || model.source in sources) &&
+            words(model.id, model.displayName)
+
+    /** A candidate's source is always DISCOVERED. */
+    fun matches(candidate: ModelCandidate): Boolean =
+        offered(candidate.capabilities) && checked(candidate.verified) &&
+            (sources == null || ModelSource.DISCOVERED in sources) &&
+            words(candidate.id, candidate.repository)
+
+    private fun offered(capabilities: Set<LocalCapability>) = capability == null || capability in capabilities
+
+    private fun checked(verified: Map<LocalCapability, CheckResult>): Boolean {
+        val wanted = checkResults ?: return true
+        fun result(c: LocalCapability) = verified[c] ?: CheckResult.NOT_TESTED
+        return if (capability != null) result(capability) in wanted else LocalCapability.entries.any { result(it) in wanted }
+    }
+
+    private fun words(vararg fields: String): Boolean {
+        val wanted = text.lowercase().split(' ', ',').filter { it.isNotBlank() }
+        if (wanted.isEmpty()) return true
+        val haystack = fields.joinToString(" ").lowercase()
+        return wanted.all { it in haystack }
+    }
+
+    companion object {
+        /** What a feature can rely on for [capability] on this device: a current PASS. */
+        fun proven(capability: LocalCapability) = ModelQuery(capability = capability, checkResults = setOf(CheckResult.PASS))
+    }
+}
+
 /**
  * An installed model -- every installed model, checked or not.
  * [capabilities]: what its installed files allow it to be asked (VISION
@@ -91,6 +150,7 @@ data class LocalModel(
     val sizeBytes: Long,
     /** Its bytes, when the install records where they came from; null for a model installed before that was kept. */
     val artifact: ArtifactRef? = null,
+    val source: ModelSource = ModelSource.CATALOG,
 ) {
     /** A current PASS on this device -- not STALE, not merely offered. */
     fun proven(capability: LocalCapability): Boolean = verified[capability] == CheckResult.PASS

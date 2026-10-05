@@ -269,28 +269,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="24dp"
-            android:text="@string/settings_whisper_model"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/whisperStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingTop="4dp"
-            android:textSize="13sp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/whisperManageButton"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/settings_whisper_manage" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingTop="24dp"
             android:text="@string/settings_section_downloads"
             android:textColor="?attr/colorPrimary"
             android:textSize="16sp"
@@ -328,6 +306,20 @@
                 android:text="@string/settings_download_policy_ask_every_time" />
 
         </RadioGroup>
+
+        <CheckBox
+            android:id="@+id/mapWeightsCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_map_weights" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="2dp"
+            android:text="@string/settings_map_weights_hint"
+            android:textSize="12sp" />
 
         <CheckBox
             android:id="@+id/autoDownloadCheck"

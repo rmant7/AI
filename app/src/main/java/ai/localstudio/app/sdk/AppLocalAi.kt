@@ -23,6 +23,7 @@ import ai.localstudio.sdk.LocalCapability
 import ai.localstudio.sdk.LocalModel
 import ai.localstudio.sdk.LocalModelDiscovery
 import ai.localstudio.sdk.ModelCandidate
+import ai.localstudio.sdk.ModelSource
 import ai.localstudio.sdk.TranslationRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -58,6 +59,7 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
                     verified = artifact?.let { SdkMapping.checks(container.recordedVerification(it), container.verificationContext(it)) }.orEmpty(),
                     sizeBytes = selected.binding.fileSizeBytes + (selected.binding.mmprojArtifact?.let { File(it).length() } ?: 0L),
                     artifact = artifact?.let(SdkMapping::artifactRef),
+                    source = sourceOf(id, artifact),
                 )
             }
 
@@ -131,6 +133,13 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
         container.candidateWork.first { candidateId !in it.queued && it.trial?.key != candidateId }
         val candidate = container.discoveredCandidate(candidateId)?.second ?: return emptyMap()
         return SdkMapping.checks(candidate.verification, container.verificationContext(candidate))
+    }
+
+    /** Shipped in the catalog; else taken in from discovery when its bytes are a candidate's; else added by the user. */
+    private fun sourceOf(modelId: String, artifact: ai.localstudio.model.install.ArtifactId?): ModelSource = when {
+        (ai.localstudio.app.models.LocalModels.SEEDS + ai.localstudio.app.models.TranslationModels.SEEDS).any { it.id == modelId } -> ModelSource.CATALOG
+        artifact != null && container.discoveredCandidates().any { it.second.identity == artifact.key } -> ModelSource.DISCOVERED
+        else -> ModelSource.CUSTOM
     }
 
     /** A T5 translation model translates and nothing else; every other local model takes text, and images with its projector. */

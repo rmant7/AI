@@ -11,7 +11,11 @@ import java.io.File
  * inherits the old file's number, the context size because the KV cache
  * scales with it.
  */
-class MeasuredRamStore(context: Context) {
+class MeasuredRamStore(
+    context: Context,
+    /** Whether weights are mapped from their file right now (see Settings.mapModelWeights): each way is measured on its own. */
+    private val weightsMapped: () -> Boolean = { true },
+) {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -43,7 +47,9 @@ class MeasuredRamStore(context: Context) {
         val canonical = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
         // KEY_VERSION: measurements from before the projector was loaded
         // lazily include it (~1 GB for Gemma's) — dropped rather than trusted.
-        return "$KEY_VERSION|$canonical|${file.length()}|$contextTokens"
+        // Mapped and read-into-memory weights cost differently (mapped pages and a repacked copy count twice): never mixed.
+        val mode = if (weightsMapped()) "" else "|read"
+        return "$KEY_VERSION|$canonical|${file.length()}|$contextTokens$mode"
     }
 
     private fun decode(raw: String?): RamMeasurement? {

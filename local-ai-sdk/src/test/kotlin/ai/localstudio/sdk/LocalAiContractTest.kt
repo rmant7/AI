@@ -96,4 +96,34 @@ class LocalAiContractTest {
         assertFailsWith<IllegalArgumentException> { GenerationOptions(timeoutMs = 0) }
         assertFailsWith<IllegalArgumentException> { GenerationOptions(timeoutMs = 10_000, deadlineMs = 5_000) }
     }
+
+    @Test
+    fun `a query means the same everywhere -- capability, check result, source, words`() = runBlocking {
+        val index = LocalModel(
+            "custom-index", "Index-Translate-2B", setOf(LocalCapability.TEXT, LocalCapability.TRANSLATION, LocalCapability.VISION),
+            mapOf(LocalCapability.TEXT to CheckResult.PASS, LocalCapability.TRANSLATION to CheckResult.PASS, LocalCapability.VISION to CheckResult.FAIL),
+            2_000_000_000, source = ModelSource.DISCOVERED,
+        )
+        val gemma = visionModel.copy(verified = mapOf(LocalCapability.TEXT to CheckResult.PASS, LocalCapability.VISION to CheckResult.PASS), source = ModelSource.DISCOVERED)
+        val stale = visionModel.copy(id = "old", verified = mapOf(LocalCapability.VISION to CheckResult.STALE))
+        val ai = FakeLocalAi(listOf(textModel, index, gemma, stale))
+
+        assertEquals(listOf("gemma"), ai.models(ModelQuery.proven(LocalCapability.VISION)).map { it.id })
+        assertEquals(listOf("custom-index", "gemma", "old"), ai.models(ModelQuery(capability = LocalCapability.VISION)).map { it.id }, "offered, whatever the check says")
+        assertEquals(listOf("old"), ai.models(ModelQuery(checkResults = setOf(CheckResult.STALE))).map { it.id })
+        assertEquals(listOf("custom-index", "gemma"), ai.models(ModelQuery(sources = setOf(ModelSource.DISCOVERED))).map { it.id })
+        assertEquals(listOf("custom-index"), ai.models(ModelQuery(text = "index translate")).map { it.id })
+        assertEquals(listOf("qwen"), ai.models(ModelQuery(capability = LocalCapability.TEXT, checkResults = setOf(CheckResult.PASS), sources = setOf(ModelSource.CATALOG))).map { it.id })
+    }
+
+    @Test
+    fun `untested counts as NOT_TESTED, and a candidate is always discovered`() {
+        val candidate = ModelCandidate(
+            id = "acme/a|c|a.gguf", artifact = ArtifactRef("acme/a", "c", "a.gguf"), repository = "acme/a", sizeBytes = 1,
+            capabilities = setOf(LocalCapability.TEXT), installed = false,
+        )
+        assertTrue(ModelQuery(checkResults = setOf(CheckResult.NOT_TESTED)).matches(candidate))
+        assertFalse(ModelQuery(sources = setOf(ModelSource.CATALOG)).matches(candidate))
+        assertTrue(ModelQuery(sources = setOf(ModelSource.DISCOVERED), text = "acme").matches(candidate))
+    }
 }

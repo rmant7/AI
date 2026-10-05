@@ -16,6 +16,9 @@ interface LocalAi {
     /** Every model installed on this device, checked or not: each with what it can be asked and what a check here says now. */
     suspend fun models(): List<LocalModel>
 
+    /** [models] narrowed by [query] -- e.g. ModelQuery.proven(VISION) for what a feature can rely on. */
+    suspend fun models(query: ModelQuery): List<LocalModel> = models().filter(query::matches)
+
     /**
      * Streams the answer to [input] from [modelId], or from the model the
      * user chose for chat when null. Images need a model with
@@ -42,6 +45,9 @@ interface LocalAi {
 interface LocalModelDiscovery {
     /** What the last search found, with what a check on this device says about each now. */
     suspend fun candidates(): List<ModelCandidate>
+
+    /** [candidates] narrowed by [query], with the same meaning as for installed models. */
+    suspend fun candidates(query: ModelQuery): List<ModelCandidate> = candidates().filter(query::matches)
 
     /** Downloads [candidateId] (all of its files) unless already installed, then checks it on this device; progress until done. */
     fun install(candidateId: String): Flow<InstallProgress>

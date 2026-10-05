@@ -53,7 +53,7 @@ class LlamaBridge {
     external fun nativeLastTurnStats(handle: Long): String
 
     /** Returns a handle, or 0 when the model could not be loaded. */
-    external fun nativeLoad(modelPath: String, contextTokens: Int, threads: Int): Long
+    external fun nativeLoad(modelPath: String, contextTokens: Int, threads: Int, mapWeights: Boolean): Long
 
     /**
      * Loads a GGUF for [nativeEmbed] rather than [nativeGenerate] — a

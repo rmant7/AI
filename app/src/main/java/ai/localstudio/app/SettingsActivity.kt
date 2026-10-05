@@ -16,8 +16,6 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.lifecycleScope
 import ai.localstudio.app.databinding.ActivitySettingsBinding
-import ai.localstudio.app.whisper.WhisperDownloadState
-import ai.localstudio.app.whisper.WhisperModels
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
@@ -74,20 +72,11 @@ class SettingsActivity : AppCompatActivity() {
         binding.generationSettingsButton.setOnClickListener {
             startActivity(Intent(this, GenerationSettingsActivity::class.java))
         }
-        // Voice models live in the Models screen next to the chat models now,
-        // not in a corner of Settings — this only points there. Deep-links
-        // straight to the Voice tab: its own toggle button is hidden
-        // alongside the mic (see activity_models.xml's comment), so without
-        // this a tap here would always land on Text with no way to switch.
-        binding.whisperManageButton.setOnClickListener {
-            startActivity(ModelsActivity.intent(this, ModelsActivity.Category.VOICE))
-        }
         binding.apiKeysButton.setOnClickListener {
             startActivity(ApiKeysActivity.intent(this, settings.providerId))
         }
         setupDownloadPolicy()
 
-        lifecycleScope.launch { container.whisperDownloads.state.collect { renderWhisper() } }
         // AICore's status can change while this screen is open (re-enabled
         // in system settings, re-checked on resume) — Gemini Nano's row
         // must follow it rather than stay greyed out until the next visit.
@@ -98,12 +87,10 @@ class SettingsActivity : AppCompatActivity() {
                 .drop(1)
                 .collect { buildProviderCheckboxes() }
         }
-        renderWhisper()
     }
 
     override fun onResume() {
         super.onResume()
-        renderWhisper()
         // Refreshes the count after a visit to ApiKeysActivity — added,
         // deleted, or exhausted keys there should be reflected the moment
         // this screen is visible again, not only after re-selecting the
@@ -196,28 +183,10 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
+        binding.mapWeightsCheck.isChecked = settings.mapModelWeights
+        binding.mapWeightsCheck.setOnCheckedChangeListener { _, checked -> settings.mapModelWeights = checked }
         binding.autoDownloadCheck.isChecked = settings.autoDownloadEnabled
         binding.autoDownloadCheck.setOnCheckedChangeListener { _, checked -> settings.autoDownloadEnabled = checked }
-    }
-
-    private fun renderWhisper() {
-        val installed = container.installedWhisperSeed(settings.whisperModelId)
-        val running = WhisperModels.SEEDS.firstOrNull { container.whisperDownloads.stateOf(it) is WhisperDownloadState.Running }
-        val failed = WhisperModels.SEEDS.firstOrNull { container.whisperDownloads.stateOf(it) is WhisperDownloadState.Failed }
-
-        binding.whisperStatus.text = when {
-            running != null -> {
-                val state = container.whisperDownloads.stateOf(running) as WhisperDownloadState.Running
-                "${running.title}: ${state.stage} ${(state.progress.fraction * 100).toInt()}%"
-            }
-
-            failed != null -> getString(
-                R.string.settings_whisper_error,
-                (container.whisperDownloads.stateOf(failed) as WhisperDownloadState.Failed).message,
-            )
-            installed != null -> getString(R.string.settings_whisper_installed, installed.title)
-            else -> getString(R.string.settings_whisper_none)
-        }
     }
 
     private fun showProvider(provider: CloudProvider) {

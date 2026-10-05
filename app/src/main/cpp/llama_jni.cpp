@@ -595,7 +595,7 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeChatTemplateInfo(JNIEnv *env, jo
 
 JNIEXPORT jlong JNICALL
 Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
-    JNIEnv *env, jobject, jstring modelPath, jint contextTokens, jint threads) {
+    JNIEnv *env, jobject, jstring modelPath, jint contextTokens, jint threads, jboolean mapWeights) {
   try {
     static std::atomic<bool> backendReady{false};
     if (!backendReady.exchange(true)) {
@@ -612,7 +612,10 @@ Java_ai_localstudio_app_llama_LlamaBridge_nativeLoad(
     // mmap rather than reading the weights into the heap: a 3 GB model is then
     // paged in on demand and, more importantly, evictable under pressure —
     // which is what keeps Android from killing the app while it loads.
-    modelParams.load_mode = LLAMA_LOAD_MODE_MMAP;
+    // Off (an experiment, see Settings.mapModelWeights): read into the app's
+    // own memory instead -- with CPU repacking, mapped pages and the repacked
+    // copy are otherwise the same weights counted twice.
+    modelParams.load_mode = mapWeights ? LLAMA_LOAD_MODE_MMAP : LLAMA_LOAD_MODE_NONE;
 
     llama_model *model = llama_model_load_from_file(path.c_str(), modelParams);
     if (model == nullptr) {

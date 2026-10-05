@@ -162,7 +162,7 @@ class TranslationActivity : AppCompatActivity() {
         // Restored from Settings — real device report: navigating to Chat
         // and back reset this screen to a hardcoded default, discarding
         // whatever pair (Russian -> Hebrew, in that report) was actually
-        // last in use, the same in-memory-field-only gap translationDraftText
+        // last in use, the same in-memory-field-only gap TranslationSession.draft
         // already closed for the input text. Russian -> Seychellois Creole
         // (Seychelles travel, per docs) is only the very first-launch
         // default, when nothing has been picked yet.
@@ -194,10 +194,10 @@ class TranslationActivity : AppCompatActivity() {
         // instance's own field happened to hold — a process kill (a real
         // risk this app already has under memory pressure) loses that, and
         // with it whatever the user had typed and not yet translated.
-        binding.translationInput.setText(container.settings.translationDraftText)
+        binding.translationInput.setText(container.translationSession.draft)
         binding.translationInput.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) {
-                container.settings.translationDraftText = s?.toString().orEmpty()
+                container.translationSession.draft = s?.toString().orEmpty()
             }
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit

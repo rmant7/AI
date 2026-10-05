@@ -102,7 +102,17 @@ class TranslationSession(context: Context) {
             .map { Result(it.getString("label"), it.getString("text")) }
     }.getOrDefault(emptyList())
 
+    /**
+     * What is typed on the Translation screen, kept on every keystroke so it
+     * survives a process kill or a trip to another screen. Screen state, not
+     * a setting -- it used to live in Settings (see [Settings.takeLegacyTranslationDraft]).
+     */
+    var draft: String
+        get() = prefs.getString(KEY_DRAFT, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_DRAFT, value).apply()
+
     private companion object {
         const val KEY_RESULTS = "results"
+        const val KEY_DRAFT = "draft"
     }
 }

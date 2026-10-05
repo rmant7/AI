@@ -188,7 +188,7 @@ class AppContainer private constructor(private val context: Context) {
      * only the outer gate deciding whether to attempt the load at all.
      */
     /** Real per-model RAM costs measured on this device — see [RamMeasuringRuntime]. */
-    private val measuredRam = MeasuredRamStore(context)
+    private val measuredRam = MeasuredRamStore(context, weightsMapped = { settings.mapModelWeights })
 
     private val sharedRuntimeManager = RuntimeManager(
         budgetBytes = { device.liveRamBytes },
@@ -229,7 +229,10 @@ class AppContainer private constructor(private val context: Context) {
     val heavyOperations = HeavyOperations()
 
     /** The Translation screen's results, kept past that screen's own lifetime — see [TranslationSession]. */
-    val translationSession = TranslationSession(context)
+    val translationSession = TranslationSession(context).also { session ->
+        // Typed text kept in Settings by older builds moves once into the screen's own state.
+        settings.takeLegacyTranslationDraft()?.let { legacy -> if (session.draft.isEmpty()) session.draft = legacy }
+    }
 
     /**
      * The last AICore [FeatureStatus] seen this run — null until the first
@@ -1148,6 +1151,7 @@ class AppContainer private constructor(private val context: Context) {
                 availableRamBytes = { currentAvailableRamBytes(context) },
                 memoryDiagnostics = { currentMemoryDiagnostics(context) },
                 memory = sharedRuntimeManager,
+                mapWeights = { settings.mapModelWeights },
             ),
             contextTokens = contextTokens,
             store = measuredRam,
@@ -2832,6 +2836,7 @@ class AppContainer private constructor(private val context: Context) {
                         availableRamBytes = { currentAvailableRamBytes(context) },
                         memoryDiagnostics = { currentMemoryDiagnostics(context) },
                         memory = sharedRuntimeManager,
+                        mapWeights = { settings.mapModelWeights },
                     ),
                     contextTokens = contextTokens,
                     store = measuredRam,

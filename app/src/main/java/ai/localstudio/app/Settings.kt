@@ -178,22 +178,22 @@ class Settings(context: Context) {
         prefs.edit().putString(key, value.joinToString(",")).apply()
 
     /**
-     * What's currently typed on the Translation screen — persisted on every
-     * keystroke so it survives a process kill (a real risk this app already
-     * has, under real memory pressure) or just navigating away to pick a
-     * different model and back, not only an in-memory Activity field that a
-     * kill would silently lose along with whatever the user had typed.
+     * The Translation screen's typed text from when it was kept here, removed
+     * as it is read: it is screen state, now in [TranslationSession.draft].
+     * Null when there is none (already moved, or never typed).
      */
-    var translationDraftText: String
-        get() = prefs.getString(KEY_TRANSLATION_DRAFT, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_TRANSLATION_DRAFT, value).apply()
+    fun takeLegacyTranslationDraft(): String? {
+        val draft = prefs.getString(KEY_TRANSLATION_DRAFT, null) ?: return null
+        prefs.edit().remove(KEY_TRANSLATION_DRAFT).apply()
+        return draft.ifEmpty { null }
+    }
 
     /**
      * The last source/target language codes picked on the Translation
      * screen — real device report: [ai.localstudio.app.TranslationActivity]'s
      * own `selectedSource`/`selectedTarget` fields were in-memory only, so
      * navigating to Chat and back (an Activity recreation under memory
-     * pressure, the same real risk [translationDraftText] exists for) reset
+     * pressure, the same real risk [TranslationSession.draft] exists for) reset
      * the screen to its hardcoded ru -> crs default, silently discarding
      * whatever pair — Russian -> Hebrew, in that report — was actually last
      * in use. Empty means "never picked one yet"; the Activity's own
@@ -275,6 +275,19 @@ class Settings(context: Context) {
     var autoDownloadEnabled: Boolean
         get() = prefs.getBoolean(KEY_AUTO_DOWNLOAD, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_DOWNLOAD, value).apply()
+
+    /**
+     * Local model weights mapped from their file (the default) or read into
+     * the app's own memory. Mapped pages are counted in the process's
+     * resident set while the kernel may drop and re-read them, and with
+     * llama.cpp's CPU repacking the same weights also exist once more as a
+     * repacked copy -- a real measurement (Qwen2.5-VL-7B, #485): +8.2 GB
+     * peak = 3.9 GB anonymous + 4.2 GB file pages for a 4.7 GB file. Off is
+     * an experiment: every weight in the app's own memory, counted once.
+     */
+    var mapModelWeights: Boolean
+        get() = prefs.getBoolean(KEY_MAP_MODEL_WEIGHTS, true)
+        set(value) = prefs.edit().putBoolean(KEY_MAP_MODEL_WEIGHTS, value).apply()
 
     var memoryEnabled: Boolean
         get() = prefs.getBoolean(KEY_MEMORY, true)
@@ -403,6 +416,7 @@ class Settings(context: Context) {
         const val KEY_HF_TOKEN = "huggingFaceToken"
         const val KEY_DOWNLOAD_POLICY = "downloadPolicy"
         const val KEY_AUTO_DOWNLOAD = "autoDownloadEnabled"
+        const val KEY_MAP_MODEL_WEIGHTS = "mapModelWeights"
         const val KEY_TEMPERATURE = "temperature"
         const val KEY_TOP_P = "topP"
         const val KEY_TOP_K = "topK"

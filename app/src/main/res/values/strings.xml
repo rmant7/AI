@@ -147,6 +147,8 @@
     <string name="settings_download_policy_wifi_only">Wi-Fi only</string>
     <string name="settings_download_policy_wifi_and_mobile">Wi-Fi + mobile data</string>
     <string name="settings_download_policy_ask_every_time">Ask every time</string>
+    <string name="settings_map_weights">Map local model weights from their file (default)</string>
+    <string name="settings_map_weights_hint">Off (experiment): weights are read into the app\'s own memory — no double counting with repacked weights, but they can no longer be dropped and re-read under pressure. Applies to the next model load.</string>
     <string name="settings_auto_download">Download recommended models automatically</string>
     <string name="settings_auto_download_hint">Right now, this only applies to the semantic-memory embedding model — it downloads itself in the background once memory is enabled. A manual tap on Download is never affected by this.</string>
     <string name="settings_whisper_installed">Installed: %1$s</string>
