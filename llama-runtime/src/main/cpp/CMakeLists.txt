@@ -53,7 +53,7 @@ set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 # explicitly is what makes on-device generation usable rather than a curiosity.
 #
 # Three CPU-feature variants of this library, one per configure, selected at
-# runtime from Kotlin (see ai.localstudio.whisper.CpuVariant):
+# runtime from Kotlin (see ai.localstudio.core.runtime.CpuVariant):
 #
 #   baseline  armv8-a                        libllama_jni.so          any arm64 CPU
 #   dotprod   armv8.2-a+dotprod+fp16         libllama_jni_dotprod.so  ~Snapdragon 845+, Cortex-A55/A75+

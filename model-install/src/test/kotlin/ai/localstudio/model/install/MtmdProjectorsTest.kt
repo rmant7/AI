@@ -10,7 +10,7 @@ class MtmdProjectorsTest {
     /** Moving llama.cpp to another tag without regenerating the list would make every projector verdict stale. */
     @Test
     fun the_list_is_generated_from_the_llama_cpp_tag_the_app_builds() {
-        val cmake = listOf("../app/src/main/cpp/CMakeLists.txt", "app/src/main/cpp/CMakeLists.txt").map(::File).first { it.isFile }
+        val cmake = listOf("../llama-runtime/src/main/cpp/CMakeLists.txt", "llama-runtime/src/main/cpp/CMakeLists.txt").map(::File).first { it.isFile }
         val tag = Regex("""GIT_TAG\s+(\S+)""").find(cmake.readText())!!.groupValues[1]
         assertEquals(tag, MtmdProjectors.LLAMA_CPP_TAG, "CMakeLists.txt builds llama.cpp $tag: rerun scripts/gen_mtmd_projectors.py against that tag")
         assertEquals(LlamaCppArchitectures.LLAMA_CPP_TAG, MtmdProjectors.LLAMA_CPP_TAG)

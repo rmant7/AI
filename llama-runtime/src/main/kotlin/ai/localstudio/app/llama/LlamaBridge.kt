@@ -194,9 +194,9 @@ class LlamaBridge {
         /**
          * Which CPU-feature build was loaded (llama_jni, llama_jni_dotprod,
          * llama_jni_i8mm) — the best this CPU supports, see
-         * [ai.localstudio.whisper.CpuVariant]. Null when none could be.
+         * [ai.localstudio.core.runtime.CpuVariant]. Null when none could be.
          */
-        val loadedLibrary: String? by lazy { ai.localstudio.whisper.CpuVariant.loadBest("llama_jni") }
+        val loadedLibrary: String? by lazy { ai.localstudio.core.runtime.CpuVariant.loadBest("llama_jni") }
 
         // Matches NodeExecutors' default context-assembly budget (4096) —
         // deliberately, on both sides: raising this without raising the RAM
@@ -226,7 +226,7 @@ class LlamaBridge {
         /**
          * Counts this SoC's performance cores (see [CpuClusters]) via the
          * same per-core `/sys/devices/system/cpu/cpuN/cpufreq/cpuinfo_max_freq`
-         * read [ai.localstudio.whisper.CpuVariant.detect] already relies on
+         * read [ai.localstudio.core.runtime.CpuVariant.detect] already relies on
          * for ISA features, just grouped by clock speed instead of
          * instruction set. Null (falls back to the flat guess above) when
          * the read fails or fewer cores were readable than

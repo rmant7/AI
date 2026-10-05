@@ -160,7 +160,7 @@ class LogActivity : AppCompatActivity() {
         val features = if (cpuInfo.isNullOrBlank()) getString(R.string.log_cpu_unavailable) else getString(R.string.log_cpu_features, cpuInfo)
         // Which of the three CPU-feature builds this device got — the features
         // line above describes that build's compile flags, not the CPU itself.
-        "$features\nCPU variant: ${ai.localstudio.whisper.CpuVariant.current} · loaded: ${LlamaBridge.loadedLibrary ?: "none"}"
+        "$features\nCPU variant: ${ai.localstudio.core.runtime.CpuVariant.current} · loaded: ${LlamaBridge.loadedLibrary ?: "none"}"
     }
 
     /**

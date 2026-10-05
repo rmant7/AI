@@ -50,4 +50,6 @@ dependencies {
     // WhisperBridge.nativeOpMutex (same reasoning as llama's own bridge) —
     // this module had no dependencies block at all before that existed.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    // CpuVariant (picks the dotprod/i8mm build of whisper_jni) lives in :core, shared with :llama-runtime.
+    implementation(project(":core"))
 }

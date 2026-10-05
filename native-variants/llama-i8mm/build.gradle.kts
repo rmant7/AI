@@ -1,4 +1,4 @@
-// llama_jni built with LOCALAI_CPU_VARIANT=i8mm — see app/src/main/cpp/CMakeLists.txt.
+// llama_jni built with LOCALAI_CPU_VARIANT=i8mm — see llama-runtime/src/main/cpp/CMakeLists.txt.
 // No sources of its own: the same CMakeLists.txt, a different CMake argument,
 // a differently named .so (libllama_jni_i8mm.so) that :app packages alongside the
 // baseline and ai.localstudio.whisper.CpuVariant picks at runtime.
@@ -37,7 +37,7 @@ android {
     if (buildsArm64) {
         externalNativeBuild {
             cmake {
-                path = file("../../app/src/main/cpp/CMakeLists.txt")
+                path = file("../../llama-runtime/src/main/cpp/CMakeLists.txt")
                 version = "3.22.1"
             }
         }

@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicReference
  * a ~990MB projector); 1.4 still leaves real margin above the bare weight
  * size without being the reason vision never gets to run at all.
  */
-internal const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
+const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 
 /**
  * Same reasoning as [MMPROJ_RAM_SAFETY_FACTOR], for the main GGUF itself —
@@ -80,7 +80,7 @@ private const val MAIN_MODEL_RAM_SAFETY_FACTOR = 1.3
  * [MAIN_MODEL_RAM_SAFETY_FACTOR]'s own doc comment for how this changes the
  * pre-flight refusal below.
  */
-internal fun readMemAvailableBytes(): Long? = runCatching {
+fun readMemAvailableBytes(): Long? = runCatching {
     File("/proc/meminfo").useLines { lines ->
         lines.firstOrNull { it.startsWith("MemAvailable:") }
             ?.removePrefix("MemAvailable:")?.trim()?.removeSuffix("kB")?.trim()?.toLongOrNull()

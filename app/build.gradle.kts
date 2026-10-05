@@ -99,19 +99,7 @@ android {
             // can never load.
             abiFilters += localAiAbis
         }
-
-        externalNativeBuild {
-            cmake {
-                arguments += listOf("-DANDROID_STL=c++_shared")
-            }
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
+        // llama_jni is built by :llama-runtime now, whisper_jni by :whisper: this module has no native code of its own.
     }
 
     // A fixed debug key, committed on purpose. AGP generates a throwaway
@@ -206,10 +194,9 @@ dependencies {
     implementation(project(":commercial-memory"))
     implementation(project(":openai"))
     implementation(project(":whisper"))
-    // CPU-feature variants of the native libraries (dotprod, i8mm) — packaged
-    // next to the baseline ones, picked at runtime by CpuVariant.
-    implementation(project(":llama-dotprod"))
-    implementation(project(":llama-i8mm"))
+    // The local-model engine: llama.cpp JNI (with its dotprod/i8mm variants), LlamaCppRuntime, RAM measuring.
+    implementation(project(":llama-runtime"))
+    // CPU-feature variants of whisper_jni (dotprod, i8mm) — packaged next to the baseline, picked at runtime by CpuVariant.
     implementation(project(":whisper-dotprod"))
     implementation(project(":whisper-i8mm"))
 

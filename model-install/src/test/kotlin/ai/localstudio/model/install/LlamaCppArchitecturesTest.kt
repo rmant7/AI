@@ -11,7 +11,7 @@ class LlamaCppArchitecturesTest {
     /** Moving llama.cpp to another tag without regenerating the list would make every compatibility verdict stale. */
     @Test
     fun the_list_is_generated_from_the_llama_cpp_tag_the_app_builds() {
-        val cmake = listOf("../app/src/main/cpp/CMakeLists.txt", "app/src/main/cpp/CMakeLists.txt").map(::File).first { it.isFile }
+        val cmake = listOf("../llama-runtime/src/main/cpp/CMakeLists.txt", "llama-runtime/src/main/cpp/CMakeLists.txt").map(::File).first { it.isFile }
         val tag = Regex("""GIT_TAG\s+(\S+)""").find(cmake.readText())!!.groupValues[1]
         assertEquals(
             tag,
