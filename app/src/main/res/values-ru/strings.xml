@@ -497,6 +497,7 @@
     <string name="candidate_new">НОВАЯ</string>
     <string name="candidate_retest">Проверить снова</string>
     <string name="candidate_cap_text">Чат</string>
+    <string name="candidate_cap_vision">Изображения</string>
     <string name="candidate_cap_translation">Перевод</string>
     <string name="candidate_check_pass">работает</string>
     <string name="candidate_check_fail">не прошла</string>

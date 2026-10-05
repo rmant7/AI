@@ -501,6 +501,7 @@
     <string name="candidate_new">NEW</string>
     <string name="candidate_retest">Test again</string>
     <string name="candidate_cap_text">Chat</string>
+    <string name="candidate_cap_vision">Images</string>
     <string name="candidate_cap_translation">Translation</string>
     <string name="candidate_check_pass">works</string>
     <string name="candidate_check_fail">did not pass</string>

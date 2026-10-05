@@ -18,6 +18,8 @@ data class FunctionalProbe(
     val expectAnyOf: List<String>,
     val match: Match = Match.WORD,
     val title: String = prompt.lineSequence().first(),
+    /** Shown to the model with [prompt]; null for a text-only question. */
+    val image: ProbeImage? = null,
 ) {
     /**
      * WORD: the expectation as a whole word or number ("12" is not in "120").
@@ -55,11 +57,43 @@ data class FunctionalProbe(
             translation("Where is the train station?", "gare"),
         )
 
+        /**
+         * Two built-in images whose answers are not a matter of opinion, then a
+         * plain text question on the same loaded model: run after [TEXT], the
+         * whole trial goes text -> image -> image -> text. VISION passes only
+         * when the model sees both images and still answers text correctly
+         * afterwards -- an image turn that leaves the model's memory in a state
+         * where the next text answer is wrong is not working vision.
+         */
+        val VISION: List<FunctionalProbe> = listOf(
+            FunctionalProbe(
+                "What digit is shown in this image? Answer with the digit only.",
+                listOf("7", "seven"),
+                title = "image: the digit 7",
+                image = ProbeImage.Digit(7),
+            ),
+            FunctionalProbe(
+                "What color is the circle in this image? Answer with one word.",
+                listOf("red"),
+                title = "image: a red circle",
+                image = ProbeImage.Disc(ProbeImage.Disc.RED),
+            ),
+            FunctionalProbe(
+                "What is 7 + 5? Answer with the number only.",
+                listOf("12", "twelve"),
+                title = "text after the images: 7 + 5",
+            ),
+        )
+
         /** Every capability is checked on every candidate: a translation model failing chat questions is a translation model, not a broken one. */
         val SUITES: Map<String, List<FunctionalProbe>> = linkedMapOf(
             VerifiedCapability.TEXT to TEXT,
             VerifiedCapability.TRANSLATION to TRANSLATION,
         )
+
+        /** [SUITES], plus [VISION] for a model that has the parts to see (see [ai.localstudio.model.install.ModelArtifact.canCheck]); without them VISION stays NOT_TESTED. */
+        fun suitesFor(artifact: ai.localstudio.model.install.ModelArtifact): Map<String, List<FunctionalProbe>> =
+            if (artifact.canCheck(VerifiedCapability.VISION)) SUITES + (VerifiedCapability.VISION to VISION) else SUITES
 
         private fun translation(text: String, vararg expected: String) = FunctionalProbe(
             prompt = TranslationPrompts.chatInstruction("English", "French", text),
@@ -86,15 +120,34 @@ fun finalAnswer(reply: String): String? {
     }
 }
 
-/** What [CandidateTrial.run] needs from the real runtime: load (once) and answer one prompt. */
+/**
+ * A test image described, not stored: the runtime side draws it (large,
+ * centred, black or one plain colour on white), so the check carries no
+ * asset and the answer depends on nothing but what is drawn.
+ */
+sealed interface ProbeImage {
+    data class Digit(val digit: Int) : ProbeImage {
+        init { require(digit in 0..9) }
+    }
+
+    /** A filled circle of [rgb] (0xRRGGBB). */
+    data class Disc(val rgb: Int) : ProbeImage {
+        companion object {
+            const val RED = 0xE00000
+        }
+    }
+}
+
+/** What [CandidateTrial.run] needs from the real runtime: load (once) and answer one probe. */
 fun interface TrialRuntime {
     /**
-     * Answers [prompt], streaming text to [onChunk]. Calls [onLoaded] once
-     * the weights are actually loaded -- the only evidence of a load the
-     * trial accepts besides text itself; a throw before either means the
-     * model never loaded.
+     * Answers [probe] -- its prompt, with its image when it has one --
+     * streaming text to [onChunk]. Calls [onLoaded] once the weights are
+     * actually loaded -- the only evidence of a load the trial accepts
+     * besides text itself; a throw before either means the model never
+     * loaded.
      */
-    suspend fun answer(prompt: String, onLoaded: () -> Unit, onChunk: (String) -> Unit)
+    suspend fun answer(probe: FunctionalProbe, onLoaded: () -> Unit, onChunk: (String) -> Unit)
 }
 
 /**
@@ -145,7 +198,7 @@ class CandidateTrial(
                 var chunks = 0
                 try {
                     runtime.answer(
-                        probe.prompt,
+                        probe,
                         onLoaded = { loaded = true },
                         onChunk = { chunk ->
                             val now = clock()

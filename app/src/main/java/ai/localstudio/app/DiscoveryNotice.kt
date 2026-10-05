@@ -87,8 +87,14 @@ object DiscoveryNotice {
         val v = c.verification ?: return c.repoId
         val name = c.repoId.substringAfter('/')
         if (!v.loaded) return activity.getString(R.string.notice_tested_failed, name, v.error?.take(120) ?: "")
-        val parts = listOf(VerifiedCapability.TEXT, VerifiedCapability.TRANSLATION).filter { it in v.checks }.map { cap ->
-            val what = activity.getString(if (cap == VerifiedCapability.TRANSLATION) R.string.candidate_cap_translation else R.string.candidate_cap_text)
+        val parts = VerifiedCapability.ALL.filter { it in v.checks }.map { cap ->
+            val what = activity.getString(
+                when (cap) {
+                    VerifiedCapability.TRANSLATION -> R.string.candidate_cap_translation
+                    VerifiedCapability.VISION -> R.string.candidate_cap_vision
+                    else -> R.string.candidate_cap_text
+                },
+            )
             val status = activity.getString(if (v.status(cap) == CheckStatus.PASS) R.string.candidate_check_pass else R.string.candidate_check_fail)
             "$what: $status"
         } + listOfNotNull(v.tokensPerSecond?.let { String.format(Locale.ROOT, "%.1f tok/s", it) })

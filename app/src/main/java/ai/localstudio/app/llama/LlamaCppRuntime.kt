@@ -447,6 +447,9 @@ class LlamaCppRuntime(
     }
 }
 
+/** Not a native code: an image turn refused because the model could not see the image. */
+private const val IMAGE_NOT_SEEN = -100
+
 private class LlamaTextModel(
     override val modelId: String,
     override val ramBytes: Long,
@@ -482,7 +485,7 @@ private class LlamaTextModel(
         var tokenCount = 0
         var firstTokenLogged = false
         val completed = AtomicBoolean(false)
-        val image = request.images.firstOrNull().takeIf { visionLoader != null }
+        val image = request.images.firstOrNull()
         log(
             "LOCAL_GENERATE",
             "$modelId: starting (prompt=${request.prompt.length} chars, maxTokens=${request.maxTokens}" +
@@ -532,7 +535,15 @@ private class LlamaTextModel(
                     if (image != null && !visionLoaded) {
                         visionLoaded = runCatching { visionLoader?.invoke() ?: false }.getOrDefault(false)
                     }
-                    if (hasEncoder) {
+                    if (image != null && !visionLoaded) {
+                        // Never answered as text instead: a reply to a question about an image the
+                        // model never saw reads like an answer and is not one.
+                        log(
+                            "LOCAL_GENERATE",
+                            "$modelId: image NOT seen -- " + if (visionLoader == null) "this model has no vision projector" else "its projector did not load (see LOCAL_LOAD)",
+                        )
+                        IMAGE_NOT_SEEN
+                    } else if (hasEncoder) {
                     // T5-family (MADLAD-400): request.prompt is already the
                     // model's own expected input (`<2xx> source text`, built
                     // by TranslationActivity) — there is no chat template, no
@@ -603,7 +614,11 @@ private class LlamaTextModel(
             val elapsedMs = System.currentTimeMillis() - start
             if (produced < 0) {
                 log("LOCAL_GENERATE", "$modelId: FAILED code=$produced after ${elapsedMs}ms, $tokenCount tokens")
-                close(IllegalStateException("Generation failed with code $produced"))
+                close(
+                    IllegalStateException(
+                        if (produced == IMAGE_NOT_SEEN) "the image was not seen: no vision projector loaded for this model" else "Generation failed with code $produced",
+                    ),
+                )
             } else {
                 log("LOCAL_GENERATE", "$modelId: done in ${elapsedMs}ms, $produced tokens")
                 runCatching { bridge.nativeLastTurnStats(handle) }

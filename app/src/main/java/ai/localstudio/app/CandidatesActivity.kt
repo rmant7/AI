@@ -250,8 +250,14 @@ class CandidatesActivity : AppCompatActivity() {
                 (v.error?.let { "\n$it" } ?: "")
         }
         if (!v.loaded) return tierLabel(CandidateTier.UNVERIFIED) + (v.error?.let { "\n$it" } ?: "")
-        val lines = USABLE.map { cap ->
-            val what = getString(if (cap == VerifiedCapability.TRANSLATION) R.string.candidate_cap_translation else R.string.candidate_cap_text)
+        val lines = (USABLE + listOf(VerifiedCapability.VISION).filter { it in v.checks }).map { cap ->
+            val what = getString(
+                when (cap) {
+                    VerifiedCapability.TRANSLATION -> R.string.candidate_cap_translation
+                    VerifiedCapability.VISION -> R.string.candidate_cap_vision
+                    else -> R.string.candidate_cap_text
+                },
+            )
             val status = getString(
                 when (v.status(cap)) {
                     CheckStatus.PASS -> R.string.candidate_check_pass

@@ -785,7 +785,7 @@ class AppContainer private constructor(private val context: Context) {
         val tag = "CANDIDATE_TEST"
         val name = candidate.repoId
         try {
-            val weights = candidateWeights(candidate) ?: run {
+            val (weights, projector) = candidateFiles(candidate) ?: run {
                 appLog.record(tag, "$name: not installed any more; test skipped")
                 return
             }
@@ -801,19 +801,19 @@ class AppContainer private constructor(private val context: Context) {
             val running = RunningTrial(label, name, profile, RuntimeKind.LLAMA_CPP.id, System.currentTimeMillis(), identity = candidate.identity)
             candidateTrialMarker.write(running)
             logChatTemplate(name, weights)
-            val suites = FunctionalProbe.SUITES
+            val suites = FunctionalProbe.suitesFor(candidate.artifact())
             val total = suites.values.sumOf { it.size }
-            val runtime = candidateRuntime(candidate, weights)
+            val runtime = candidateRuntime(candidate, weights, projector)
             var asked = 0
             var loadReported = false
             val verification = CandidateTrial().run(
                 deviceProfile = profile,
                 runtimeId = RuntimeKind.LLAMA_CPP.id,
                 suites = suites,
-                runtime = TrialRuntime { prompt, onLoaded, onChunk ->
-                    val probe = ++asked
+                runtime = TrialRuntime { probe, onLoaded, onChunk ->
+                    val number = ++asked
                     runtime.answer(
-                        prompt,
+                        probe,
                         onLoaded = {
                             onLoaded()
                             if (!loadReported) {
@@ -821,7 +821,7 @@ class AppContainer private constructor(private val context: Context) {
                                 candidateTrialMarker.write(running.copy(loaded = true))
                                 appLog.record(tag, "$name: loaded; asking $total question(s): ${suites.entries.joinToString { "${it.value.size} ${it.key}" }}")
                             }
-                            candidateWork.update { it.copy(trial = CandidateTrialState(name, CandidateTrialState.Phase.ANSWERING, probe, total)) }
+                            candidateWork.update { it.copy(trial = CandidateTrialState(name, CandidateTrialState.Phase.ANSWERING, number, total)) }
                         },
                         onChunk = onChunk,
                     )
@@ -999,21 +999,26 @@ class AppContainer private constructor(private val context: Context) {
         candidateManifest(candidate)?.let { m -> m.artifacts.sumOf { it.unpackedBytes ?: it.sizeBytes } }
 
     /**
-     * The candidate's weights on disk: its own install, or -- once "Use" moved
-     * it into a custom model -- that model's file, when it is the very same
-     * commit and path. Tested again from there, never downloaded again.
+     * The candidate's files on disk -- weights, and its projector when it has
+     * one: its own install, or -- once "Use" moved it into a custom model --
+     * that model's files, when they are the very same commit and paths.
+     * Tested again from there, never downloaded again.
      */
-    private fun candidateWeights(candidate: DiscoveredCandidate): File? {
+    private fun candidateFiles(candidate: DiscoveredCandidate): Pair<File, File?>? {
         val installed = modelInstallation.installed
         val manifest = candidateManifest(candidate)
             ?: installed.manifest(modelStore.variantId(LocalModels.custom(candidate.repoId)))?.takeIf { holdsCandidate(it, candidate) }
             ?: return null
-        val artifact = manifest.artifacts.firstOrNull { it.role == ai.localstudio.model.ArtifactRoles.WEIGHTS } ?: return null
-        return installed.pathOf(manifest, artifact).takeIf { it.isFile }
+        fun file(role: ai.localstudio.model.ArtifactRole) =
+            manifest.artifacts.firstOrNull { it.role == role }?.let { installed.pathOf(manifest, it) }?.takeIf { it.isFile }
+        val weights = file(ai.localstudio.model.ArtifactRoles.WEIGHTS) ?: return null
+        // A model with a projector is tested as the pair or not at all: half of it is not the model that was found.
+        val projector = if (candidate.projector != null) file(ai.localstudio.model.ArtifactRoles.PROJECTOR) ?: return null else null
+        return weights to projector
     }
 
-    /** Whether [testCandidate] has a file to test: downloaded, or already moved into one of the user's models. */
-    fun candidateTestable(candidate: DiscoveredCandidate): Boolean = candidateWeights(candidate) != null
+    /** Whether [testCandidate] has files to test: downloaded, or already moved into one of the user's models. */
+    fun candidateTestable(candidate: DiscoveredCandidate): Boolean = candidateFiles(candidate) != null
 
     /**
      * Removes [candidate]'s installed file and any paused partial download;
@@ -1077,7 +1082,7 @@ class AppContainer private constructor(private val context: Context) {
      * does not finish within [CANDIDATE_PROBE_TIMEOUT_MS] -- the first one
      * includes the load -- fails as a timeout instead of hanging the trial.
      */
-    private fun candidateRuntime(candidate: DiscoveredCandidate, weights: File): TrialRuntime {
+    private fun candidateRuntime(candidate: DiscoveredCandidate, weights: File, projector: File?): TrialRuntime {
         val contextTokens = SMALL_CONTEXT_TOKENS
         val runtime = RamMeasuringRuntime(
             inner = LlamaCppRuntime(
@@ -1096,12 +1101,12 @@ class AppContainer private constructor(private val context: Context) {
             version = candidate.commit,
             parameterCount = 0,
             contextLength = candidate.contextLength?.toInt() ?: 0,
-            capabilities = setOf(Capability.TEXT_GENERATION),
+            capabilities = if (projector != null) setOf(Capability.TEXT_GENERATION, Capability.VISION) else setOf(Capability.TEXT_GENERATION),
             sourceUrl = "https://huggingface.co/${candidate.repoId}",
-            bindings = listOf(RuntimeBinding(RuntimeKind.LLAMA_CPP, weights.absolutePath, weights.length())),
+            bindings = listOf(RuntimeBinding(RuntimeKind.LLAMA_CPP, weights.absolutePath, weights.length(), mmprojArtifact = projector?.absolutePath)),
         )
         val binding = descriptor.bindings.single()
-        return TrialRuntime { prompt, onLoaded, onChunk ->
+        return TrialRuntime { probe, onLoaded, onChunk ->
             try {
                 withTimeout(CANDIDATE_PROBE_TIMEOUT_MS) {
                     deviceMemoryGate.withLock {
@@ -1111,7 +1116,8 @@ class AppContainer private constructor(private val context: Context) {
                                 ?: throw IllegalStateException("${descriptor.id} did not load as a text model")
                             handle.generate(
                                 ai.localstudio.core.runtime.GenerationRequest(
-                                    prompt = prompt,
+                                    prompt = probe.prompt,
+                                    images = listOfNotNull(probe.image?.let { ai.localstudio.core.model.ImageRef(ai.localstudio.app.vision.ProbeImageRenderer.dataUri(it)) }),
                                     maxTokens = CANDIDATE_MAX_TOKENS,
                                     temperature = 0.0,
                                     repeatPenalty = 1.0,

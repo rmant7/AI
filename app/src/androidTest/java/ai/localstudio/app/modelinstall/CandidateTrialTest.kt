@@ -35,9 +35,9 @@ class CandidateTrialTest {
     }
 
     /** Loads, then answers each prompt with the chunks [replies] gives for it. */
-    private fun answering(replies: (String) -> List<String>) = TrialRuntime { prompt, onLoaded, onChunk ->
+    private fun answering(replies: (String) -> List<String>) = TrialRuntime { probe, onLoaded, onChunk ->
         onLoaded()
-        replies(prompt).forEach(onChunk)
+        replies(probe.prompt).forEach(onChunk)
     }
 
     private fun correctChat(prompt: String) = if ("France" in prompt) listOf("Pa", "ris", ".") else listOf("1", "2")
@@ -107,10 +107,10 @@ class CandidateTrialTest {
     @Test
     fun the_translation_check_sends_exactly_what_the_translation_screen_sends() {
         val asked = mutableListOf<String>()
-        run(mapOf(VerifiedCapability.TRANSLATION to FunctionalProbe.TRANSLATION), TrialRuntime { prompt, onLoaded, onChunk ->
-            asked += prompt
+        run(mapOf(VerifiedCapability.TRANSLATION to FunctionalProbe.TRANSLATION), TrialRuntime { probe, onLoaded, onChunk ->
+            asked += probe.prompt
             onLoaded()
-            correctFrench(prompt).forEach(onChunk)
+            correctFrench(probe.prompt).forEach(onChunk)
         })
         assertEquals(TranslationPrompts.chatInstruction("English", "French", "Good morning, my friend."), asked.first())
         assertEquals(3, asked.size)
@@ -119,11 +119,11 @@ class CandidateTrialTest {
     @Test
     fun one_capability_failing_mid_generation_does_not_skip_the_next() {
         var calls = 0
-        val result = run(FunctionalProbe.SUITES, TrialRuntime { prompt, onLoaded, onChunk ->
+        val result = run(FunctionalProbe.SUITES, TrialRuntime { probe, onLoaded, onChunk ->
             calls++
             onLoaded()
             if (calls == 1) throw IllegalStateException("no complete answer within 10 min")
-            correctFrench(prompt).forEach(onChunk)
+            correctFrench(probe.prompt).forEach(onChunk)
         })
         assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.TEXT))
         assertTrue(result.checks.getValue(VerifiedCapability.TEXT).detail!!.startsWith("generation failed: IllegalStateException"))
@@ -239,5 +239,91 @@ class CandidateTrialTest {
             fail("cancellation must propagate, not become a verification")
         } catch (_: CancellationException) {
         }
+    }
+
+    private val main = ai.localstudio.model.install.ModelFile("acme/see-GGUF", "a".repeat(40), "see-Q4_K_M.gguf", 2_000_000_000)
+    private val pair = ai.localstudio.model.install.ModelArtifact(
+        main,
+        ai.localstudio.model.install.ProjectorFile(main.copy(path = "mmproj-F16.gguf", sizeBytes = 800_000_000), "gemma3"),
+    )
+
+    /** What a model that sees: the digit, the colour, and text as before. */
+    private fun seeing(probe: FunctionalProbe): List<String> = when (val image = probe.image) {
+        is ProbeImage.Digit -> listOf(image.digit.toString())
+        is ProbeImage.Disc -> listOf("Red.")
+        null -> correctChat(probe.prompt)
+    }
+
+    @Test
+    fun vision_is_checked_only_on_a_model_with_a_projector() {
+        assertEquals(FunctionalProbe.SUITES, FunctionalProbe.suitesFor(ai.localstudio.model.install.ModelArtifact(main)))
+        assertEquals(FunctionalProbe.VISION, FunctionalProbe.suitesFor(pair)[VerifiedCapability.VISION])
+
+        val textOnlyModel = run(FunctionalProbe.suitesFor(ai.localstudio.model.install.ModelArtifact(main)), TrialRuntime { probe, onLoaded, onChunk ->
+            onLoaded()
+            (if (probe.prompt.contains("French")) correctFrench(probe.prompt) else correctChat(probe.prompt)).forEach(onChunk)
+        })
+        assertEquals(CheckStatus.NOT_TESTED, textOnlyModel.status(VerifiedCapability.VISION))
+    }
+
+    @Test
+    fun seeing_both_images_and_answering_text_afterwards_passes_vision_in_order_text_image_image_text() {
+        val asked = mutableListOf<ProbeImage?>()
+        val result = run(
+            mapOf(VerifiedCapability.TEXT to FunctionalProbe.TEXT, VerifiedCapability.VISION to FunctionalProbe.VISION),
+            TrialRuntime { probe, onLoaded, onChunk ->
+                asked += probe.image
+                onLoaded()
+                seeing(probe).forEach(onChunk)
+            },
+        )
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT))
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.VISION))
+        assertEquals(listOf(null, null, ProbeImage.Digit(7), ProbeImage.Disc(ProbeImage.Disc.RED), null), asked)
+    }
+
+    @Test
+    fun a_wrong_text_answer_after_the_images_fails_vision() {
+        var imagesSeen = 0
+        val result = run(
+            mapOf(VerifiedCapability.TEXT to FunctionalProbe.TEXT, VerifiedCapability.VISION to FunctionalProbe.VISION),
+            TrialRuntime { probe, onLoaded, onChunk ->
+                onLoaded()
+                if (probe.image != null) imagesSeen++
+                // Memory left over from the image turn: the next text answer is about the image.
+                (if (probe.image == null && imagesSeen > 0) listOf("7") else seeing(probe)).forEach(onChunk)
+            },
+        )
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT))
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION))
+        assertTrue(result.checks.getValue(VerifiedCapability.VISION).detail!!.contains("text after the images"))
+    }
+
+    @Test
+    fun an_image_the_model_did_not_see_fails_vision_and_leaves_text_alone() {
+        val result = run(
+            mapOf(VerifiedCapability.TEXT to FunctionalProbe.TEXT, VerifiedCapability.VISION to FunctionalProbe.VISION),
+            TrialRuntime { probe, onLoaded, onChunk ->
+                onLoaded()
+                if (probe.image != null) throw IllegalStateException("the image was not seen: no vision projector loaded for this model")
+                seeing(probe).forEach(onChunk)
+            },
+        )
+        assertEquals(CheckStatus.PASS, result.status(VerifiedCapability.TEXT))
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION))
+        assertTrue(result.checks.getValue(VerifiedCapability.VISION).detail!!.contains("the image was not seen"))
+    }
+
+    @Test
+    fun a_wrong_digit_fails_vision() {
+        val result = run(
+            mapOf(VerifiedCapability.VISION to FunctionalProbe.VISION),
+            TrialRuntime { probe, onLoaded, onChunk ->
+                onLoaded()
+                (if (probe.image is ProbeImage.Digit) listOf("1") else seeing(probe)).forEach(onChunk)
+            },
+        )
+        assertEquals(CheckStatus.FAIL, result.status(VerifiedCapability.VISION))
+        assertTrue(result.checks.getValue(VerifiedCapability.VISION).detail!!.contains("the digit 7"))
     }
 }
