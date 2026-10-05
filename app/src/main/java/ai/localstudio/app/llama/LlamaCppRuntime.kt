@@ -4,8 +4,10 @@ import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.runtime.GenerationRequest
+import ai.localstudio.core.runtime.InsufficientMemoryException
 import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
+import ai.localstudio.core.runtime.ModelMemory
 import ai.localstudio.core.runtime.ModelRuntime
 import ai.localstudio.core.runtime.TextModelHandle
 import kotlinx.coroutines.CancellationException
@@ -180,10 +182,11 @@ class LlamaCppRuntime(
      * vision projector's cost into the *same* gate would risk rejecting a
      * model outright — text and all — on a device where only the vision
      * *add-on* doesn't fit, for a model that worked fine as text-only before
-     * mmproj existed. This is the separate, softer check that instead lets
-     * the base model load normally and only skips the projector, exactly
-     * like a projector that failed to download. Defaults to "assume plenty"
-     * so tests and any other caller don't need a real device.
+     * mmproj existed. The projector is admitted separately, when an image
+     * first needs it -- through [memory] when there is one, by this reading
+     * alone otherwise -- and an image it cannot get memory for is refused
+     * as unseen, never answered as text. Defaults to "assume plenty" so
+     * tests and any other caller don't need a real device.
      */
     private val availableRamBytes: () -> Long = { Long.MAX_VALUE },
     /**
@@ -194,6 +197,14 @@ class LlamaCppRuntime(
      * empty so tests and any other caller don't need a real device.
      */
     private val memoryDiagnostics: () -> String = { "" },
+    /**
+     * Where a vision projector's RAM is admitted when the first image turn
+     * needs it: the same manager, the same budget as the model's own load
+     * (see [ModelMemory]) -- resident means weights + projector, and a
+     * projector that does not fit is refused there, out loud. Null (tests,
+     * a caller with no manager): the live free-RAM reading decides alone.
+     */
+    private val memory: ModelMemory? = null,
 ) : ModelRuntime {
 
     override val kind: RuntimeKind = RuntimeKind.LLAMA_CPP
@@ -353,40 +364,42 @@ class LlamaCppRuntime(
             // needed for a turn that actually carries an image, and loading
             // it eagerly cost that much RAM on every text-only chat (real
             // device log: gemma-4-e4b-it-q4, "mmproj loaded" on a plain text
-            // turn). [LlamaTextModel.generate] calls this the first time an
-            // image arrives, under the same nativeOpMutex hold as that turn.
+            // turn). [LlamaTextModel.generate] admits and loads it the first
+            // time an image arrives.
             //
-            // Best-effort, and only if a projector was actually downloaded
-            // for this model (see ModelStore.hasMmproj) — a model with none
-            // behaves exactly as it always did, text-only. Also skipped
-            // outright when there isn't visibly enough free RAM to also hold
-            // a vision encoder — attempting it anyway was observed on a real
-            // device to reliably run the whole process out of memory a turn
-            // or two later (Android's OOM killer, not a catchable Kotlin
-            // exception). The margin is deliberately generous: the
-            // projector's *file* size is only its weights, and encoding an
-            // image needs activation buffers on top that scale with the same
-            // size. Not holding nativeOpMutex itself — the caller already does.
-            val visionLoader: (() -> Boolean)? = binding.mmprojArtifact
-                ?.takeIf { File(it).length() > 0 }
-                ?.let { mmprojPath ->
-                    {
-                        val mmprojBytes = File(mmprojPath).length()
-                        val headroom = availableRamBytes()
-                        if (headroom < mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR) {
-                            log(
-                                "LOCAL_LOAD",
-                                "${file.name}: mmproj SKIPPED — only ${headroom / 1_000_000}MB free, " +
-                                    "want ~${(mmprojBytes * MMPROJ_RAM_SAFETY_FACTOR / 1_000_000).toLong()}MB for $mmprojPath",
-                            )
-                            false
-                        } else {
-                            runCatching { bridge.nativeLoadMmproj(handle, mmprojPath, threads) }.getOrDefault(false)
-                                .also { loaded ->
-                                    log("LOCAL_LOAD", "${file.name}: mmproj ${if (loaded) "loaded" else "FAILED to load"} on first image from $mmprojPath")
+            // Only if a projector was actually downloaded for this model — a
+            // model with none stays text-only, and an image sent to it is
+            // refused as unseen. Admission goes through [memory] (the same
+            // budget as every load) and refuses when the projector does not
+            // fit — loading it anyway was observed on a real device to
+            // reliably run the whole process out of memory a turn or two
+            // later (Android's OOM killer, not a catchable Kotlin exception).
+            // The margin is deliberately generous: the projector's *file*
+            // size is only its weights, and encoding an image needs
+            // activation buffers on top that scale with the same size.
+            val vision: ProjectorLoader? = binding.mmprojArtifact
+                ?.let(::File)
+                ?.takeIf { it.length() > 0 }
+                ?.let { projector ->
+                    val needBytes = (projector.length() * MMPROJ_RAM_SAFETY_FACTOR).toLong()
+                    ProjectorLoader(
+                        file = projector,
+                        admit = {
+                            if (memory != null) {
+                                try {
+                                    memory.reserve(model.id, needBytes, "vision projector ${projector.name}")
+                                    null
+                                } catch (e: InsufficientMemoryException) {
+                                    e.message
                                 }
-                        }
-                    }
+                            } else {
+                                val headroom = availableRamBytes()
+                                if (headroom < needBytes) "only ${headroom / 1_000_000}MB free, want ~${needBytes / 1_000_000}MB" else null
+                            }
+                        },
+                        giveBack = { memory?.unreserve(model.id, needBytes) },
+                        load = { runCatching { bridge.nativeLoadMmproj(handle, projector.path, threads) }.getOrDefault(false) },
+                    )
                 }
 
             // Read once here rather than on every generate() call — it's a read
@@ -397,7 +410,7 @@ class LlamaCppRuntime(
             }
             if (hasEncoder) log("LOCAL_LOAD", "${file.name}: encoder-decoder model — routing generate() through nativeGenerateT5")
 
-            return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, visionLoader, hasEncoder, log)
+            return LlamaTextModel(model.id, binding.effectiveRequiredRamBytes, bridge, handle, vision, hasEncoder, log)
         } catch (t: Throwable) {
             log("LOCAL_LOAD", "${file.name}: abandoned after load (${t.javaClass.simpleName}) — freeing native model")
             trackPendingNativeWork(releaseInBackground(bridge, handle, file.name))
@@ -447,6 +460,19 @@ class LlamaCppRuntime(
     }
 }
 
+/**
+ * A model's vision projector, not yet loaded: [admit] asks for its RAM
+ * (null = admitted, otherwise why not), [load] loads it -- under
+ * nativeOpMutex, which [admit] must never be called under -- and
+ * [giveBack] returns an admission whose load failed.
+ */
+private class ProjectorLoader(
+    val file: File,
+    val admit: suspend () -> String?,
+    val giveBack: suspend () -> Unit,
+    val load: () -> Boolean,
+)
+
 /** Not a native code: an image turn refused because the model could not see the image. */
 private const val IMAGE_NOT_SEEN = -100
 
@@ -455,11 +481,8 @@ private class LlamaTextModel(
     override val ramBytes: Long,
     private val bridge: LlamaBridge,
     private val handle: Long,
-    /**
-     * Loads this model's projector on the first image turn; null when it has
-     * none on disk. Called with nativeOpMutex already held — see [generate].
-     */
-    private val visionLoader: (() -> Boolean)?,
+    /** This model's projector, loaded on the first image turn; null when it has none on disk. */
+    private val vision: ProjectorLoader?,
     /** Whether this handle is an encoder-decoder (T5-family) model — see [generate]. */
     private val hasEncoder: Boolean,
     private val log: (tag: String, message: String) -> Unit,
@@ -473,7 +496,7 @@ private class LlamaTextModel(
     // call is using out from under it.
     private val activeWorker = AtomicReference<Job?>(null)
 
-    /** Set once [visionLoader] succeeds; a skipped or failed attempt is retried on the next image turn. */
+    /** Set once [vision] loads; a refused or failed attempt is retried on the next image turn. */
     @Volatile
     private var visionLoaded = false
 
@@ -530,18 +553,29 @@ private class LlamaTextModel(
             // logged here instead: one translation fails cleanly, and the
             // exception's own message/stack finally reaches the same
             // user-copyable log everything else in this app does.
+            var notSeen: String? = null
             val produced = try {
+                // Admitted before nativeOpMutex, never under it: RuntimeManager
+                // loads models under its own lock and then takes nativeOpMutex,
+                // so asking it for memory from inside would invert that order.
+                var admitted = false
+                if (image != null && !visionLoaded) {
+                    notSeen = when (vision) {
+                        null -> "this model has no vision projector"
+                        else -> vision.admit()?.let { "no memory for its projector -- $it" }
+                    }
+                    admitted = vision != null && notSeen == null
+                }
                 LlamaBridge.nativeOpMutex.withLock {
-                    if (image != null && !visionLoaded) {
-                        visionLoaded = runCatching { visionLoader?.invoke() ?: false }.getOrDefault(false)
+                    if (admitted && vision != null) {
+                        visionLoaded = vision.load()
+                        log("LOCAL_LOAD", "$modelId: mmproj ${if (visionLoaded) "loaded" else "FAILED to load"} on first image from ${vision.file.path}")
+                        if (!visionLoaded) notSeen = "its projector did not load"
                     }
                     if (image != null && !visionLoaded) {
                         // Never answered as text instead: a reply to a question about an image the
                         // model never saw reads like an answer and is not one.
-                        log(
-                            "LOCAL_GENERATE",
-                            "$modelId: image NOT seen -- " + if (visionLoader == null) "this model has no vision projector" else "its projector did not load (see LOCAL_LOAD)",
-                        )
+                        log("LOCAL_GENERATE", "$modelId: image NOT seen -- $notSeen")
                         IMAGE_NOT_SEEN
                     } else if (hasEncoder) {
                     // T5-family (MADLAD-400): request.prompt is already the
@@ -596,6 +630,9 @@ private class LlamaTextModel(
                         callback = sink,
                     )
                 }
+                }.also {
+                    // Admitted, then failed to load: the budget gets its bytes back.
+                    if (admitted && !visionLoaded) vision?.giveBack()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -616,7 +653,7 @@ private class LlamaTextModel(
                 log("LOCAL_GENERATE", "$modelId: FAILED code=$produced after ${elapsedMs}ms, $tokenCount tokens")
                 close(
                     IllegalStateException(
-                        if (produced == IMAGE_NOT_SEEN) "the image was not seen: no vision projector loaded for this model" else "Generation failed with code $produced",
+                        if (produced == IMAGE_NOT_SEEN) "the image was not seen: $notSeen" else "Generation failed with code $produced",
                     ),
                 )
             } else {

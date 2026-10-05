@@ -290,4 +290,80 @@ class RuntimeManagerTest {
         manager.unloadAll()
         assertEquals(false, manager.hasModelInUse)
     }
+
+    @Test
+    fun `a projector reserved after the load counts as resident until the model unloads`() = runBlocking {
+        val manager = manager(6 * GB)
+        val vlm = model("vlm", bindings = listOf(binding(ramBytes = 3 * GB)))
+
+        manager.withModel(vlm, vlm.bindings.first()) { manager.reserve("vlm", 1 * GB, "vision projector") }
+        assertEquals(4 * GB, manager.residentBytes)
+        assertEquals(4 * GB, manager.residentModels().single().ramBytes)
+
+        manager.unloadAll()
+        manager.withModel(vlm, vlm.bindings.first()) { }
+        assertEquals(3 * GB, manager.residentBytes, "a reload starts from the load alone; the projector comes back only when reserved again")
+    }
+
+    @Test
+    fun `a projector that does not fit evicts idle models, never the one that asked`() = runBlocking {
+        val manager = manager(5 * GB)
+        val asr = model("asr", bindings = listOf(binding(ramBytes = 1 * GB)))
+        val vlm = model("vlm", bindings = listOf(binding(ramBytes = 3 * GB)))
+        manager.withModel(asr, asr.bindings.first()) { }
+
+        manager.withModel(vlm, vlm.bindings.first()) {
+            manager.reserve("vlm", 2 * GB, "vision projector")
+        }
+
+        assertEquals(listOf("asr"), runtime.unloads)
+        assertEquals(listOf("vlm"), manager.residentModels().map { it.modelId })
+        assertEquals(5 * GB, manager.residentBytes)
+    }
+
+    @Test
+    fun `a projector that cannot fit is refused and changes nothing`() = runBlocking {
+        val manager = manager(4 * GB)
+        val vlm = model("vlm", bindings = listOf(binding(ramBytes = 3 * GB)))
+
+        manager.withModel(vlm, vlm.bindings.first()) {
+            assertFailsWith<InsufficientMemoryException> { manager.reserve("vlm", 2 * GB, "vision projector") }
+        }
+
+        assertEquals(3 * GB, manager.residentBytes)
+        assertTrue(runtime.unloads.isEmpty(), "the model that asked is never evicted for its own part")
+    }
+
+    @Test
+    fun `an unused reservation is given back`() = runBlocking {
+        val manager = manager(6 * GB)
+        val vlm = model("vlm", bindings = listOf(binding(ramBytes = 3 * GB)))
+        manager.withModel(vlm, vlm.bindings.first()) {
+            manager.reserve("vlm", 1 * GB, "vision projector")
+            manager.unreserve("vlm", 1 * GB)
+        }
+        assertEquals(3 * GB, manager.residentBytes)
+    }
+
+    @Test
+    fun `text then vision then text then vision on one resident model loads it once and reserves the projector once`() = runBlocking {
+        val manager = manager(6 * GB)
+        val vlm = model("vlm", bindings = listOf(binding(ramBytes = 3 * GB)))
+        var projectorLoaded = false
+        suspend fun turn(image: Boolean) = manager.withModel(vlm, vlm.bindings.first()) {
+            if (image && !projectorLoaded) {
+                manager.reserve("vlm", 1 * GB, "vision projector")
+                projectorLoaded = true
+            }
+        }
+
+        turn(image = false)
+        assertEquals(3 * GB, manager.residentBytes)
+        turn(image = true)
+        turn(image = false)
+        turn(image = true)
+
+        assertEquals(listOf("vlm"), runtime.loads)
+        assertEquals(4 * GB, manager.residentBytes)
+    }
 }

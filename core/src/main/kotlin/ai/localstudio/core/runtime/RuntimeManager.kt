@@ -6,9 +6,30 @@ import ai.localstudio.core.registry.RuntimeKind
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+/**
+ * Memory a loaded model takes on after its load -- a vision projector
+ * loaded on the first image turn is the case this exists for. Admitted
+ * against the same budget as loads, by the same manager, so "what is
+ * resident" always means weights + projector + whatever else was reserved,
+ * never weights alone with a part on the side no budget saw.
+ */
+interface ModelMemory {
+    /**
+     * Reserves [bytes] more for the resident [modelId]: evicts idle models
+     * (never [modelId] itself) until it fits, or throws
+     * [InsufficientMemoryException] and changes nothing. [what] names the
+     * part, for the log.
+     */
+    suspend fun reserve(modelId: String, bytes: Long, what: String)
+
+    /** Gives back a reservation whose part did not load after all. */
+    suspend fun unreserve(modelId: String, bytes: Long)
+}
+
 data class ResidentModel(
     val modelId: String,
     val runtime: RuntimeKind,
+    /** Everything this model holds: its load plus what it [ModelMemory.reserve]d since. */
     val ramBytes: Long,
     val refCount: Int,
     val lastUsedAt: Long,
@@ -66,7 +87,7 @@ class RuntimeManager(
     private val log: (String) -> Unit = {},
     private val beforeAdmission: suspend (requiredBytes: Long) -> Unit = {},
     private val requiredBytesFor: (binding: RuntimeBinding, variant: Any?) -> Long = { binding, _ -> binding.effectiveRequiredRamBytes },
-) {
+) : ModelMemory {
     constructor(
         budgetBytes: Long,
         runtimes: Map<RuntimeKind, ModelRuntime>,
@@ -79,7 +100,11 @@ class RuntimeManager(
         val variant: Any?,
         var refCount: Int,
         var lastUsedAt: Long,
-    )
+        /** Reserved after the load (see [ModelMemory]); gone with the model when it unloads. */
+        var extraBytes: Long = 0L,
+    ) {
+        val bytes: Long get() = loaded.ramBytes + extraBytes
+    }
 
     private val mutex = Mutex()
     private val resident = LinkedHashMap<String, Entry>()
@@ -95,10 +120,33 @@ class RuntimeManager(
     val hasModelInUse: Boolean get() = activeRefs.get() > 0
 
     val residentBytes: Long
-        get() = resident.values.sumOf { it.loaded.ramBytes }
+        get() = resident.values.sumOf { it.bytes }
 
     fun residentModels(): List<ResidentModel> = resident.values.map {
-        ResidentModel(it.loaded.modelId, it.runtime, it.loaded.ramBytes, it.refCount, it.lastUsedAt)
+        ResidentModel(it.loaded.modelId, it.runtime, it.bytes, it.refCount, it.lastUsedAt)
+    }
+
+    override suspend fun reserve(modelId: String, bytes: Long, what: String) = mutex.withLock {
+        require(bytes >= 0) { "bytes must not be negative" }
+        val entry = resident[modelId] ?: throw IllegalStateException("$modelId is not loaded; nothing to reserve $what for")
+        val budget = budgetBytes()
+        while (residentBytes + bytes > budget) {
+            val victim = resident.values
+                .filter { it.refCount == 0 && it !== entry }
+                .minByOrNull { it.lastUsedAt }
+                ?: run {
+                    log("$modelId: $what refused -- needs ${bytes / MB}MB more, ${residentBytes / MB}MB resident of a ${budget / MB}MB budget")
+                    throw InsufficientMemoryException(bytes, budget - residentBytes, residentBytes)
+                }
+            unload(victim.loaded.modelId)
+        }
+        entry.extraBytes += bytes
+        log("$modelId: $what admitted (+${bytes / MB}MB, ${entry.bytes / MB}MB in all)")
+    }
+
+    override suspend fun unreserve(modelId: String, bytes: Long) = mutex.withLock {
+        resident[modelId]?.let { it.extraBytes = (it.extraBytes - bytes).coerceAtLeast(0L) }
+        Unit
     }
 
     /**
@@ -210,7 +258,7 @@ class RuntimeManager(
     private fun unload(modelId: String) {
         resident.remove(modelId)?.let { entry ->
             activeRefs.addAndGet(-entry.refCount)
-            log("$modelId: evicted (${entry.loaded.ramBytes / MB}MB)")
+            log("$modelId: evicted (${entry.bytes / MB}MB)")
             entry.loaded.close()
         }
     }
