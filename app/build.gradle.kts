@@ -190,6 +190,8 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    // The local-AI SDK's API; the app is its first implementation (localai/AppLocalAi).
+    implementation(project(":local-ai-sdk"))
     // The unified local-model domain. Phase 2: only LegacyCatalogMapper uses
     // it, and nothing at runtime calls that yet.
     implementation(project(":model-core"))

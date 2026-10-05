@@ -1115,11 +1115,12 @@ class AppContainer private constructor(private val context: Context) {
                             onLoaded()
                             val handle = loaded as? ai.localstudio.core.runtime.TextModelHandle
                                 ?: throw IllegalStateException("${descriptor.id} did not load as a text model")
-                            val input = ai.localstudio.app.localai.LocalAiInput(
+                            val input = ai.localstudio.sdk.LocalAiInput(
                                 text = probe.prompt,
-                                images = listOfNotNull(probe.image?.let { ai.localstudio.core.model.ImageRef(ai.localstudio.app.vision.ProbeImageRenderer.dataUri(it)) }),
+                                images = listOfNotNull(probe.image?.let { ai.localstudio.sdk.LocalImage(ai.localstudio.app.vision.ProbeImageRenderer.png(it), "image/png") }),
                             )
-                            handle.generate(input.toRequest(maxTokens = CANDIDATE_MAX_TOKENS, temperature = 0.0, repeatPenalty = 1.0))
+                            val options = ai.localstudio.sdk.GenerationOptions(maxTokens = CANDIDATE_MAX_TOKENS, temperature = 0.0)
+                            handle.generate(ai.localstudio.app.localai.SdkMapping.request(input, options, repeatPenalty = 1.0))
                                 .collect { onChunk(it) }
                         }
                     }
@@ -2689,6 +2690,56 @@ class AppContainer private constructor(private val context: Context) {
      */
     fun localVisionAvailable(): Boolean =
         effectiveLocalSelection(localRegistry())?.binding?.mmprojArtifact != null
+
+    /** The SDK's way in ([ai.localstudio.sdk.LocalAi]), backed by this app's models, runtime and discovery. */
+    val localAi: ai.localstudio.sdk.LocalAi by lazy { ai.localstudio.app.sdk.AppLocalAi(this) }
+
+    /** Installed local models for [purpose], as the runtime will load them. For [ai.localstudio.app.sdk.AppLocalAi]. */
+    internal fun installedLocalModels(purpose: ModelPurpose): List<SelectedModel> =
+        localRegistry(purpose).installed().map { SelectedModel(it.model, it.model.bindings.first()) }
+
+    /**
+     * [modelId] when it is installed for [purpose], else null; with no id,
+     * the model the user chose for [purpose] (or the best installed one) --
+     * the same choice the Chat and Translation screens make.
+     */
+    internal fun localModelFor(purpose: ModelPurpose, modelId: String?): SelectedModel? {
+        val registry = localRegistry(purpose)
+        if (modelId != null) {
+            return registry.find(modelId)?.takeIf { it.state == InstallState.INSTALLED }?.let { SelectedModel(it.model, it.model.bindings.first()) }
+        }
+        return when (purpose) {
+            ModelPurpose.CHAT -> effectiveLocalSelection(registry)
+            ModelPurpose.TRANSLATION -> {
+                val chosen = settings.translationModel.takeUnless { it == CloudProviders.AICORE.id }.orEmpty()
+                (if (chosen.isNotBlank()) effectiveLocalSelection(registry, chosen) else null) ?: effectiveLocalSelection(registry)
+            }
+        }
+    }
+
+    /** The one runtime every local text model goes through (shared RAM manager, device memory gate). */
+    internal fun localTextRuntime(): ModelRuntime = sharedLlamaRuntime()
+
+    /** The installed seed behind a local model id, for what only the seed knows (its title, whether it is a T5 model). */
+    internal fun localSeed(modelId: String): LocalModelSeed? =
+        (installedSeeds(ModelPurpose.CHAT) + installedSeeds(ModelPurpose.TRANSLATION)).firstOrNull { it.id == modelId }
+
+    /** The discovery candidate whose files a local model is (moved in by "Use"), for its device checks. */
+    internal fun candidateBehind(modelId: String): DiscoveredCandidate? =
+        discoveryStore.runs().asSequence().flatMap { it.candidates.asSequence() }
+            .filter { c ->
+                listOf(ai.localstudio.model.install.VerifiedCapability.TEXT, ai.localstudio.model.install.VerifiedCapability.TRANSLATION)
+                    .any { candidateSeed(it, c).id == modelId }
+            }
+            .maxByOrNull { it.verification?.verifiedAtEpochMs ?: 0L }
+
+    /** Every candidate of the last sweep with the label it was found under. */
+    internal fun discoveredCandidates(): List<Pair<String, DiscoveredCandidate>> =
+        discoveryStore.runs().flatMap { run -> run.candidates.map { run.label to it } }
+
+    /** The candidate's stored state right now, found by its identity (a sweep may have replaced it). */
+    internal fun discoveredCandidate(identity: String): Pair<String, DiscoveredCandidate>? =
+        discoveredCandidates().firstOrNull { it.second.identity == identity }
 
     /**
      * A [LlamaCppRuntime] whose loads go through [sharedRuntimeManager]. The

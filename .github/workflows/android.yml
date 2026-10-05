@@ -46,7 +46,7 @@ jobs:
       # (NodeExecutors/LlmMemoryExtractor, split out of :core — see
       # MOBILE_MEM0_DEPENDENCY.md) is the same risk if left off this list.
       - name: Test core, model-core, model-install, core-chat, commercial-memory and openai
-        run: ./gradlew --no-daemon :core:test :model-core:test :model-install:test :core-chat:test :commercial-memory:test :openai:test 2>&1 | tee -a build.log
+        run: ./gradlew --no-daemon :core:test :model-core:test :model-install:test :core-chat:test :commercial-memory:test :openai:test :local-ai-sdk:test 2>&1 | tee -a build.log
 
       # --max-workers=1: with two native-build modules now (:app's llama_jni
       # and :whisper's whisper_jni), Gradle configures both CMake projects in

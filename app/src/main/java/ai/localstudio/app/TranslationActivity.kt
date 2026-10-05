@@ -64,7 +64,7 @@ import kotlinx.coroutines.withContext
  * with no chat framing at all, while every other model — an ordinary chat
  * GGUF from [ai.localstudio.app.models.LocalModels], or a decoder-only
  * translation fine-tune from [TranslationModels] like TranslateGemma — gets
- * the instruction-style prompt [buildChatPrompt] builds from a language's
+ * the instruction-style prompt [ai.localstudio.app.localai.TranslationPrompts.chatInstruction] builds from a language's
  * English `name`. [translate] picks between the two prompt shapes by
  * checking [Settings.translationModel]'s own seed — see [buildPrompt]. A
  * model never trained on a given language, MADLAD-400 included, is always a
@@ -550,7 +550,7 @@ class TranslationActivity : AppCompatActivity() {
      * when [Settings.translationModel] names a real T5 encoder-decoder seed
      * ([ai.localstudio.app.models.LocalModelSeed.isT5EncoderDecoder]) — it
      * was fine-tuned on `<2xx> source text` and nothing else; an instruction
-     * wrapped around it the way [buildChatPrompt] does would just be more
+     * wrapped around it the way [ai.localstudio.app.localai.TranslationPrompts.chatInstruction] does would just be more
      * text for the encoder to (mis)translate, not an instruction it
      * understands. Every other [TranslationModels] seed (TranslateGemma: a
      * decoder-only chat model fine-tuned for translation, not an
@@ -558,43 +558,17 @@ class TranslationActivity : AppCompatActivity() {
      * chat-instruction prompt as AICore, a cloud provider, or an ordinary
      * [ai.localstudio.app.models.LocalModels] seed.
      */
-    private fun buildPrompt(translationSource: AppContainer.CompareSource, source: MadladLanguage, target: MadladLanguage, text: String): String =
-        if (translationSource.isLocal && TranslationModels.SEEDS.any { it.id == container.settings.translationModel && it.isT5EncoderDecoder }) {
-            "<2${target.code}> $text"
-        } else if (translationSource.isLocal && translationSource.label.contains("omnitranslate", ignoreCase = true)) {
-            buildOmniTranslatePrompt(target, text)
+    private fun buildPrompt(translationSource: AppContainer.CompareSource, source: MadladLanguage, target: MadladLanguage, text: String): String {
+        val format = if (translationSource.isLocal) {
+            ai.localstudio.app.localai.TranslationPrompts.Format.of(
+                isT5EncoderDecoder = TranslationModels.SEEDS.any { it.id == container.settings.translationModel && it.isT5EncoderDecoder },
+                modelName = translationSource.label,
+            )
         } else {
-            buildChatPrompt(source, target, text)
+            ai.localstudio.app.localai.TranslationPrompts.Format.CHAT_INSTRUCTION
         }
-
-    /**
-     * OmniTranslate's own format — `Translate to <iso639-3>_<Script>: text`
-     * (its model card's example uses `ron_Latn`), target only. Real device
-     * report: given [buildChatPrompt]'s English instruction it decided on its
-     * own the task was "EN->sul_Latn" and answered in Spanish. The model card
-     * also says an ISO code works much better than a language name, so the
-     * name is only the fallback when no code can be derived.
-     */
-    private fun buildOmniTranslatePrompt(target: MadladLanguage, text: String): String =
-        "Translate to ${isoScriptCode(target.code) ?: target.name}: $text"
-
-    /**
-     * `ru` → `rus_Cyrl`, `crs` → `crs_Latn`: the ISO 639-3 code from
-     * [java.util.Locale] and the script from ICU's CLDR likely-subtags data —
-     * both shipped with Android, nothing hand-typed (see [MadladLanguages]' own
-     * doc comment on why fabricated codes are worse than none). Null when ICU
-     * has no script for the language. Macrolanguages come out as their
-     * macrolanguage code (`ara`, `zho`), not FLORES' specific variety (`arb`).
-     */
-    private fun isoScriptCode(code: String): String? = runCatching {
-        val likely = android.icu.util.ULocale.addLikelySubtags(android.icu.util.ULocale(code.replace('-', '_')))
-        val iso3 = likely.toLocale().isO3Language
-        val script = likely.script
-        if (iso3.isNullOrEmpty() || script.isNullOrEmpty()) null else "${iso3}_$script"
-    }.getOrNull()
-
-    private fun buildChatPrompt(source: MadladLanguage, target: MadladLanguage, text: String): String =
-        ai.localstudio.app.localai.TranslationPrompts.chatInstruction(source.name, target.name, text)
+        return ai.localstudio.app.localai.TranslationPrompts.forLocalModel(format, source.name, target.name, target.code, text, IsoScriptCodes::of)
+    }
 
     /**
      * The same button doubles as Stop while busy rather than just disabling

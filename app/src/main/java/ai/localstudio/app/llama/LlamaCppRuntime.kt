@@ -4,6 +4,7 @@ import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.runtime.GenerationRequest
+import ai.localstudio.core.runtime.ImageNotSeenException
 import ai.localstudio.core.runtime.InsufficientMemoryException
 import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
@@ -655,9 +656,11 @@ private class LlamaTextModel(
             if (produced < 0) {
                 log("LOCAL_GENERATE", "$modelId: FAILED code=$produced after ${elapsedMs}ms, $tokenCount tokens")
                 close(
-                    IllegalStateException(
-                        if (produced == IMAGE_NOT_SEEN) "the image was not seen: $notSeen" else "Generation failed with code $produced",
-                    ),
+                    if (produced == IMAGE_NOT_SEEN) {
+                        ImageNotSeenException(notSeen ?: "unknown")
+                    } else {
+                        IllegalStateException("Generation failed with code $produced")
+                    },
                 )
             } else {
                 log("LOCAL_GENERATE", "$modelId: done in ${elapsedMs}ms, $produced tokens")

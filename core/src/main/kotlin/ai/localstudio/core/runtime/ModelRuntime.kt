@@ -146,6 +146,9 @@ interface ModelRuntime {
 
 class ModelLoadException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
+/** An image turn a model refused because it could not see the image (no projector, or none admitted or loaded) -- never answered as text instead. */
+class ImageNotSeenException(val reason: String) : Exception("the image was not seen: $reason")
+
 class InsufficientMemoryException(
     val requestedBytes: Long,
     val budgetBytes: Long,

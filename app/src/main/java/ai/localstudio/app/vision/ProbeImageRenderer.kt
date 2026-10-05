@@ -7,7 +7,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
-import android.util.Base64
 import java.io.ByteArrayOutputStream
 
 /**
@@ -47,7 +46,4 @@ object ProbeImageRenderer {
             bitmap.recycle()
         }
     }
-
-    /** The form [ai.localstudio.core.model.ImageRef.uri] takes for an image handed to a local model. */
-    fun dataUri(image: ProbeImage): String = "data:image/png;base64," + Base64.encodeToString(png(image), Base64.NO_WRAP)
 }

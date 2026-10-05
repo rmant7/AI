@@ -1,0 +1,149 @@
+package ai.localstudio.app.sdk
+
+import ai.localstudio.app.AppContainer
+import ai.localstudio.app.IsoScriptCodes
+import ai.localstudio.app.localai.SdkMapping
+import ai.localstudio.app.localai.TranslationPrompts
+import ai.localstudio.app.modelinstall.finalAnswer
+import ai.localstudio.app.models.ModelPurpose
+import ai.localstudio.core.engine.SelectedModel
+import ai.localstudio.core.runtime.GenerationRequest
+import ai.localstudio.core.runtime.ImageNotSeenException
+import ai.localstudio.core.runtime.InsufficientMemoryException
+import ai.localstudio.core.runtime.TextModelHandle
+import ai.localstudio.sdk.CheckResult
+import ai.localstudio.sdk.GenerationOptions
+import ai.localstudio.sdk.InstallProgress
+import ai.localstudio.sdk.LocalAi
+import ai.localstudio.sdk.LocalAiException
+import ai.localstudio.sdk.LocalAiInput
+import ai.localstudio.sdk.LocalCapability
+import ai.localstudio.sdk.LocalModel
+import ai.localstudio.sdk.LocalModelDiscovery
+import ai.localstudio.sdk.ModelCandidate
+import ai.localstudio.sdk.TranslationRequest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.flow.toList
+import java.io.File
+
+/**
+ * [LocalAi] backed by this app: the models the user installed, the one
+ * shared llama.cpp runtime and RAM manager the Chat and Translation screens
+ * use, and candidate discovery. Every choice it makes is the screens' own
+ * (see [AppContainer.localModelFor]) -- a caller of the SDK gets exactly what
+ * the app would do, never a second path that could drift from it.
+ */
+class AppLocalAi(private val container: AppContainer) : LocalAi {
+
+    override suspend fun models(): List<LocalModel> =
+        (container.installedLocalModels(ModelPurpose.CHAT) + container.installedLocalModels(ModelPurpose.TRANSLATION))
+            .distinctBy { it.model.id }
+            .map { selected ->
+                val id = selected.model.id
+                LocalModel(
+                    id = id,
+                    displayName = container.localSeed(id)?.title ?: id,
+                    capabilities = capabilitiesOf(selected),
+                    verified = SdkMapping.checks(container.candidateBehind(id)?.verification),
+                    sizeBytes = selected.binding.fileSizeBytes + (selected.binding.mmprojArtifact?.let { File(it).length() } ?: 0L),
+                )
+            }
+
+    override fun generate(input: LocalAiInput, options: GenerationOptions, modelId: String?): Flow<String> = flow {
+        val selected = container.localModelFor(ModelPurpose.CHAT, modelId)
+            ?: throw if (modelId != null) LocalAiException.UnknownModel(modelId) else LocalAiException.NoModel(LocalCapability.TEXT)
+        if (LocalCapability.TEXT !in capabilitiesOf(selected)) {
+            throw LocalAiException.Failed("${selected.model.id} only translates; ask it through translate()")
+        }
+        if (!SdkMapping.canTake(selected.binding, input)) {
+            throw LocalAiException.ImageNotSeen("${selected.model.id} has no vision projector installed")
+        }
+        emitAll(answer(selected, SdkMapping.request(input, options)))
+    }
+
+    override suspend fun translate(request: TranslationRequest, modelId: String?): String {
+        val selected = container.localModelFor(ModelPurpose.TRANSLATION, modelId)
+            ?: throw if (modelId != null) LocalAiException.UnknownModel(modelId) else LocalAiException.NoModel(LocalCapability.TRANSLATION)
+        val seed = container.localSeed(selected.model.id)
+        val format = TranslationPrompts.Format.of(
+            isT5EncoderDecoder = seed?.isT5EncoderDecoder == true,
+            modelName = listOfNotNull(selected.model.id, seed?.title).joinToString(" "),
+        )
+        val prompt = TranslationPrompts.forLocalModel(
+            format, request.source.name, request.target.name, request.target.code, request.text, IsoScriptCodes::of,
+        )
+        val reply = answer(selected, GenerationRequest(prompt = prompt, temperature = 0.0)).toList().joinToString("")
+        return finalAnswer(reply)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: throw LocalAiException.Failed("${selected.model.id} gave no translation" + if (finalAnswer(reply) == null) " (still reasoning when the reply ended)" else "")
+    }
+
+    override val discovery: LocalModelDiscovery = object : LocalModelDiscovery {
+        override suspend fun candidates(): List<ModelCandidate> =
+            container.discoveredCandidates().map { (_, c) -> SdkMapping.candidate(c, installed = container.candidateTestable(c)) }
+
+        override fun install(candidateId: String): Flow<InstallProgress> = flow {
+            val (label, candidate) = container.discoveredCandidate(candidateId) ?: run {
+                emit(InstallProgress.Failed("no candidate \"$candidateId\" in the last search"))
+                return@flow
+            }
+            if (!container.candidateTestable(candidate)) {
+                // Downloading straight into the device check is what the app itself does (see AppContainer.downloadCandidate).
+                container.downloadCandidate(label, candidate)
+                container.candidateWork
+                    .map { it.downloads[candidate.repoId] }
+                    .takeWhile { it != null }
+                    .collect { emit(InstallProgress.Downloading(it!!.bytesDone, it.bytesTotal)) }
+                if (!container.candidateTestable(candidate)) {
+                    emit(InstallProgress.Failed(container.candidateWork.value.failures[candidate.repoId] ?: "not installed (paused or cancelled)"))
+                    return@flow
+                }
+            } else {
+                container.testCandidate(label, candidate)
+            }
+            emit(InstallProgress.Checking)
+            emit(InstallProgress.Done(awaitCheck(candidateId, candidate.repoId)))
+        }
+
+        override suspend fun verify(candidateId: String): Map<LocalCapability, CheckResult> {
+            val (label, candidate) = container.discoveredCandidate(candidateId) ?: throw LocalAiException.UnknownModel(candidateId)
+            if (!container.candidateTestable(candidate)) throw LocalAiException.Failed("$candidateId is not installed")
+            container.testCandidate(label, candidate)
+            return awaitCheck(candidateId, candidate.repoId)
+        }
+    }
+
+    /** Waits for [repoId]'s queued or running check to finish, then reads what it recorded. */
+    private suspend fun awaitCheck(candidateId: String, repoId: String): Map<LocalCapability, CheckResult> {
+        container.candidateWork.first { repoId !in it.queued && it.trial?.repoId != repoId }
+        return SdkMapping.checks(container.discoveredCandidate(candidateId)?.second?.verification)
+    }
+
+    /** A T5 translation model translates and nothing else; every other local model takes text, and images with its projector. */
+    private fun capabilitiesOf(selected: SelectedModel): Set<LocalCapability> =
+        if (container.localSeed(selected.model.id)?.isT5EncoderDecoder == true) setOf(LocalCapability.TRANSLATION) else SdkMapping.capabilities(selected.binding)
+
+    /** One request through the shared runtime, with its failures in the SDK's terms. */
+    private fun answer(selected: SelectedModel, request: GenerationRequest): Flow<String> = flow {
+        val handle = container.localTextRuntime().load(selected.model, selected.binding) as? TextModelHandle
+            ?: throw LocalAiException.Failed("${selected.model.id} did not load as a text model")
+        try {
+            container.heavyOperations.track { emitAll(handle.generate(request)) }
+        } finally {
+            handle.close()
+        }
+    }.catch { e ->
+        throw when (e) {
+            is CancellationException, is LocalAiException -> e
+            is ImageNotSeenException -> LocalAiException.ImageNotSeen(e.reason)
+            is InsufficientMemoryException -> LocalAiException.NotEnoughMemory(e.requestedBytes, e.budgetBytes)
+            else -> LocalAiException.Failed(e.message ?: e.javaClass.simpleName, e)
+        }
+    }
+}

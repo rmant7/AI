@@ -25,6 +25,10 @@ include(":model-install")
 // LlmMemoryExtractor it uses — the only pieces of the old :core that
 // touched :commercial-memory/Mobile_mem0. Split out so :core itself stays
 // buildable against nothing but plain Kotlin — see MOBILE_MEM0_DEPENDENCY.md.
+// The local-AI SDK's public API (what IntelliVerse calls): capabilities,
+// inputs, results, discovery -- no runtime or file-format types. Pure
+// Kotlin; the app implements it (see app/.../localai/AppLocalAi.kt).
+include(":local-ai-sdk")
 include(":core-chat")
 include(":openai")
 
