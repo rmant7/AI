@@ -20,6 +20,8 @@ data class DiscoveredCandidate(
     val notes: List<String>,
     val commit: String,
     val downloads: Long,
+    /** The repository's Hugging Face tags as the search returned them -- see [CandidateFacts]. Empty for a run stored before they were kept. */
+    val tags: List<String> = emptyList(),
     /** Null until a real device has tried to load and use this exact file -- see [CandidateTier]. */
     val verification: ai.localstudio.model.install.DeviceVerification? = null,
 )
@@ -143,6 +145,7 @@ class DiscoveryStore(context: Context, baseDir: File = context.filesDir) {
             notes = outcome.notes,
             commit = outcome.commit,
             downloads = outcome.repo.downloads,
+            tags = outcome.repo.tags,
         )
     }
 }

@@ -13,6 +13,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import ai.localstudio.app.AppContainer
 import ai.localstudio.app.R
+import ai.localstudio.app.describe
 import ai.localstudio.app.whisper.WhisperDownloadState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -83,7 +84,7 @@ class ModelDownloadService : Service() {
                         add(getString(R.string.download_notification_whisper_progress, (it.progress.fraction * 100).toInt()))
                     }
                     if (discovering) add(getString(R.string.download_notification_discovery))
-                    if (trial != null) add(trial)
+                    if (trial != null) add(trial.describe(this@ModelDownloadService))
                     if (isEmpty() && ggufResolving) add(getString(R.string.download_notification_searching))
                 }
                 // Discovery alone (activeCount 0) must not say "Downloading
@@ -164,5 +165,5 @@ private data class Watched(
     val gguf: Map<String, DownloadState>,
     val whisper: Map<String, WhisperDownloadState>,
     val discovering: Boolean,
-    val trial: String?,
+    val trial: ai.localstudio.app.modelinstall.CandidateTrialState?,
 )

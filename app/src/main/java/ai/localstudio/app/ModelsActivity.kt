@@ -40,13 +40,8 @@ import ai.localstudio.app.whisper.WhisperModels
 import ai.localstudio.core.registry.DeviceProfile
 import ai.localstudio.core.registry.ModelFit
 import ai.localstudio.core.speech.AsrEngineType
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import ai.localstudio.app.models.ModelDownloadService
-import ai.localstudio.app.modelinstall.DiscoveredCandidate
-import ai.localstudio.model.install.CandidateTier
-import ai.localstudio.model.install.tier
 
 /**
  * Every model the app can run, grouped by what it is *for* — chat models,
@@ -225,7 +220,7 @@ class ModelsActivity : AppCompatActivity() {
     }
 
     /**
-     * Pops the candidate list open once for whatever finished since it was
+     * Opens the candidates screen once for whatever finished since it was
      * last shown -- a sweep from [AppContainer.startDiscovery] or a test from
      * [AppContainer.startCandidateTrial] -- however long ago; see
      * [runDiscovery]'s own doc comment.
@@ -237,111 +232,8 @@ class ModelsActivity : AppCompatActivity() {
         showCandidates()
     }
 
-    /**
-     * Every candidate of the last sweep with what is actually known about it
-     * on this device: UNVERIFIED until a test here loaded it and got the
-     * expected answers -- a header that llama.cpp can parse is not a
-     * recommendation. Tapping one opens its details and Download & Test.
-     */
     private fun showCandidates() {
-        val runs = container.discoveryStore.runs()
-        if (runs.isEmpty()) {
-            Toast.makeText(this, R.string.candidates_none, Toast.LENGTH_LONG).show()
-            return
-        }
-        val rows = mutableListOf<Pair<String, (() -> Unit)?>>()
-        for (run in runs) {
-            val header = if (run.failure != null) {
-                getString(R.string.discover_failed, run.label, run.failure)
-            } else {
-                getString(R.string.discover_section, run.label, run.candidates.size, run.checked)
-            }
-            rows.add(Pair(header, null))
-            run.candidates.forEach { c ->
-                val row = "• ${c.repoId} — ${c.sizeBytes / 1_000_000} MB, ${c.architecture} — ${tierLabel(c.verification.tier())}"
-                val open: () -> Unit = { showCandidate(run.label, c) }
-                rows.add(Pair(row, open))
-            }
-        }
-        rows.add(Pair(getString(R.string.discover_footer), null))
-        val title = container.candidateTrialStatus.value ?: getString(R.string.discover_title)
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setItems(rows.map { it.first }.toTypedArray()) { _, which -> rows[which].second?.invoke() }
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
-    }
-
-    private fun tierLabel(tier: CandidateTier): String = getString(
-        when (tier) {
-            CandidateTier.UNVERIFIED -> R.string.candidate_tier_unverified
-            CandidateTier.LOADABLE -> R.string.candidate_tier_loadable
-            CandidateTier.FUNCTIONAL -> R.string.candidate_tier_functional
-        },
-    )
-
-    private fun showCandidate(label: String, c: DiscoveredCandidate) {
-        val dash = "—"
-        val details = buildString {
-            append(
-                getString(
-                    R.string.candidate_details,
-                    c.repoId, c.filePath, c.sizeBytes / 1_000_000, c.architecture,
-                    c.contextLength?.toString() ?: dash, c.commit.take(12), tierLabel(c.verification.tier()),
-                ),
-            )
-            c.notes.forEach { append("\n• ").append(it) }
-            c.verification?.let { v ->
-                append("\n\n")
-                append(
-                    getString(
-                        R.string.candidate_verification,
-                        v.deviceProfile,
-                        v.loaded.toString(),
-                        v.inferenceOk.toString(),
-                        v.tokensPerSecond?.let { "%.1f tok/s".format(it) } ?: dash,
-                        v.sampleOutput ?: dash,
-                        v.error ?: dash,
-                    ),
-                )
-            }
-        }
-        val installedBytes = container.candidateInstalledBytes(c)
-        AlertDialog.Builder(this)
-            .setTitle(c.repoId)
-            .setMessage(details)
-            .setPositiveButton(R.string.candidate_test) { _, _ -> testCandidate(label, c) }
-            .setNegativeButton(android.R.string.cancel, null)
-            .apply {
-                if (installedBytes != null) {
-                    setNeutralButton(getString(R.string.candidate_delete, installedBytes / 1_000_000)) { _, _ ->
-                        lifecycleScope.launch {
-                            val deleted = withContext(Dispatchers.IO) { container.deleteCandidateInstall(c) }
-                            Toast.makeText(
-                                this@ModelsActivity,
-                                if (deleted) R.string.candidate_deleted else R.string.candidate_delete_failed,
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        }
-                    }
-                }
-            }
-            .show()
-    }
-
-    private fun testCandidate(label: String, c: DiscoveredCandidate) {
-        if (container.candidateTrialStatus.value != null) {
-            Toast.makeText(this, R.string.candidate_test_busy, Toast.LENGTH_LONG).show()
-            return
-        }
-        NetworkPolicy.confirmIfNeeded(this, container.settings) {
-            ModelDownloadService.ensureStarted(this)
-            if (container.startCandidateTrial(label, c)) {
-                Toast.makeText(this, getString(R.string.candidate_test_started, c.repoId), Toast.LENGTH_LONG).show()
-            } else {
-                Toast.makeText(this, R.string.candidate_test_busy, Toast.LENGTH_LONG).show()
-            }
-        }
+        startActivity(android.content.Intent(this, CandidatesActivity::class.java))
     }
 
     // ── Text models ────────────────────────────────────────────────────────

@@ -41,6 +41,12 @@
             android:parentActivityName=".ChatActivity" />
 
         <activity
+            android:name=".CandidatesActivity"
+            android:exported="false"
+            android:label="@string/candidates_menu"
+            android:parentActivityName=".ModelsActivity" />
+
+        <activity
             android:name=".AiCoreTestActivity"
             android:exported="false"
             android:label="@string/aicore_screen_title"

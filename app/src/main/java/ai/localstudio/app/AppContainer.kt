@@ -71,6 +71,7 @@ import ai.localstudio.app.llama.RamMeasuringRuntime
 import ai.localstudio.app.llama.readMemAvailableBytes
 import ai.localstudio.app.modelinstall.ModelInstallation
 import ai.localstudio.app.modelinstall.CandidateTrial
+import ai.localstudio.app.modelinstall.CandidateTrialState
 import ai.localstudio.app.modelinstall.DiscoveredCandidate
 import ai.localstudio.app.modelinstall.DiscoveryRun
 import ai.localstudio.app.modelinstall.FunctionalProbe
@@ -627,8 +628,8 @@ class AppContainer private constructor(private val context: Context) {
         }
     }
 
-    /** What [startCandidateTrial] is doing right now, for the notification and the Models screen; null when idle. */
-    val candidateTrialStatus = MutableStateFlow<String?>(null)
+    /** What [startCandidateTrial] is doing right now, for the notification and the candidates screen; null when idle. */
+    val candidateTrialStatus = MutableStateFlow<CandidateTrialState?>(null)
 
     private var candidateTrialJob: Job? = null
 
@@ -649,13 +650,21 @@ class AppContainer private constructor(private val context: Context) {
             val tag = "CANDIDATE_TEST"
             val name = candidate.repoId
             try {
-                candidateTrialStatus.value = "$name: downloading…"
+                candidateTrialStatus.value = CandidateTrialState(name, CandidateTrialState.Phase.DOWNLOADING, 0, candidate.sizeBytes)
                 appLog.record(tag, "$name: installing ${candidate.filePath}@${candidate.commit.take(8)} (${candidate.sizeBytes / 1_000_000} MB)")
+                var loggedQuarter = 0
                 val weights = installCandidate(candidate) { done, total ->
-                    candidateTrialStatus.value = "$name: downloading ${done / 1_000_000}/${total / 1_000_000} MB"
+                    val state = CandidateTrialState(name, CandidateTrialState.Phase.DOWNLOADING, done, total)
+                    candidateTrialStatus.value = state
+                    val quarter = (state.percent ?: 0) / 25
+                    if (quarter > loggedQuarter && quarter < 4) {
+                        loggedQuarter = quarter
+                        appLog.record(tag, "$name: downloaded ${done / 1_000_000}/${total / 1_000_000} MB")
+                    }
                 } ?: return@launch
 
-                candidateTrialStatus.value = "$name: loading and testing…"
+                candidateTrialStatus.value = CandidateTrialState(name, CandidateTrialState.Phase.LOADING)
+                appLog.record(tag, "$name: loading with llama.cpp")
                 val profile = "${Build.MANUFACTURER} ${Build.MODEL} / API ${Build.VERSION.SDK_INT} / " +
                     String.format(
                         java.util.Locale.ROOT,
@@ -664,11 +673,27 @@ class AppContainer private constructor(private val context: Context) {
                         ai.localstudio.model.install.LlamaCppArchitectures.LLAMA_CPP_TAG,
                         LlamaBridge.loadedLibrary ?: "unavailable",
                     )
+                val probes = FunctionalProbe.forLabel(label)
+                val runtime = candidateRuntime(candidate, weights)
+                var asked = 0
                 val verification = CandidateTrial().run(
                     deviceProfile = profile,
                     runtimeId = RuntimeKind.LLAMA_CPP.id,
-                    probes = FunctionalProbe.forLabel(label),
-                    runtime = candidateRuntime(candidate, weights),
+                    probes = probes,
+                    runtime = TrialRuntime { prompt, onLoaded, onChunk ->
+                        val probe = ++asked
+                        runtime.answer(
+                            prompt,
+                            onLoaded = {
+                                onLoaded()
+                                if (candidateTrialStatus.value?.phase != CandidateTrialState.Phase.ANSWERING) {
+                                    appLog.record(tag, "$name: loaded; asking ${probes.size} question(s)")
+                                }
+                                candidateTrialStatus.value = CandidateTrialState(name, CandidateTrialState.Phase.ANSWERING, probe = probe, probes = probes.size)
+                            },
+                            onChunk = onChunk,
+                        )
+                    },
                 )
                 val tier = verification.tier()
                 appLog.record(
@@ -733,7 +758,7 @@ class AppContainer private constructor(private val context: Context) {
             modelInstallation::freeBytes,
         ) { p ->
             val mb = p.transfer.bytesDone / 1_000_000
-            if (mb / 50 != lastReportedMb / 50) {
+            if (mb / 10 != lastReportedMb / 10) {
                 lastReportedMb = mb
                 progress(p.transfer.bytesDone, p.transfer.bytesTotal ?: candidate.sizeBytes)
             }

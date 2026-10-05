@@ -165,4 +165,33 @@ class DiscoveryStoreTest {
         store.recordVerification("chat", "acme/a-GGUF", verification(at = System.currentTimeMillis() + 10_000))
         assertTrue("a finished test is news even though the sweep was already seen", store.hasUnseen())
     }
+
+    @Test
+    fun a_candidate_keeps_what_the_search_said_about_it_and_its_full_path() {
+        val outcome = ai.localstudio.model.install.ModelDiscovery.Outcome.Candidate(
+            repo = ai.localstudio.model.install.RepoSummary(id = "acme/a-GGUF", downloads = 7, tags = listOf("gguf", "code", "license:mit")),
+            commit = "a".repeat(40),
+            file = ai.localstudio.model.install.RepoFile("Q4/a-Q4_K_M.gguf", 1_000, "b".repeat(64)),
+            architecture = "qwen2",
+            contextLength = 4096,
+            notes = emptyList(),
+        )
+        val stored = store().apply { record(DiscoveryRun("chat", 1_000L, 1, listOf(DiscoveryStore.candidateOf(outcome)))) }
+        val reloaded = store().runs().single().candidates.single()
+        assertEquals(listOf("gguf", "code", "license:mit"), reloaded.tags)
+        assertEquals("Q4/a-Q4_K_M.gguf", reloaded.filePath)
+        assertEquals("a-Q4_K_M.gguf", reloaded.fileName)
+        assertEquals("b".repeat(64), reloaded.sha256)
+        assertTrue(stored.runs().isNotEmpty())
+    }
+
+    @Test
+    fun a_result_stored_before_tags_were_kept_still_reads() {
+        base.mkdirs()
+        File(base, "discovery_results.json").writeText(
+            """{"runs":[{"label":"chat","finishedAtEpochMs":1,"checked":1,"candidates":[{"repoId":"acme/a-GGUF","fileName":"a.gguf",""" +
+                """"filePath":"a.gguf","sizeBytes":1,"architecture":"llama","contextLength":null,"notes":[],"commit":"c","downloads":0}]}]}""",
+        )
+        assertEquals(emptyList<String>(), store().runs().single().candidates.single().tags)
+    }
 }

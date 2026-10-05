@@ -118,3 +118,19 @@ class CandidateTrial(
         const val SAMPLE_CHARS = 300
     }
 }
+
+/** Where a running Download & Test is, for the candidates screen and the notification. */
+data class CandidateTrialState(
+    val repoId: String,
+    val phase: Phase,
+    val bytesDone: Long = 0,
+    val bytesTotal: Long = 0,
+    /** 1-based, while [phase] is [Phase.ANSWERING]. */
+    val probe: Int = 0,
+    val probes: Int = 0,
+) {
+    enum class Phase { DOWNLOADING, LOADING, ANSWERING }
+
+    /** Download progress 0..100, or null when there is nothing to measure it against. */
+    val percent: Int? get() = if (phase == Phase.DOWNLOADING && bytesTotal > 0) (bytesDone * 100 / bytesTotal).toInt().coerceIn(0, 100) else null
+}
