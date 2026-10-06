@@ -44,6 +44,31 @@ import java.util.concurrent.atomic.AtomicReference
 const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
 
 /**
+ * Free RAM a vision turn must still leave once the projector is in: below
+ * it the turn runs, but on swap. Pixel 10 Pro, IntelliVerse #163: Gemma 4
+ * E4B with ~0.5 GB left after its projector took 229 s to its first token
+ * (0.5 tok/s prefill); Gemma 4 E2B with ~1.2 GB left answered in 14 s.
+ */
+const val PROJECTOR_FREE_FLOOR_BYTES = 1_000_000_000L
+
+/**
+ * Why a vision projector of [needBytes] cannot be added now, or null when
+ * it can. [freeBytes] is the phone's free-RAM reading; with the weights
+ * mapped ([ownMappedWeightsBytes] > 0) that reading counts their page cache
+ * as free although every generated token reads it again -- a budget of
+ * "free + what our models hold" counts those pages twice. Same phone, #163:
+ * E4B mapped, 5.3 GB "free" of which ~4.7 GB its own weights, the projector
+ * admitted, and two images took 190 s with 1.4 GB pushed to swap.
+ */
+fun projectorRefusal(freeBytes: Long, ownMappedWeightsBytes: Long, needBytes: Long): String? {
+    val reallyFree = freeBytes - ownMappedWeightsBytes
+    if (reallyFree - needBytes >= PROJECTOR_FREE_FLOOR_BYTES) return null
+    return "only ${reallyFree.coerceAtLeast(0) / 1_000_000}MB really free" +
+        (if (ownMappedWeightsBytes > 0) " (${freeBytes / 1_000_000}MB free counts this model's ${ownMappedWeightsBytes / 1_000_000}MB of mapped weights)" else "") +
+        "; the vision part wants ~${needBytes / 1_000_000}MB and leaves less than ${PROJECTOR_FREE_FLOOR_BYTES / 1_000_000}MB, which runs on swap"
+}
+
+/**
  * Same reasoning as [MMPROJ_RAM_SAFETY_FACTOR], for the main GGUF itself —
  * a real device report: a 5.2GB model's load started with only 3.3GB free,
  * ran the whole process out of memory, and got killed by Android's OOM
@@ -454,16 +479,20 @@ class LlamaCppRuntime(
                     ProjectorLoader(
                         file = projector,
                         admit = {
+                            // The phone's own reading too, not only the budget: see projectorRefusal.
+                            val live = { projectorRefusal(effectiveHeadroomBytes(), if (mapped) file.length() else 0L, needBytes) }
                             if (memory != null) {
                                 try {
                                     memory.reserve(model.id, needBytes, "vision projector ${projector.name}")
-                                    null
+                                    live()?.also {
+                                        memory.unreserve(model.id, needBytes)
+                                        log("RAM_MANAGER", "${model.id}: vision projector ${projector.name} given back -- $it")
+                                    }
                                 } catch (e: InsufficientMemoryException) {
                                     e.message
                                 }
                             } else {
-                                val headroom = availableRamBytes()
-                                if (headroom < needBytes) "only ${headroom / 1_000_000}MB free, want ~${needBytes / 1_000_000}MB" else null
+                                live()
                             }
                         },
                         giveBack = { memory?.unreserve(model.id, needBytes) },
