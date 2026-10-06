@@ -26,6 +26,8 @@ android {
 
     defaultConfig {
         minSdk = 26
+        // JNI looks members up by name: an app minifying this library keeps them (see the file).
+        consumerProguardFiles("consumer-rules.pro")
 
         // arm64 by default, x86_64 only for CI's emulator smoke test -- gradle.properties' localai.abis, as :app.
         ndk {
