@@ -124,12 +124,26 @@ class LogActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.log_empty, Toast.LENGTH_SHORT).show()
             return
         }
-        val report = buildHeader() + "\n\n" + log
+        val report = buildHeader() + "\n\n" + newest(log)
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("Local AI Studio log", report))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             Toast.makeText(this, R.string.message_copied, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /**
+     * The newest [COPY_RECENT_CHARS] of [log], whole lines, saying what it
+     * left out: a report is pasted into a chat, and a chat cuts a long paste
+     * at its end -- the newest entries, the ones that matter (IntelliVerse
+     * #163's log arrived twice cut mid-line at the same spot).
+     */
+    private fun newest(log: String): String {
+        if (log.length <= COPY_RECENT_CHARS) return log
+        val tail = log.takeLast(COPY_RECENT_CHARS)
+        val fromLine = tail.substringAfter('\n', tail)
+        val omittedLines = log.substring(0, log.length - fromLine.length).count { it == '\n' }
+        return "[$omittedLines earlier lines left out]\n$fromLine"
     }
 
     private fun confirmClear() {
@@ -194,5 +208,8 @@ class LogActivity : AppCompatActivity() {
     private companion object {
         /** How close to the bottom still counts as "following the newest lines". */
         const val FOLLOW_BOTTOM_SLOP_PX = 48
+
+        /** What fits a chat message with room to spare. */
+        const val COPY_RECENT_CHARS = 12_000
     }
 }
