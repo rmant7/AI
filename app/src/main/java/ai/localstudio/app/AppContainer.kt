@@ -683,9 +683,9 @@ class AppContainer private constructor(private val context: Context) {
         val key: String,
         val name: String,
         val label: String?,
-        val files: () -> TrialFiles?,
         /** Runs the whole check itself instead of loading [files] with llama.cpp (Gemini Nano: no files of ours). */
         val run: (suspend () -> Unit)? = null,
+        val files: () -> TrialFiles?,
     )
 
     /**
