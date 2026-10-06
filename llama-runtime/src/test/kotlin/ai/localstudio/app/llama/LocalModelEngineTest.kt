@@ -165,4 +165,30 @@ class LocalModelEngineTest {
             }
         }
     }
+
+    @Test
+    fun admission_reads_the_rule_a_load_applies_without_loading_anything() = runBlocking {
+        // IntelliVerse #169: Gemma 4 E4B needed 6401 MB with 5861 MB available -- refused at the load.
+        val e4b = model("e4b.gguf", 4_980_000_000)
+        val small = model("small.gguf", 2_500_000_000)
+        val engine = engine()
+        engine.measuredRam.record(e4b.absolutePath, 4096, 5_334_000_000)
+        budget = 5_861_000_000
+        val refused = engine.admission(EngineModel("e4b", e4b), 4096)
+        assertTrue(refused is Admission.NotAdmitted)
+        assertEquals(engine.admissionBytes(e4b, 4096), refused.requiredBytes)
+        assertEquals(5_861_000_000L, refused.availableBytes)
+        assertTrue(engine.admission(EngineModel("small", small), 4096) is Admission.Admitted)
+        assertTrue(engine.manager.residentModels().isEmpty())
+    }
+
+    @Test
+    fun a_model_resident_as_asked_is_admitted_as_it_is() = runBlocking {
+        val weights = EngineModel("a", model("a.gguf", 1_000_000_000))
+        val engine = engine()
+        engine.manager.withModel(weights.descriptor(), weights.descriptor().bindings.single(), FakeRuntime(), 4096) { }
+        budget = 100
+        assertEquals(true, (engine.admission(weights, 4096) as? Admission.Admitted)?.resident)
+        assertTrue("another context size is another load", engine.admission(weights, 2048) is Admission.NotAdmitted)
+    }
 }

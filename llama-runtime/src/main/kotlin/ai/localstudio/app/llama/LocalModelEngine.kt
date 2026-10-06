@@ -102,10 +102,33 @@ class LocalModelEngine(
         // Admission against what this model actually cost on this device
         // (variant = the context size it's loaded with), once measured;
         // the file-size × 1.3 guess only until the first real run.
-        requiredBytesFor = { binding, variant ->
-            measuredRam.measurementFor(binding.artifact, variant as? Int)?.requiredBytes ?: binding.effectiveRequiredRamBytes
-        },
+        requiredBytesFor = { binding, variant -> requiredBytes(binding, variant as? Int) },
     )
+
+    /** What a load of [binding] with [contextTokens] is admitted against: its measurement here, else the binding's estimate. */
+    private fun requiredBytes(binding: RuntimeBinding, contextTokens: Int?): Long =
+        measuredRam.measurementFor(binding.artifact, contextTokens)?.requiredBytes ?: binding.effectiveRequiredRamBytes
+
+    /**
+     * Whether [model] would be admitted with [contextTokens] right now, by
+     * the very rule [withModel]'s load applies -- its requirement (measured
+     * here once measured) against this phone's budget, idle models counted
+     * as freeable -- without loading or evicting anything. A model resident
+     * as asked is admitted as it is. A reading: memory can change before the
+     * load, which still decides (and fails with InsufficientMemoryException).
+     * Memory the app frees only at admission ([beforeAdmission]: an
+     * embedding model) is not counted -- the reading errs on refusing.
+     */
+    fun admission(model: EngineModel, contextTokens: Int): Admission {
+        val binding = model.descriptor().bindings.single()
+        val required = requiredBytes(binding, contextTokens)
+        val available = budgetBytes(residentBytesNow())
+        return when {
+            manager.isResident(model.id, contextTokens) -> Admission.Admitted(required, available, resident = true)
+            required <= available -> Admission.Admitted(required, available, resident = false)
+            else -> Admission.NotAdmitted(required, available, Admission.Reason.INSUFFICIENT_MEMORY)
+        }
+    }
 
     private fun residentBytesNow(): Long = runCatching { manager.residentBytes }.getOrDefault(0L)
 
@@ -197,4 +220,16 @@ data class EngineModel(
         sourceUrl = sourceUrl ?: "",
         bindings = listOf(RuntimeBinding(RuntimeKind.LLAMA_CPP, weights.absolutePath, weights.length(), mmprojArtifact = projector?.absolutePath)),
     )
+}
+
+/** Whether a model would load now, with the figures that decided it (see [LocalModelEngine.admission]). */
+sealed interface Admission {
+    val requiredBytes: Long
+    val availableBytes: Long
+
+    data class Admitted(override val requiredBytes: Long, override val availableBytes: Long, val resident: Boolean) : Admission
+
+    data class NotAdmitted(override val requiredBytes: Long, override val availableBytes: Long, val reason: Reason) : Admission
+
+    enum class Reason { INSUFFICIENT_MEMORY }
 }

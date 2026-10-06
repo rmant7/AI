@@ -128,6 +128,13 @@ class RuntimeManager(
         ResidentModel(it.loaded.modelId, it.runtime, it.bytes, it.refCount, it.lastUsedAt)
     }
 
+    /**
+     * Whether [modelId] is resident as [variant] right now -- what [acquire]
+     * would hand out again without a load. A reading, not a reservation: it
+     * can be evicted the next moment.
+     */
+    fun isResident(modelId: String, variant: Any?): Boolean = runCatching { resident[modelId]?.let { it.variant == variant } == true }.getOrDefault(false)
+
     override suspend fun reserve(modelId: String, bytes: Long, what: String) = mutex.withLock {
         require(bytes >= 0) { "bytes must not be negative" }
         val entry = resident[modelId] ?: throw IllegalStateException("$modelId is not loaded; nothing to reserve $what for")
