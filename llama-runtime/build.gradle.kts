@@ -62,4 +62,7 @@ dependencies {
     // The dotprod and i8mm builds of llama_jni: packaged next to the baseline wherever this module goes.
     implementation(project(":llama-dotprod"))
     implementation(project(":llama-i8mm"))
+
+    // LocalModelEngineTest: the engine's admission and RAM bookkeeping on a plain JVM (InMemoryKeyValueStore, a fake runtime).
+    testImplementation("junit:junit:4.13.2")
 }

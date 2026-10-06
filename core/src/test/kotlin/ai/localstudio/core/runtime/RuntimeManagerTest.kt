@@ -6,6 +6,7 @@ import ai.localstudio.core.model
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -209,6 +210,46 @@ class RuntimeManagerTest {
 
         assertEquals(listOf("llm", "llm"), runtime.loads)
         assertEquals(listOf("llm"), runtime.unloads)
+    }
+
+    @Test
+    fun `a copy in use is never handed out for another variant -- the request waits, then reloads`() = runBlocking {
+        val manager = manager(6 * GB)
+        val llm = model("llm", bindings = listOf(binding(ramBytes = 1 * GB)))
+        val holding = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val loadedShort = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+        val short = launch {
+            manager.withModel(llm, llm.bindings.first(), variant = 2048) {
+                loadedShort.complete(Unit)
+                holding.await()
+            }
+        }
+        loadedShort.await()
+        var longGot = false
+        val long = launch {
+            manager.withModel(llm, llm.bindings.first(), variant = 4096) { longGot = true }
+        }
+        repeat(10) { kotlinx.coroutines.yield() }
+        assertEquals(false, longGot, "the 2048-token copy must not serve a 4096-token request")
+        assertEquals(listOf("llm"), runtime.loads)
+
+        holding.complete(Unit)
+        short.join()
+        long.join()
+        assertTrue(longGot)
+        assertEquals(listOf("llm", "llm"), runtime.loads, "reloaded with the context asked for")
+        assertEquals(listOf("llm"), runtime.unloads)
+    }
+
+    @Test
+    fun `the same variant in use is shared, not waited for`() = runBlocking {
+        val manager = manager(6 * GB)
+        val llm = model("llm", bindings = listOf(binding(ramBytes = 1 * GB)))
+        manager.withModel(llm, llm.bindings.first(), variant = 2048) {
+            manager.withModel(llm, llm.bindings.first(), variant = 2048) { }
+        }
+        assertEquals(listOf("llm"), runtime.loads)
     }
 
     @Test

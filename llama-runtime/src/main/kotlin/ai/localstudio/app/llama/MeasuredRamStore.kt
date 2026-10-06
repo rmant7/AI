@@ -12,25 +12,29 @@ import java.io.File
  * scales with it.
  */
 class MeasuredRamStore(
-    context: Context,
+    private val prefs: KeyValueStore,
     /** Whether this model file's weights are mapped from it (see [ai.localstudio.core.runtime.WeightsLoadPolicy]): each way is measured on its own. */
     private val weightsMapped: (artifactPath: String) -> Boolean = { true },
     /** The native runtime that measured (llama.cpp build, JNI revision): another one is another figure, never reused. */
     private val runtimeVersion: () -> String = { "" },
 ) {
-
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    /** On a device: the app's SharedPreferences. */
+    constructor(
+        context: Context,
+        weightsMapped: (artifactPath: String) -> Boolean = { true },
+        runtimeVersion: () -> String = { "" },
+    ) : this(SharedPreferencesStore(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)), weightsMapped, runtimeVersion)
 
     fun measurementFor(artifactPath: String, contextTokens: Int?): RamMeasurement? {
         val key = keyFor(artifactPath, contextTokens ?: return null) ?: return null
-        return decode(prefs.getString(key, null))
+        return decode(prefs.getString(key))
     }
 
     @Synchronized
     fun record(artifactPath: String, contextTokens: Int, peakBytes: Long): RamMeasurement? {
         val key = keyFor(artifactPath, contextTokens) ?: return null
-        val merged = decode(prefs.getString(key, null))?.merge(peakBytes) ?: RamMeasurement(peakBytes, 1)
-        prefs.edit().putString(key, "${merged.peakBytes},${merged.sampleCount}").apply()
+        val merged = decode(prefs.getString(key))?.merge(peakBytes) ?: RamMeasurement(peakBytes, 1)
+        prefs.putString(key, "${merged.peakBytes},${merged.sampleCount}")
         return merged
     }
 
@@ -43,11 +47,11 @@ class MeasuredRamStore(
     fun loadsMapped(artifactPath: String): Boolean = weightsMapped(artifactPath)
 
     fun mappedAnonymousBytes(artifactPath: String): Long? =
-        profileKey(artifactPath)?.let { prefs.getString(it, null)?.toLongOrNull() }
+        profileKey(artifactPath)?.let { prefs.getString(it)?.toLongOrNull() }
 
     fun recordMappedAnonymous(artifactPath: String, anonymousBytes: Long) {
         val key = profileKey(artifactPath) ?: return
-        prefs.edit().putString(key, anonymousBytes.toString()).apply()
+        prefs.putString(key, anonymousBytes.toString())
     }
 
     private fun profileKey(artifactPath: String): String? = fileIdentity(artifactPath)?.let { "mapped-anon|$it" }
@@ -68,8 +72,8 @@ class MeasuredRamStore(
     @Synchronized
     fun forget(artifactPath: String, contextTokens: Int): Boolean {
         val key = keyFor(artifactPath, contextTokens) ?: return false
-        if (!prefs.contains(key)) return false
-        prefs.edit().remove(key).apply()
+        if (prefs.getString(key) == null) return false
+        prefs.remove(listOf(key))
         return true
     }
 
@@ -85,20 +89,20 @@ class MeasuredRamStore(
     @Synchronized
     fun forgetAll(artifactPath: String): Int {
         val prefix = filePrefix(artifactPath) ?: return 0
-        val keys = prefs.all.keys.filter { it.startsWith(prefix) }
-        if (keys.isNotEmpty()) prefs.edit().apply { keys.forEach { remove(it) } }.apply()
+        val keys = prefs.all().keys.filter { it.startsWith(prefix) }
+        prefs.remove(keys)
         return keys.size
     }
 
     /** Every measurement of this file: context size, whether read into memory, and the figure -- for a person reading a check. */
     fun measurementsOf(artifactPath: String): List<Triple<Int, Boolean, RamMeasurement>> {
         val prefix = filePrefix(artifactPath) ?: return emptyList()
-        return prefs.all.mapNotNull { (key, value) ->
+        return prefs.all().mapNotNull { (key, value) ->
             if (!key.startsWith(prefix)) return@mapNotNull null
             val rest = key.removePrefix(prefix)
             val read = rest.endsWith("|read")
             val ctx = rest.removeSuffix("|read").toIntOrNull() ?: return@mapNotNull null
-            decode(value as? String)?.let { Triple(ctx, read, it) }
+            decode(value)?.let { Triple(ctx, read, it) }
         }.sortedWith(compareBy({ it.first }, { it.second }))
     }
 
@@ -118,12 +122,13 @@ class MeasuredRamStore(
         return runCatching { RamMeasurement(peak, count) }.getOrNull()
     }
 
-    private companion object {
+    companion object {
+        /** The SharedPreferences file the figures live in on a device. */
         const val PREFS_NAME = "measured_ram"
         // v2: from before the projector was loaded lazily, figures included it (~1 GB for Gemma's).
         // v3: keyed by file time and runtime too; v2 figures were max-merged across runs that also
         // counted mapped pages twice (#492: a September 4096-token peak refused Gemma 4 E4B at
         // ~9.8 GB right after its check measured 7.6) -- dropped, measured again on the next load.
-        const val KEY_VERSION = "v3"
+        private const val KEY_VERSION = "v3"
     }
 }

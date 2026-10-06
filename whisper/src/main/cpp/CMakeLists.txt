@@ -73,6 +73,10 @@ FetchContent_MakeAvailable(whispercpp)
 
 add_library(${LOCALAI_JNI_LIB} SHARED whisper_jni.cpp)
 
+# 16 KB memory pages (Android 15+ devices; Google Play) -- the same as
+# llama_jni's: whisper/ggml are static here, this .so is the only one to align.
+target_link_options(${LOCALAI_JNI_LIB} PRIVATE "-Wl,-z,max-page-size=16384")
+
 target_include_directories(${LOCALAI_JNI_LIB} PRIVATE
     ${whispercpp_SOURCE_DIR}/include
     ${whispercpp_SOURCE_DIR}/ggml/include

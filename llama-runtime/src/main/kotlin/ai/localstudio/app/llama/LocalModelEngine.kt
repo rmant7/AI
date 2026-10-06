@@ -27,24 +27,55 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * [runtimeVersion] names the native runtime (llama.cpp build, JNI
  * revision): a RAM figure measured by another one is not reused.
- * [weightsLoading] is the user's setting (AUTO by default).
- * [beforeAdmission] frees whatever else the app holds (an embedding model,
- * caches) before a model is admitted. [budgetBytes] is what a load may
- * take; by default this phone's live free RAM ([liveBudgetBytes]).
+ * [ramStore] keeps the RAM figures. [weightsLoading] is the user's setting
+ * (AUTO by default). [beforeAdmission] frees whatever else the app holds
+ * (an embedding model, caches) before a model is admitted. [budgetBytes] is
+ * what a load may take, given what this engine's models hold now.
+ *
+ * This constructor touches nothing Android-specific until a model actually
+ * loads ([llamaRuntime]): tests build the engine with it. Apps use the one
+ * taking a Context.
  */
 class LocalModelEngine(
-    private val context: Context,
     private val runtimeVersion: String,
+    ramStore: KeyValueStore,
+    private val availableRamBytes: () -> Long,
+    private val budgetBytes: (ownResidentBytes: Long) -> Long,
     private val log: (tag: String, message: String) -> Unit = { _, _ -> },
     private val weightsLoading: () -> WeightsLoading = { WeightsLoading.AUTO },
     private val beforeAdmission: suspend (requiredBytes: Long) -> Unit = {},
-    budgetBytes: (() -> Long)? = null,
     private val memoryDiagnostics: () -> String = { "" },
     private val deviceConditions: () -> String = { "" },
 ) {
+    /**
+     * On a device: RAM figures in SharedPreferences, the budget by default
+     * this phone's live free RAM plus what this engine's models hold
+     * ([liveBudgetBytes]), unless [budgetBytes] says otherwise.
+     */
+    constructor(
+        context: Context,
+        runtimeVersion: String,
+        log: (tag: String, message: String) -> Unit = { _, _ -> },
+        weightsLoading: () -> WeightsLoading = { WeightsLoading.AUTO },
+        beforeAdmission: suspend (requiredBytes: Long) -> Unit = {},
+        budgetBytes: (() -> Long)? = null,
+        memoryDiagnostics: () -> String = { "" },
+        deviceConditions: () -> String = { "" },
+    ) : this(
+        runtimeVersion = runtimeVersion,
+        ramStore = SharedPreferencesStore(context.getSharedPreferences(MeasuredRamStore.PREFS_NAME, Context.MODE_PRIVATE)),
+        availableRamBytes = { availableRamBytes(context) },
+        budgetBytes = { own -> budgetBytes?.invoke() ?: liveBudgetBytes(context, own) },
+        log = log,
+        weightsLoading = weightsLoading,
+        beforeAdmission = beforeAdmission,
+        memoryDiagnostics = memoryDiagnostics,
+        deviceConditions = deviceConditions,
+    )
+
     /** What every model was measured to cost on this phone, by file, context size and load mode. */
     val measuredRam: MeasuredRamStore = MeasuredRamStore(
-        context,
+        ramStore,
         weightsMapped = { path -> weightsLoadDecision(File(path)).mapped },
         runtimeVersion = { runtimeVersion },
     )
@@ -54,7 +85,7 @@ class LocalModelEngine(
         WeightsLoadPolicy.decide(weightsLoading(), measuredRam.mappedAnonymousBytes(file.path), file.length())
 
     val manager: RuntimeManager = RuntimeManager(
-        budgetBytes = budgetBytes ?: { liveBudgetBytes(context, residentBytesNow()) },
+        budgetBytes = { budgetBytes(residentBytesNow()) },
         runtimes = emptyMap(),
         exclusive = true,
         log = { log("RAM_MANAGER", it) },
@@ -90,7 +121,7 @@ class LocalModelEngine(
             inner = LlamaCppRuntime(
                 contextTokens = contextTokens,
                 log = log,
-                availableRamBytes = { availableRamBytes(context) },
+                availableRamBytes = availableRamBytes,
                 memoryDiagnostics = memoryDiagnostics,
                 memory = manager,
                 weightsLoading = ::weightsLoadDecision,

@@ -15,9 +15,10 @@ import java.io.File
  * taking the intersection across every core listed: threads can be scheduled
  * on any of them.
  *
- * Declared in :whisper because it's the lowest Android module both native
- * libraries' loaders can see (:app depends on it); nothing here is
- * whisper-specific.
+ * In :core, the one module both native libraries' loaders depend on
+ * (:llama-runtime for llama_jni, :whisper for whisper_jni -- which keeps
+ * the old name as a typealias). Pure JVM: /proc/cpuinfo and
+ * System.loadLibrary, nothing Android-specific.
  */
 enum class CpuVariant(val librarySuffix: String) {
     I8MM("_i8mm"),

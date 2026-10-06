@@ -3,6 +3,8 @@ package ai.localstudio.core.runtime
 import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -169,22 +171,49 @@ class RuntimeManager(
         }
     }
 
+    /** Bumped on every [release]: what an acquisition waiting for a model to come free watches. */
+    private val releases = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
     /**
      * [runtime] overrides the one registered for [binding]'s kind — for a
      * caller that owns its own runtime instance (settings baked into it) but
      * still wants residency tracked here. [variant] distinguishes loads of the
-     * same model that are not interchangeable (a different context size): an
-     * idle resident copy of another variant is unloaded and reloaded rather
-     * than reused; one still in use is reused as-is.
+     * same model that are not interchangeable (a different context size): the
+     * resident copy is reused only for the same variant. An idle copy of
+     * another variant is unloaded and reloaded; one still in use is never
+     * handed out for another variant (the caller would believe it has a
+     * context size it does not) -- the acquisition waits until it is
+     * released, then reloads. A caller must therefore not ask for another
+     * variant of a model it is itself still holding: that wait never ends.
      */
     suspend fun acquire(
         model: ModelDescriptor,
         binding: RuntimeBinding,
         runtime: ModelRuntime? = null,
         variant: Any? = null,
-    ): LoadedModel = mutex.withLock {
+    ): LoadedModel {
+        while (true) {
+            val seen = mutex.withLock {
+                val entry = resident[model.id]
+                if (entry == null || entry.variant == variant || entry.refCount == 0) {
+                    return acquireLocked(model, binding, runtime, variant)
+                }
+                log("${model.id}: waiting -- the resident copy (${entry.variant}) is in use, this needs $variant")
+                releases.value
+            }
+            releases.first { it != seen }
+        }
+    }
+
+    /** [acquire] with [mutex] held, once no other variant of [model] is in use. */
+    private suspend fun acquireLocked(
+        model: ModelDescriptor,
+        binding: RuntimeBinding,
+        runtime: ModelRuntime?,
+        variant: Any?,
+    ): LoadedModel {
         resident[model.id]?.let { entry ->
-            if (entry.variant == variant || entry.refCount > 0) {
+            if (entry.variant == variant) {
                 entry.refCount++
                 activeRefs.incrementAndGet()
                 entry.lastUsedAt = clock()
@@ -222,13 +251,16 @@ class RuntimeManager(
         return loaded
     }
 
-    suspend fun release(modelId: String) = mutex.withLock {
-        val entry = resident[modelId] ?: return@withLock
-        if (entry.refCount > 0) {
-            entry.refCount--
-            activeRefs.decrementAndGet()
+    suspend fun release(modelId: String) {
+        mutex.withLock {
+            val entry = resident[modelId] ?: return@withLock
+            if (entry.refCount > 0) {
+                entry.refCount--
+                activeRefs.decrementAndGet()
+            }
+            entry.lastUsedAt = clock()
         }
-        entry.lastUsedAt = clock()
+        releases.update { it + 1 }
     }
 
     /** Frees memory on demand — e.g. on `onTrimMemory` from Android. */
