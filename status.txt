@@ -1,0 +1,38 @@
+run: 516
+sha: ebecf31608cbc604925f56575fd4de3c1574d4e1
+job status: success
+---
+> Task :core-chat:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :commercial-memory:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :openai:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :local-ai-sdk:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-install:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :llama-runtime:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :whisper:checkKotlinGradlePluginConfigurationErrors SKIPPED
+BUILD SUCCESSFUL in 8m 49s
+--- test results ---
+app/build/outputs/androidTest-results/connected/debug/TEST-emulator-5554 - 11-_app-.xml
+tests="146" failures="0" errors="0"
+testcase name="sending_a_message_produces_an_answer"
+testcase name="the_chat_screen_renders"
+testcase name="the_native_library_loads_and_reports_its_cpu_features"
+testcase name="the_catalog_is_ranked_for_this_device"
+testcase name="ask_every_time_always_needs_confirmation_regardless_of_network"
+testcase name="wifi_and_mobile_always_allows_auto_download"
+testcase name="ask_every_time_never_auto_downloads_regardless_of_network"
+testcase name="wifi_only_needs_confirmation_only_on_metered_networks"
+testcase name="wifi_only_allows_auto_download_only_when_unmetered"
+testcase name="wifi_and_mobile_never_needs_confirmation"
+testcase name="nothing_to_tell_apart_falls_back"
+testcase name="tensor_g5_keeps_its_mid_cluster_and_drops_the_efficiency_cores"
+testcase name="classic_layouts"
+testcase name="a_proven_legacy_file_is_adopted_and_every_reader_switches_to_the_store_copy"
+testcase name="without_the_new_chain_the_store_is_the_legacy_store"
+testcase name="a_download_installs_through_the_new_chain_and_delete_removes_it"
+testcase name="an_unproven_legacy_file_stays_where_it_is_and_keeps_being_used"
+testcase name="files_of_removed_models_are_deleted_and_e5_base_is_kept"
+testcase name="embeddings_are_well_formed_and_similarity_ranks_sensibly"
+testcase name="after_set_delegates_every_call_to_the_real_embedder"
