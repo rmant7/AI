@@ -7,6 +7,7 @@ import android.content.Context
 fun CandidateTrialState.describe(context: Context): String {
     return when (phase) {
         CandidateTrialState.Phase.LOADING -> context.getString(R.string.candidate_phase_loading, name)
-        CandidateTrialState.Phase.ANSWERING -> context.getString(R.string.candidate_phase_answering, name, probe, probes)
+        CandidateTrialState.Phase.ANSWERING -> context.getString(R.string.candidate_phase_answering, name, probe, probes) +
+            (if (tokens > 0) " " + context.getString(R.string.check_tokens_so_far, tokens) else "")
     }
 }

@@ -606,4 +606,5 @@
     <string name="models_nano_unknown">Статус пока неизвестен</string>
     <string name="models_nano_not_downloaded">Ещё не скачана в AICore</string>
     <string name="models_nano_open">AICore</string>
+    <string name="check_tokens_so_far">(уже %1$d токенов)</string>
 </resources>

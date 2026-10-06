@@ -532,7 +532,8 @@ class ModelsActivity : AppCompatActivity() {
         val text = when {
             running != null ->
                 if (running.phase == ai.localstudio.app.modelinstall.CandidateTrialState.Phase.LOADING) getString(R.string.model_check_loading)
-                else getString(R.string.model_check_answering, running.probe, running.probes)
+                else getString(R.string.model_check_answering, running.probe, running.probes) +
+                        (if (running.tokens > 0) " " + getString(R.string.check_tokens_so_far, running.tokens) else "")
             check.queued -> getString(R.string.model_check_queued)
             record == null || now == null -> getString(R.string.model_check_none)
             else -> VerificationText.summary(this, record, now) + "  ›"
@@ -786,7 +787,8 @@ class ModelsActivity : AppCompatActivity() {
             text = when {
                 running != null ->
                     if (running.phase == ai.localstudio.app.modelinstall.CandidateTrialState.Phase.LOADING) getString(R.string.model_check_loading)
-                    else getString(R.string.model_check_answering, running.probe, running.probes)
+                    else getString(R.string.model_check_answering, running.probe, running.probes) +
+                        (if (running.tokens > 0) " " + getString(R.string.check_tokens_so_far, running.tokens) else "")
                 check.queued -> getString(R.string.model_check_queued)
                 record == null || now == null -> getString(R.string.model_check_none)
                 else -> VerificationText.summary(this, record, now) + "  ›"

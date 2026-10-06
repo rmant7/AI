@@ -610,4 +610,5 @@
     <string name="models_nano_unknown">Status not known yet</string>
     <string name="models_nano_not_downloaded">Not downloaded in AICore yet</string>
     <string name="models_nano_open">AICore</string>
+    <string name="check_tokens_so_far">(%1$d tokens so far)</string>
 </resources>

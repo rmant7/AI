@@ -21,6 +21,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -50,6 +51,9 @@ const val MMPROJ_RAM_SAFETY_FACTOR = 1.4
  * (0.5 tok/s prefill); Gemma 4 E2B with ~1.2 GB left answered in 14 s.
  */
 const val PROJECTOR_FREE_FLOOR_BYTES = 1_000_000_000L
+
+/** How often a turn still generating says so in the log. */
+const val PROGRESS_LOG_INTERVAL_MS = 30_000L
 
 /**
  * Why a vision projector of [needBytes] cannot be added now, or null when
@@ -605,7 +609,8 @@ private class LlamaTextModel(
     override fun generate(request: GenerationRequest): Flow<String> = callbackFlow {
         val start = System.currentTimeMillis()
         val conditionsBefore = TurnConditions.read()
-        var tokenCount = 0
+        // Written by the native thread, read by the progress line below.
+        val tokens = java.util.concurrent.atomic.AtomicInteger(0)
         var firstTokenLogged = false
         val completed = AtomicBoolean(false)
         val image = request.images.firstOrNull()
@@ -630,7 +635,7 @@ private class LlamaTextModel(
                             .onSuccess { log("LOCAL_GENERATE", "$modelId: chat template $it") }
                     }
                 }
-                tokenCount++
+                tokens.incrementAndGet()
                 trySend(text)
             }
         }
@@ -745,7 +750,7 @@ private class LlamaTextModel(
                 log(
                     "LOCAL_GENERATE",
                     "$modelId: THREW ${e::class.java.simpleName}: ${e.message} after ${elapsedMs}ms, " +
-                        "$tokenCount tokens\n${e.stackTraceToString().take(4000)}",
+                        "${tokens.get()} tokens\n${e.stackTraceToString().take(4000)}",
                 )
                 close(e)
                 return@launch
@@ -759,7 +764,7 @@ private class LlamaTextModel(
                 } else {
                     null
                 }
-                log("LOCAL_GENERATE", "$modelId: FAILED code=$produced after ${elapsedMs}ms, $tokenCount tokens" + (cause?.let { " -- native: $it" } ?: ""))
+                log("LOCAL_GENERATE", "$modelId: FAILED code=$produced after ${elapsedMs}ms, ${tokens.get()} tokens" + (cause?.let { " -- native: $it" } ?: ""))
                 close(
                     if (produced == IMAGE_NOT_SEEN) {
                         ImageNotSeenException(notSeen ?: "unknown")
@@ -780,13 +785,32 @@ private class LlamaTextModel(
         }
         activeWorker.set(worker)
 
+        // A long turn says it is alive: a reasoning model's 1024 tokens at 3.5 tok/s are 5 silent minutes
+        // otherwise -- read on a phone as a hang (Qwen3.5 9B's check, AI #509).
+        val progress = launch {
+            while (!completed.get()) {
+                delay(PROGRESS_LOG_INTERVAL_MS)
+                if (completed.get()) break
+                val elapsedS = (System.currentTimeMillis() - start) / 1000
+                val n = tokens.get()
+                log(
+                    "LOCAL_GENERATE",
+                    "$modelId: still generating -- $n tokens in ${elapsedS}s" +
+                        (if (n > 0 && elapsedS > 0) String.format(java.util.Locale.ROOT, " (%.1f tok/s overall)", n.toDouble() / elapsedS) else " (prompt still being read)") +
+                        TurnConditions.read().since(conditionsBefore).takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty(),
+                )
+            }
+        }
+
         awaitClose {
+            // A child of this flow: left running, it would hold the finished turn open until its next tick.
+            progress.cancel()
             // Native generation blocks in C++; cancelling the coroutine alone
             // would leave it running to completion on a background thread.
             if (!completed.get()) {
                 log(
                     "LOCAL_GENERATE",
-                    "$modelId: cancelled/timed out after ${System.currentTimeMillis() - start}ms, $tokenCount tokens so far",
+                    "$modelId: cancelled/timed out after ${System.currentTimeMillis() - start}ms, ${tokens.get()} tokens so far",
                 )
             }
             bridge.nativeCancel(handle)

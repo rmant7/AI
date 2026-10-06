@@ -377,6 +377,8 @@ data class CandidateTrialState(
     /** 1-based, while [phase] is [Phase.ANSWERING]. */
     val probe: Int = 0,
     val probes: Int = 0,
+    /** Tokens the model has written for the current question so far: a slow answer shows it is moving. */
+    val tokens: Int = 0,
     /** For a person: the repository or the installed model's id. */
     val name: String = key.substringBefore('|').substringAfter('/'),
 ) {

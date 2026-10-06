@@ -1166,6 +1166,8 @@ class AppContainer private constructor(private val context: Context) {
             val total = suites.values.sumOf { it.size }
             val runtime = trialRuntime(name, files)
             var asked = 0
+            var tokens = 0
+            var shownAt = 0L
             var loadReported = false
             val verification = CandidateTrial().run(
                 deviceProfile = profile,
@@ -1174,6 +1176,7 @@ class AppContainer private constructor(private val context: Context) {
                 context = checkContext,
                 runtime = TrialRuntime { probe, onLoaded, onChunk ->
                     val number = ++asked
+                    tokens = 0
                     runtime.answer(
                         probe,
                         onLoaded = {
@@ -1185,7 +1188,16 @@ class AppContainer private constructor(private val context: Context) {
                             }
                             candidateWork.update { it.copy(trial = CandidateTrialState(subject.key, CandidateTrialState.Phase.ANSWERING, number, total, name)) }
                         },
-                        onChunk = onChunk,
+                        onChunk = { chunk ->
+                            onChunk(chunk)
+                            // A slow answer is visibly moving: the count, at most once a second.
+                            tokens++
+                            val now = System.currentTimeMillis()
+                            if (now - shownAt >= 1000) {
+                                shownAt = now
+                                candidateWork.update { w -> w.copy(trial = w.trial?.takeIf { it.key == subject.key }?.copy(tokens = tokens) ?: w.trial) }
+                            }
+                        },
                     )
                 },
             )
