@@ -1,0 +1,19 @@
+run: 516
+sha: ebecf31608cbc604925f56575fd4de3c1574d4e1
+job status: success
+---
+BUILD SUCCESSFUL in 1m 17s
+BUILD SUCCESSFUL in 11m 51s
+BUILD SUCCESSFUL in 44s
+--- unit tests per module (from JUnit XML; a module with 0 ran nothing) ---
+app: 16 tests, 0 failures, 0 errors, 0 skipped
+commercial-memory: 27 tests, 0 failures, 0 errors, 0 skipped
+core: 285 tests, 0 failures, 0 errors, 0 skipped
+core-chat: 22 tests, 0 failures, 0 errors, 0 skipped
+llama-runtime: 14 tests, 0 failures, 0 errors, 0 skipped
+local-ai-sdk: 12 tests, 0 failures, 0 errors, 0 skipped
+model-core: 70 tests, 0 failures, 0 errors, 0 skipped
+model-install: 116 tests, 0 failures, 0 errors, 0 skipped
+openai: 39 tests, 0 failures, 0 errors, 0 skipped
+--- script/config errors (build.gradle.kts syntax, unresolved DSL, etc.) ---
+none
