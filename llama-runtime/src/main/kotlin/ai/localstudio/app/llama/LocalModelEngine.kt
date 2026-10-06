@@ -119,10 +119,13 @@ class LocalModelEngine(
      * Memory the app frees only at admission ([beforeAdmission]: an
      * embedding model) is not counted -- the reading errs on refusing.
      */
+    /** What a load may take now, idle models counted as freeable: the figure [admission] compares a model against. */
+    fun availableBytes(): Long = budgetBytes(residentBytesNow())
+
     fun admission(model: EngineModel, contextTokens: Int): Admission {
         val binding = model.descriptor().bindings.single()
         val required = requiredBytes(binding, contextTokens)
-        val available = budgetBytes(residentBytesNow())
+        val available = availableBytes()
         return when {
             manager.isResident(model.id, contextTokens) -> Admission.Admitted(required, available, resident = true)
             required <= available -> Admission.Admitted(required, available, resident = false)
