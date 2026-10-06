@@ -91,6 +91,14 @@ enum class ModelSource {
     DISCOVERED,
     /** Added by the user by its repository. */
     CUSTOM,
+    /**
+     * Part of the phone, not of the app: Gemini Nano through Android's
+     * AICore. No file of the caller's ([LocalModel.artifact] is null,
+     * [LocalModel.sizeBytes] 0); offered only while the system says it is
+     * ready on this device. Its checks are tied to the system service's
+     * version, so an update of it makes them STALE.
+     */
+    SYSTEM,
 }
 
 /**
@@ -155,7 +163,7 @@ data class LocalModel(
     val capabilities: Set<LocalCapability>,
     val verified: Map<LocalCapability, CheckResult> = emptyMap(),
     val sizeBytes: Long,
-    /** Its bytes, when the install records where they came from; null for a model installed before that was kept. */
+    /** Its bytes, when the install records where they came from; null for a model installed before that was kept, and for a [ModelSource.SYSTEM] one. */
     val artifact: ArtifactRef? = null,
     val source: ModelSource = ModelSource.CATALOG,
 ) {

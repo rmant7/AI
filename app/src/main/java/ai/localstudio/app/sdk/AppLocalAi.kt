@@ -1,6 +1,7 @@
 package ai.localstudio.app.sdk
 
 import ai.localstudio.app.AppContainer
+import ai.localstudio.app.CloudProviders
 import ai.localstudio.app.IsoScriptCodes
 import ai.localstudio.app.localai.SdkMapping
 import ai.localstudio.app.localai.TranslationPrompts
@@ -64,9 +65,47 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
                     artifact = artifact?.let(SdkMapping::artifactRef),
                     source = sourceOf(id, artifact),
                 )
-            }
+            } + listOfNotNull(nano())
+
+    /**
+     * Gemini Nano, while AICore says it is ready here: part of the phone,
+     * not a file of ours. Checked like any model, against AICore's version.
+     */
+    private suspend fun nano(): LocalModel? {
+        if (!container.aicoreReady()) return null
+        val checked = container.nanoCheck()
+        return LocalModel(
+            id = NANO,
+            displayName = "Gemini Nano (AICore)",
+            capabilities = setOf(LocalCapability.TEXT, LocalCapability.TRANSLATION, LocalCapability.VISION),
+            verified = checked?.let { (record, now) -> SdkMapping.checks(record, now) }.orEmpty(),
+            sizeBytes = 0,
+            source = ModelSource.SYSTEM,
+        )
+    }
+
+    /**
+     * Whether a request for [purpose] goes to Gemini Nano: asked for by id;
+     * or no id, and the user chose it for translation; or no id and no
+     * installed model for [purpose] at all, while AICore is ready.
+     */
+    private suspend fun usesNano(purpose: ModelPurpose, modelId: String?): Boolean = when {
+        modelId != null -> modelId == NANO
+        purpose == ModelPurpose.TRANSLATION && container.settings.translationModel == CloudProviders.AICORE.id -> container.aicoreReady()
+        else -> container.localModelFor(purpose, null) == null && container.aicoreReady()
+    }
+
+    private suspend fun requireNano() {
+        if (!container.aicoreReady()) throw LocalAiException.Failed("Gemini Nano (AICore) is not ready on this device (status ${container.aicoreStatus.value})")
+    }
 
     override fun generate(input: LocalAiInput, options: GenerationOptions, modelId: String?): Flow<String> = flow {
+        if (usesNano(ModelPurpose.CHAT, modelId)) {
+            requireNano()
+            // One image per request is AICore's limit; more is refused by its runtime as ImageNotSeen.
+            emitAll(answer(container::loadNano, SdkMapping.request(input, options), options))
+            return@flow
+        }
         val selected = container.localModelFor(ModelPurpose.CHAT, modelId)
             ?: throw if (modelId != null) LocalAiException.UnknownModel(modelId) else LocalAiException.NoModel(LocalCapability.TEXT)
         if (LocalCapability.TEXT !in capabilitiesOf(selected)) {
@@ -79,6 +118,14 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
     }
 
     override suspend fun translate(request: TranslationRequest, modelId: String?): String {
+        if (usesNano(ModelPurpose.TRANSLATION, modelId)) {
+            requireNano()
+            val prompt = TranslationPrompts.forLocalModel(
+                TranslationPrompts.Format.CHAT_INSTRUCTION, request.source.name, request.target.name, request.target.code, request.text, IsoScriptCodes::of,
+            )
+            val reply = answer(container::loadNano, GenerationRequest(prompt = prompt, temperature = 0.0), GenerationOptions(temperature = 0.0)).toList().joinToString("")
+            return reply.trim().takeIf { it.isNotEmpty() } ?: throw LocalAiException.Failed("$NANO gave no translation")
+        }
         val selected = container.localModelFor(ModelPurpose.TRANSLATION, modelId)
             ?: throw if (modelId != null) LocalAiException.UnknownModel(modelId) else LocalAiException.NoModel(LocalCapability.TRANSLATION)
         val seed = container.localSeed(selected.model.id)
@@ -95,6 +142,13 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
     }
 
     override suspend fun verify(modelId: String): Map<LocalCapability, CheckResult> {
+        if (modelId == NANO) {
+            requireNano()
+            container.checkNano()
+            container.candidateWork.first { AppContainer.NANO_CHECK_KEY !in it.queued && it.trial?.key != AppContainer.NANO_CHECK_KEY }
+            val (record, now) = container.nanoCheck() ?: throw LocalAiException.Failed("AICore is not installed any more")
+            return SdkMapping.checks(record, now)
+        }
         val seed = container.localSeed(modelId) ?: throw LocalAiException.UnknownModel(modelId)
         val key = container.checkKey(seed) ?: throw LocalAiException.UnknownModel(modelId)
         container.checkInstalledModel(modelId)
@@ -147,6 +201,10 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
         return SdkMapping.checks(candidate.verification, container.verificationContext(candidate))
     }
 
+    private companion object {
+        const val NANO = AppContainer.NANO_MODEL_ID
+    }
+
     /** Shipped in the catalog; else taken in from discovery when its bytes are a candidate's; else added by the user. */
     private fun sourceOf(modelId: String, artifact: ai.localstudio.model.install.ArtifactId?): ModelSource = when {
         (ai.localstudio.app.models.LocalModels.SEEDS + ai.localstudio.app.models.TranslationModels.SEEDS).any { it.id == modelId } -> ModelSource.CATALOG
@@ -165,9 +223,18 @@ class AppLocalAi(private val container: AppContainer) : LocalAi {
      * channelFlow: the watchdog runs the work in a child coroutine, and a
      * plain flow may only emit from its own.
      */
-    private fun answer(selected: SelectedModel, request: GenerationRequest, options: GenerationOptions): Flow<String> = channelFlow {
-        val handle = container.localTextRuntime().load(selected.model, selected.binding) as? TextModelHandle
-            ?: throw LocalAiException.Failed("${selected.model.id} did not load as a text model")
+    private fun answer(selected: SelectedModel, request: GenerationRequest, options: GenerationOptions): Flow<String> =
+        answer({
+            container.localTextRuntime().load(selected.model, selected.binding) as? TextModelHandle
+                ?: throw LocalAiException.Failed("${selected.model.id} did not load as a text model")
+        }, request, options)
+
+    private fun answer(
+        load: suspend () -> TextModelHandle,
+        request: GenerationRequest,
+        options: GenerationOptions,
+    ): Flow<String> = channelFlow {
+        val handle = load()
         try {
             container.heavyOperations.track {
                 withOperationTimeout(options.timeoutMs, options.deadlineMs) {

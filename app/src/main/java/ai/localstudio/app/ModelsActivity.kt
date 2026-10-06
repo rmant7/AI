@@ -737,7 +737,75 @@ class ModelsActivity : AppCompatActivity() {
         }
 
         addUnassignedRows(ModelPurpose.CHAT)
+        addNanoRows()
         add(Row.Custom(onAdd = { addCustomRepo(ModelPurpose.CHAT) }))
+    }
+
+    /**
+     * Gemini Nano, when AICore is on this phone and has not said it cannot
+     * run it: a model like the others for the SDK (source SYSTEM), checked
+     * with the same questions, minus the two-images-in-one-turn one AICore
+     * refuses. Nothing to download or delete here: AICore owns it.
+     */
+    private fun MutableList<Row>.addNanoRows() {
+        if (container.aicoreUnsupported || container.nanoIdentity() == null) return
+        val status = container.aicoreStatus.value
+        val ready = status == com.google.mlkit.genai.common.FeatureStatus.AVAILABLE
+        add(Row.Header(getString(R.string.models_system_header)))
+        add(
+            Row.Model(
+                title = getString(CloudProviders.AICORE.titleRes),
+                subtitle = getString(R.string.models_nano_subtitle),
+                selected = false,
+                status = getString(
+                    when {
+                        ready -> R.string.models_nano_ready
+                        status == null -> R.string.models_nano_unknown
+                        else -> R.string.models_nano_not_downloaded
+                    },
+                ),
+                progress = null,
+                indeterminate = false,
+                primaryLabel = getString(R.string.models_nano_open),
+                primaryEnabled = true,
+                secondaryLabel = null,
+                onPrimary = { startActivity(android.content.Intent(this@ModelsActivity, AiCoreTestActivity::class.java)) },
+                onSecondary = {},
+                check = if (ready) nanoCheckLine() else null,
+            ),
+        )
+    }
+
+    private fun nanoCheckLine(): Row.CheckLine? {
+        val check = container.nanoCheck() ?: return null
+        val title = getString(CloudProviders.AICORE.titleRes)
+        val record = check.record
+        val now = check.now
+        val running = check.running
+        return Row.CheckLine(
+            text = when {
+                running != null ->
+                    if (running.phase == ai.localstudio.app.modelinstall.CandidateTrialState.Phase.LOADING) getString(R.string.model_check_loading)
+                    else getString(R.string.model_check_answering, running.probe, running.probes)
+                check.queued -> getString(R.string.model_check_queued)
+                record == null || now == null -> getString(R.string.model_check_none)
+                else -> VerificationText.summary(this, record, now) + "  ›"
+            },
+            buttonLabel = getString(if (record == null) R.string.model_check else R.string.model_check_again),
+            buttonEnabled = !check.busy,
+            onButton = {
+                if (container.checkNano()) {
+                    container.appLog.record("CANDIDATE_TEST", "${AppContainer.NANO_MODEL_ID}: check queued")
+                    Toast.makeText(this, getString(R.string.model_check_started, title), Toast.LENGTH_SHORT).show()
+                }
+                render()
+            },
+            onDetails = if (record != null && now != null) {
+                { showCheckDetails(title, VerificationText.details(this, record, now)) }
+            } else {
+                null
+            },
+        )
     }
 
     private fun translationRows(device: DeviceProfile): List<Row> = buildList {

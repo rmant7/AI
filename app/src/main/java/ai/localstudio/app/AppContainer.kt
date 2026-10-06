@@ -684,6 +684,8 @@ class AppContainer private constructor(private val context: Context) {
         val name: String,
         val label: String?,
         val files: () -> TrialFiles?,
+        /** Runs the whole check itself instead of loading [files] with llama.cpp (Gemini Nano: no files of ours). */
+        val run: (suspend () -> Unit)? = null,
     )
 
     /**
@@ -732,7 +734,8 @@ class AppContainer private constructor(private val context: Context) {
                 candidateWork.update {
                     it.copy(queued = it.queued - subject.key, trial = CandidateTrialState(subject.key, CandidateTrialState.Phase.LOADING, name = subject.name))
                 }
-                runTrial(subject)
+                val own = subject.run
+                if (own != null) own() else runTrial(subject)
             }
         }
     }
@@ -981,6 +984,142 @@ class AppContainer private constructor(private val context: Context) {
         val running: CandidateTrialState?,
     ) {
         val busy: Boolean get() = queued || running != null
+    }
+
+    /**
+     * Whether AICore says Gemini Nano is ready on this device. Asks once
+     * when nothing has been asked yet; otherwise the status the last
+     * background check or generation recorded.
+     */
+    internal suspend fun aicoreReady(): Boolean {
+        if (_aicoreStatus.value == null) {
+            withContext(Dispatchers.IO) {
+                val client = runCatching { AiCorePromptClient() }.getOrNull() ?: return@withContext
+                try {
+                    recordAicoreStatus(client.status())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    appLog.record("AICORE_LOAD", "status check failed: ${t.javaClass.simpleName}: ${t.message}")
+                } finally {
+                    client.close()
+                }
+            }
+        }
+        return _aicoreStatus.value == FeatureStatus.AVAILABLE
+    }
+
+    /** AICore's own version on this phone (needs the manifest's <queries> entry); null when it is not installed. */
+    private val aicoreVersion: String?
+        get() = runCatching { context.packageManager.getPackageInfo(AICORE_PACKAGE, 0).versionName }.getOrNull()
+
+    /**
+     * What a Gemini Nano check is evidence for: the system service's version
+     * in place of a commit (the weights are AICore's, not ours, and the
+     * Prompt API names no model version). An AICore update makes the check
+     * STALE; a model update AICore makes without changing its own version
+     * is not seen. Null when AICore is not installed.
+     */
+    internal fun nanoIdentity(): ai.localstudio.model.install.ArtifactId? =
+        aicoreVersion?.let { ai.localstudio.model.install.ArtifactId(repository = "system/aicore", revision = it, mainFile = NANO_MODEL_ID) }
+
+    private val nanoRuntime: String get() = "AICore ${aicoreVersion ?: "?"} / ML Kit genai-prompt $GENAI_PROMPT_VERSION"
+
+    internal fun nanoVerificationContext(identity: ai.localstudio.model.install.ArtifactId) =
+        ai.localstudio.model.install.VerificationContext(identity, verificationDevice, nanoRuntime)
+
+    /** Where Gemini Nano's check stands, as [installedCheck] says it for a file model. Null when AICore is not installed. */
+    fun nanoCheck(): InstalledCheck? {
+        val identity = nanoIdentity() ?: return null
+        val work = candidateWork.value
+        return InstalledCheck(
+            record = recordedVerification(identity),
+            now = nanoVerificationContext(identity),
+            queued = NANO_CHECK_KEY in work.queued,
+            running = work.trial?.takeIf { it.key == NANO_CHECK_KEY },
+        )
+    }
+
+    /** Gemini Nano for one request, through the same gate and RAM courtesy as chat's AICore candidate. */
+    internal suspend fun loadNano(): ai.localstudio.core.runtime.TextModelHandle {
+        val candidate = aicoreCandidate()
+        return candidate.runtime.load(candidate.model, candidate.binding) as? ai.localstudio.core.runtime.TextModelHandle
+            ?: throw IllegalStateException("$NANO_MODEL_ID did not load as a text model")
+    }
+
+    /**
+     * Queues a check of Gemini Nano in the same queue as every model's: the
+     * same text and translation questions, and the vision ones that take one
+     * image (the Prompt API's limit -- more is refused, see [AiCoreRuntime]).
+     * False when AICore is not installed or the check is already queued or
+     * running.
+     */
+    fun checkNano(): Boolean {
+        if (nanoIdentity() == null) return false
+        fun waiting(w: CandidateWork) = NANO_CHECK_KEY in w.queued || w.trial?.key == NANO_CHECK_KEY
+        val before = candidateWork.getAndUpdate { if (waiting(it)) it else it.copy(queued = it.queued + NANO_CHECK_KEY) }
+        if (waiting(before)) return false
+        candidateTrialQueue.trySend(TrialSubject(NANO_CHECK_KEY, NANO_MODEL_ID, label = null, files = { null }, run = { runNanoTrial() }))
+        return true
+    }
+
+    private suspend fun runNanoTrial() {
+        val tag = "CANDIDATE_TEST"
+        val name = NANO_MODEL_ID
+        try {
+            val identity = nanoIdentity() ?: run {
+                appLog.record(tag, "$name: AICore is not installed; check skipped")
+                return
+            }
+            if (!aicoreReady()) {
+                appLog.record(tag, "$name: AICore status ${_aicoreStatus.value} (not AVAILABLE); check skipped")
+                return
+            }
+            val checkContext = nanoVerificationContext(identity)
+            val profile = "${Build.MANUFACTURER} ${Build.MODEL} / API ${Build.VERSION.SDK_INT} / " +
+                String.format(java.util.Locale.ROOT, "%.1f GB / %s", device.totalRamBytes / 1e9, nanoRuntime)
+            val suites = FunctionalProbe.suitesFor(hasProjector = true).mapValues { (cap, probes) ->
+                if (cap == ai.localstudio.model.install.VerifiedCapability.VISION) probes.filter { it.images.size <= 1 } else probes
+            }
+            val total = suites.values.sumOf { it.size }
+            appLog.record(tag, "$name: checking through $nanoRuntime; asking $total question(s): ${suites.entries.joinToString { "${it.value.size} ${it.key}" }}")
+            var asked = 0
+            val verification = CandidateTrial().run(
+                deviceProfile = profile,
+                runtimeId = RuntimeKind.AICORE.id,
+                suites = suites,
+                context = checkContext,
+                // A fresh client per question: AICore keeps the model, so a "reload" is simply the next request.
+                runtime = TrialRuntime { probe, onLoaded, onChunk ->
+                    val number = ++asked
+                    val handle = loadNano()
+                    try {
+                        onLoaded()
+                        candidateWork.update { it.copy(trial = CandidateTrialState(NANO_CHECK_KEY, CandidateTrialState.Phase.ANSWERING, number, total, name)) }
+                        val input = ai.localstudio.sdk.LocalAiInput(
+                            text = probe.prompt,
+                            images = probe.images.map { ai.localstudio.sdk.LocalImage(ai.localstudio.app.vision.ProbeImageRenderer.png(it), "image/png") },
+                        )
+                        val options = ai.localstudio.sdk.GenerationOptions(maxTokens = CANDIDATE_MAX_TOKENS, temperature = 0.0)
+                        withTimeout(CANDIDATE_PROBE_TIMEOUT_MS) {
+                            handle.generate(ai.localstudio.app.localai.SdkMapping.request(input, options, repeatPenalty = 1.0)).collect { onChunk(it) }
+                        }
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        throw ai.localstudio.app.modelinstall.ProbeTimeoutException("no complete answer within ${CANDIDATE_PROBE_TIMEOUT_MS / 60_000} min")
+                    } finally {
+                        handle.close()
+                    }
+                },
+            )
+            recordVerification(null, name, verification, NANO_CHECK_KEY)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            appLog.record(tag, "$name: test cancelled")
+            throw e
+        } catch (e: Exception) {
+            appLog.record(tag, "$name: test FAILED: ${e.javaClass.simpleName}: ${e.message}")
+        } finally {
+            candidateWork.update { it.copy(trial = null) }
+        }
     }
 
     /**
@@ -3128,7 +3267,7 @@ class AppContainer private constructor(private val context: Context) {
      * See docs/04-runtime.md's "Gemini Nano / AICore feasibility" section.
      */
     private fun aicoreCandidate(): FallbackCandidate {
-        val model = servedModel("gemini-nano-aicore", RuntimeKind.AICORE, Capability.TEXT_GENERATION, Capability.REASONING)
+        val model = servedModel(NANO_MODEL_ID, RuntimeKind.AICORE, Capability.TEXT_GENERATION, Capability.REASONING)
         return FallbackCandidate(
             label = context.getString(CloudProviders.AICORE.titleRes),
             runtime = DeviceMemoryGatedRuntime(
@@ -3585,6 +3724,16 @@ class AppContainer private constructor(private val context: Context) {
 
         /** Per probe; the first includes the load, which has taken minutes for a large model on this class of device. */
         private const val CANDIDATE_PROBE_TIMEOUT_MS = 10 * 60_000L
+
+        /** Gemini Nano through AICore, as chat's AICore candidate and the SDK both call it. */
+        const val NANO_MODEL_ID = "gemini-nano-aicore"
+
+        /** What [candidateWork] tracks Gemini Nano's check under. */
+        const val NANO_CHECK_KEY = "system:$NANO_MODEL_ID"
+        private const val AICORE_PACKAGE = "com.google.android.aicore"
+
+        /** com.google.mlkit:genai-prompt, as app/build.gradle.kts pins it. */
+        private const val GENAI_PROMPT_VERSION = "1.0.0-beta4"
 
         /**
          * Room for a reasoning model to finish its thinking block and answer: a

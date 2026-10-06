@@ -115,7 +115,8 @@ class LocalAiContractTest {
         )
         val gemma = visionModel.copy(verified = mapOf(LocalCapability.TEXT to CheckResult.PASS, LocalCapability.VISION to CheckResult.PASS), source = ModelSource.DISCOVERED)
         val stale = visionModel.copy(id = "old", verified = mapOf(LocalCapability.VISION to CheckResult.STALE))
-        val ai = FakeLocalAi(listOf(textModel, index, gemma, stale))
+        val nano = LocalModel("gemini-nano-aicore", "Gemini Nano", setOf(LocalCapability.TEXT, LocalCapability.TRANSLATION), sizeBytes = 0, source = ModelSource.SYSTEM)
+        val ai = FakeLocalAi(listOf(textModel, index, gemma, stale, nano))
 
         assertEquals(listOf("gemma"), ai.models(ModelQuery.proven(LocalCapability.VISION)).map { it.id })
         assertEquals(listOf("custom-index", "gemma", "old"), ai.models(ModelQuery(capability = LocalCapability.VISION)).map { it.id }, "offered, whatever the check says")
@@ -123,6 +124,8 @@ class LocalAiContractTest {
         assertEquals(listOf("custom-index", "gemma"), ai.models(ModelQuery(sources = setOf(ModelSource.DISCOVERED))).map { it.id })
         assertEquals(listOf("custom-index"), ai.models(ModelQuery(text = "index translate")).map { it.id })
         assertEquals(listOf("qwen"), ai.models(ModelQuery(capability = LocalCapability.TEXT, checkResults = setOf(CheckResult.PASS), sources = setOf(ModelSource.CATALOG))).map { it.id })
+        assertEquals(listOf("gemini-nano-aicore"), ai.models(ModelQuery(sources = setOf(ModelSource.SYSTEM))).map { it.id })
+        assertTrue(nano !in ai.models(ModelQuery.proven(LocalCapability.TEXT)), "a system model is offered, not proven, until checked")
     }
 
     @Test

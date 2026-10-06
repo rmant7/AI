@@ -604,4 +604,10 @@
     <string name="model_check_busy">This model is being checked; try again after the check</string>
     <string name="model_check_started">%1$s: check queued. One check at a time; the model is loaded fresh for it.</string>
     <string name="model_check_title">Check on this phone: %1$s</string>
+    <string name="models_system_header">Part of the phone</string>
+    <string name="models_nano_subtitle">Android\'s own model through AICore: nothing to download here, and not counted in this app\'s RAM budget. One image per request.</string>
+    <string name="models_nano_ready">Ready</string>
+    <string name="models_nano_unknown">Status not known yet</string>
+    <string name="models_nano_not_downloaded">Not downloaded in AICore yet</string>
+    <string name="models_nano_open">AICore</string>
 </resources>

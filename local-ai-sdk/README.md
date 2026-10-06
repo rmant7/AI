@@ -27,7 +27,13 @@ caller's own tests.
   not promoted to PASS because the runtime works.
 - **Images are never silently dropped.** Images to a model that cannot see
   fail with `LocalAiException.ImageNotSeen`, never with a text answer that
-  pretends it saw them.
+  pretends it saw them. A model that takes fewer images per request than
+  it was given fails the same way (Gemini Nano: one image per request).
+- **Sources**: CATALOG (shipped with the app), DISCOVERED (found by search,
+  taken in after a check), CUSTOM (added by the user), SYSTEM (part of the
+  phone: Gemini Nano through AICore — no file, size 0, offered only while
+  the system reports it ready; its checks are tied to AICore's version, and
+  an AICore update makes them STALE).
 - Results are PASS / FAIL / NOT_TESTED / STALE. Per-question evidence and why
   a step failed (model answer, runtime, resource) are internal to the app,
   not part of this API.

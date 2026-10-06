@@ -4,6 +4,7 @@ import ai.localstudio.core.registry.ModelDescriptor
 import ai.localstudio.core.registry.RuntimeBinding
 import ai.localstudio.core.registry.RuntimeKind
 import ai.localstudio.core.runtime.GenerationRequest
+import ai.localstudio.core.runtime.ImageNotSeenException
 import ai.localstudio.core.runtime.LoadedModel
 import ai.localstudio.core.runtime.ModelLoadException
 import ai.localstudio.core.runtime.ModelRuntime
@@ -143,19 +144,28 @@ private class AiCoreTextModel(
         // ImageRef.uri is always a "data:<mime>;base64,<payload>" string here,
         // never a content:// or file path — ChatActivity.attachImage() builds
         // it that way specifically because core/openai are plain JVM modules
-        // with no Android Context to resolve a real URI against; same source
-        // and same one-image-per-turn assumption LlamaCppRuntime's own image
-        // handling uses (see its generate()'s own comment on ImageRef.uri).
+        // with no Android Context to resolve a real URI against.
+        // The Prompt API takes one image per request (see AiCorePromptClient.generate).
+        // A second image, or one that does not decode, used to be dropped
+        // silently and the answer read as if Nano had seen everything; it
+        // is now the same refusal any model that cannot see gives.
+        if (request.images.size > 1) {
+            log("AICORE_GENERATE", "$modelId: REFUSED — ${request.images.size} images, Gemini Nano takes one per request")
+            throw ImageNotSeenException("Gemini Nano (AICore) takes one image per request, got ${request.images.size}")
+        }
         val image = request.images.firstOrNull()?.let { ref ->
             runCatching {
                 val bytes = Base64.decode(ref.uri.substringAfter(",", ""), Base64.NO_WRAP)
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            }.getOrNull()
+            }.getOrNull() ?: run {
+                log("AICORE_GENERATE", "$modelId: REFUSED — the image did not decode")
+                throw ImageNotSeenException("the image could not be decoded for Gemini Nano (AICore)")
+            }
         }
         log(
             "AICORE_GENERATE",
             "$modelId: starting (prompt=${request.prompt.length} chars" +
-                (if (request.images.isNotEmpty()) ", with image (decoded=${image != null})" else "") + ")",
+                (if (image != null) ", with an image ${image.width}x${image.height}" else "") + ")",
         )
         // AiCorePromptClient.generate() has no separate system-prompt slot
         // confirmed to exist in this SDK version's generateContentRequest —

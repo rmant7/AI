@@ -600,4 +600,10 @@
     <string name="model_check_busy">Модель сейчас проверяется; повторите после проверки</string>
     <string name="model_check_started">%1$s: проверка в очереди. Проверки идут по одной; модель для неё загружается заново.</string>
     <string name="model_check_title">Проверка на этом телефоне: %1$s</string>
+    <string name="models_system_header">Встроено в телефон</string>
+    <string name="models_nano_subtitle">Собственная модель Android через AICore: здесь ничего не скачивается и не входит в бюджет RAM приложения. Одна картинка на запрос.</string>
+    <string name="models_nano_ready">Готова</string>
+    <string name="models_nano_unknown">Статус пока неизвестен</string>
+    <string name="models_nano_not_downloaded">Ещё не скачана в AICore</string>
+    <string name="models_nano_open">AICore</string>
 </resources>
